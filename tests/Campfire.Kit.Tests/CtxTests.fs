@@ -214,3 +214,17 @@ let ``a page in parts gets its etag from the parts`` () =
     let finished = finish c response
     Assert.Equal(Some "W/\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"", header finished "etag")
     Assert.Equal(Some "text/html; charset=utf-8", header finished "content-type")
+
+[<Fact>]
+let ``json written straight to a buffer escapes only what json requires`` () =
+    let c = plain []
+    let response = c.JsonWith(Status.Ok, (fun w ->
+        w.WriteStartObject()
+        w.WriteString("text", "<b>café</b> & \"quoted\"\n")
+        w.WriteNumber("n", 5)
+        w.WriteEndObject()))
+    Assert.Equal("{\"text\":\"<b>café</b> & \\\"quoted\\\"\\n\",\"n\":5}", bodyText response)
+    Assert.Equal(Some "application/json; charset=utf-8", header response "content-type")
+    // The value form agrees.
+    let same = c.Json(Status.Ok, json """{"text": "<b>café</b> & \"quoted\"\n", "n": 5}""")
+    Assert.Equal(bodyText response, bodyText same)

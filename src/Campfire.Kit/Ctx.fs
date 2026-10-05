@@ -452,7 +452,8 @@ type Ctx internal (kit: Kit, request: Request, pathParams: ParamMap, queryParams
     member this.JsonWith(status: int, write: Utf8JsonWriter -> unit) : Response =
         let buffer = new PooledBufferWriter()
         try
-            use writer = new Utf8JsonWriter(buffer)
+            // serde_json's escaping: only what JSON requires, so `<`, `&` and non-ASCII text go out as they are.
+            use writer = new Utf8JsonWriter(buffer, JsonWriterOptions(Encoder = Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping))
             write writer
             writer.Flush()
             this.RenderAs(status, Response.JsonUtf8, buffer.ToPooledBytes())

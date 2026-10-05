@@ -138,36 +138,45 @@ module Deflater =
                 tables[k][n] <- c
         tables
 
-    /// The running CRC-32 (IEEE, as zlib's `crc32`) of `data` after what `crc` covers.
-    let internal crc32Update (crc: uint32) (data: ReadOnlySpan<byte>) : uint32 =
+    /// The running CRC-32 (IEEE, as zlib's `crc32`) of `data` after what `crc` covers, by slicing-by-8
+    /// tables: what runs where the CPU has no CRC instruction (and what the tests check the other against).
+    let internal crc32Software (crc: uint32) (data: ReadOnlySpan<byte>) : uint32 =
+        let t = slicingTables
         let mutable c = ~~~crc
         let mutable i = 0
-        if System.Runtime.Intrinsics.Arm.Crc32.Arm64.IsSupported then
-            while i + 8 <= data.Length do
-                c <- System.Runtime.Intrinsics.Arm.Crc32.Arm64.ComputeCrc32(c, BinaryPrimitives.ReadUInt64LittleEndian(data.Slice i))
-                i <- i + 8
-            while i < data.Length do
-                c <- System.Runtime.Intrinsics.Arm.Crc32.ComputeCrc32(c, data[i])
-                i <- i + 1
-        else
-            let t = slicingTables
-            while i + 8 <= data.Length do
-                let lo = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice i) ^^^ c
-                let hi = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(i + 4))
-                c <-
-                    t[7][int (lo &&& 0xFFu)]
-                    ^^^ t[6][int ((lo >>> 8) &&& 0xFFu)]
-                    ^^^ t[5][int ((lo >>> 16) &&& 0xFFu)]
-                    ^^^ t[4][int (lo >>> 24)]
-                    ^^^ t[3][int (hi &&& 0xFFu)]
-                    ^^^ t[2][int ((hi >>> 8) &&& 0xFFu)]
-                    ^^^ t[1][int ((hi >>> 16) &&& 0xFFu)]
-                    ^^^ t[0][int (hi >>> 24)]
-                i <- i + 8
-            while i < data.Length do
-                c <- t[0][int ((c ^^^ uint32 data[i]) &&& 0xFFu)] ^^^ (c >>> 8)
-                i <- i + 1
+        while i + 8 <= data.Length do
+            let lo = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice i) ^^^ c
+            let hi = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(i + 4))
+            c <-
+                t[7][int (lo &&& 0xFFu)]
+                ^^^ t[6][int ((lo >>> 8) &&& 0xFFu)]
+                ^^^ t[5][int ((lo >>> 16) &&& 0xFFu)]
+                ^^^ t[4][int (lo >>> 24)]
+                ^^^ t[3][int (hi &&& 0xFFu)]
+                ^^^ t[2][int ((hi >>> 8) &&& 0xFFu)]
+                ^^^ t[1][int ((hi >>> 16) &&& 0xFFu)]
+                ^^^ t[0][int (hi >>> 24)]
+            i <- i + 8
+        while i < data.Length do
+            c <- t[0][int ((c ^^^ uint32 data[i]) &&& 0xFFu)] ^^^ (c >>> 8)
+            i <- i + 1
         ~~~c
+
+    /// The same by the ARM CRC-32 instructions.
+    let private crc32Arm (crc: uint32) (data: ReadOnlySpan<byte>) : uint32 =
+        let mutable c = ~~~crc
+        let mutable i = 0
+        while i + 8 <= data.Length do
+            c <- System.Runtime.Intrinsics.Arm.Crc32.Arm64.ComputeCrc32(c, BinaryPrimitives.ReadUInt64LittleEndian(data.Slice i))
+            i <- i + 8
+        while i < data.Length do
+            c <- System.Runtime.Intrinsics.Arm.Crc32.ComputeCrc32(c, data[i])
+            i <- i + 1
+        ~~~c
+
+    /// The running CRC-32 (IEEE, as zlib's `crc32`) of `data` after what `crc` covers.
+    let internal crc32Update (crc: uint32) (data: ReadOnlySpan<byte>) : uint32 =
+        if System.Runtime.Intrinsics.Arm.Crc32.Arm64.IsSupported then crc32Arm crc data else crc32Software crc data
 
     /// `Zlib::GzipWriter` writes the header with the given mtime and the Unix OS code.
     let private header (mtime: uint32) : byte[] =
