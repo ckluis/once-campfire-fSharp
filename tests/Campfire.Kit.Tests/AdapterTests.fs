@@ -1,0 +1,321 @@
+// What the adapter does that rust/crates/kit/tests/http.rs reaches only through axum: writing every kind
+// of body (buffer, pooled buffer, file, stream), `Rack::Deflater` around them, the responses that
+// bypass the kit's headers, and how a request reaches an action over the wire.
+module Campfire.Kit.Tests.AdapterTests
+
+open System
+open System.IO
+open System.IO.Compression
+open System.Text
+open System.Threading.Tasks
+open Falco
+open Microsoft.AspNetCore.Builder
+open Microsoft.AspNetCore.Http
+open Xunit
+open Campfire.RailsCompat
+open Campfire.Kit
+open Campfire.Kit.Tests.Helpers
+open Campfire.Kit.Tests.Harness
+
+let private page = String.replicate 200 "<div class=\"message\">Hello there</div>\n"
+
+let private gunzip (bytes: byte[]) : string =
+    use input = new MemoryStream(bytes)
+    use gzip = new GZipStream(input, CompressionMode.Decompress)
+    use output = new MemoryStream()
+    gzip.CopyTo output
+    Encoding.UTF8.GetString(output.ToArray())
+
+let private tempFile (content: string) : string =
+    let path = Path.Combine(Path.GetTempPath(), "kit-adapter-" + Guid.NewGuid().ToString("N"))
+    File.WriteAllText(path, content)
+    path
+
+let private text (c: Ctx) = act { return c.Html page }
+
+let private pooled (c: Ctx) =
+    act {
+        return c.JsonWith(Status.Ok, (fun w ->
+            w.WriteStartObject()
+            w.WriteString("page", page)
+            w.WriteEndObject()))
+    }
+
+let private streamed (_: Ctx) =
+    act {
+        let response = Response(Status.Ok).ContentType "text/plain"
+        response.Body <- Body.Stream(new MemoryStream(Encoding.UTF8.GetBytes page))
+        return response
+    }
+
+let private fileIn (path: string) (c: Ctx) = act { return! c.SendFile(path, SendOptions.Inline "text/plain") }
+
+let private empty (c: Ctx) = act { return c.Html "" }
+
+let private routes (kit: Kit) (path: string) : HttpEndpoint list =
+    let route = Adapter.route kit
+    [ route "/page" [ "GET", text ]
+      route "/pooled" [ "GET", pooled ]
+      route "/stream" [ "GET", streamed ]
+      route "/file" [ "GET", fileIn path ]
+      route "/empty" [ "GET", empty ]
+      route "/boom" [ "GET", (fun _ -> failwith "boom") ]
+      route "/missing" [ "GET", (fun _ -> Task.FromResult(Error NotFound)) ]
+      route "/teapot" [ "GET", (fun _ -> Task.FromResult(Error(Status 418))) ]
+      route "/echo" [ "GET", (fun c -> act { return c.Json(Status.Ok, Value.Object [ "url", Value.String c.Request.Url; "ssl", Value.Bool c.Request.IsSsl; "path", Value.String c.Request.Fullpath; "cookie", Value.String(match c.Cookies.Get "b" with null -> "" | v -> v) ]) })
+                      "POST", (fun c -> act { return c.Json(Status.Ok, Value.Object [ "params", c.Params.ToJson() ]) }) ] ]
+
+/// A page served the way the app serves public files: its own response, marked as static.
+let private staticFiles (kit: Kit) (app: IApplicationBuilder) : unit =
+    app.Use(
+        Func<HttpContext, RequestDelegate, Task>(fun http next ->
+            match http.Request.Path.Value with
+            | "/static.css" ->
+                let response = Response(Status.Ok).ContentType("text/css").Header(Hdr.LastModified, "Thu, 01 Jan 1970 00:01:40 GMT")
+                response.SetBody(page) |> ignore
+                response.StaticFile <- true
+                Adapter.write kit http response (http.Request.Method = "HEAD")
+            | "/static-empty.css" ->
+                let response = Response(Status.Ok).ContentType("text/css").Header(Hdr.ContentLength, "0")
+                response.StaticFile <- true
+                Adapter.write kit http response false
+            | _ -> next.Invoke http)
+    )
+    |> ignore
+
+let private startApp (deflate: bool) (config: KitConfig) : Task<TestApp * string> =
+    task {
+        let path = tempFile page
+        let kit = kitWith { config with ErrorPages = ErrorPages.Of [ 404, bytesOf "<h1>Not found</h1>"; 500, bytesOf "<h1>Boom</h1>" ] } (obj ())
+        let! app =
+            startWith kit (routes kit path) (fun builder ->
+                // config.ru: the deflater is the outermost layer.
+                if deflate then Adapter.useDeflater kit builder |> ignore
+                staticFiles kit builder)
+        return app, path
+    }
+
+let private gz (req: Req) = req.With("accept-encoding", "gzip, deflate")
+
+[<Fact>]
+let ``every kind of body is written whole`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            for target in [ "/page"; "/stream"; "/file" ] do
+                let! reply = app.Send(get target)
+                Assert.Equal(200, reply.Status)
+                Assert.True((reply.Text = page), target)
+            let! pooled = app.Send(get "/pooled")
+            Assert.Equal(page, (pooled.Json.TryGet "page").Value.AsString.Value)
+            Assert.Equal(Some "application/json; charset=utf-8", pooled.Header "content-type")
+            let! empty = app.Send(get "/empty")
+            Assert.Equal(200, empty.Status)
+            Assert.Empty empty.Body
+            // Not a deflater app: nothing is gzipped, whatever the client accepts.
+            let! plain = app.Send(gz (get "/page"))
+            Assert.Null(plain.Header "content-encoding" |> Option.toObj)
+            Assert.Equal(Some(string page.Length), plain.Header "content-length")
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``the deflater gzips every kind of body for a client that accepts it`` () =
+    task {
+        let! app, path = startApp true KitConfig.Default
+        use _ = app
+        try
+            for target in [ "/page"; "/stream"; "/file" ] do
+                let! reply = app.Send(gz (get target))
+                Assert.Equal(200, reply.Status)
+                Assert.Equal(Some "gzip", reply.Header "content-encoding")
+                Assert.Equal(None, reply.Header "content-length")
+                Assert.Equal(Some "chunked", reply.Header "transfer-encoding")
+                Assert.True(reply.HeaderValues("vary") |> List.exists (fun v -> v.Contains "Accept-Encoding"), target)
+                Assert.True((gunzip reply.Body = page), target)
+            let! pooled = app.Send(gz (get "/pooled"))
+            Assert.Equal(Some "gzip", pooled.Header "content-encoding")
+            Assert.Equal(page, (json (gunzip pooled.Body)).TryGet("page").Value.AsString.Value)
+            // A response with an empty body is gzipped too: its length is the server's doing.
+            let! empty = app.Send(gz (get "/empty"))
+            Assert.Equal(Some "gzip", empty.Header "content-encoding")
+            Assert.Equal("", gunzip empty.Body)
+            // Without Accept-Encoding it goes out plain, but still varies on it.
+            let! plain = app.Send(get "/page")
+            Assert.Equal(None, plain.Header "content-encoding")
+            Assert.Equal(page, plain.Text)
+            Assert.True(plain.HeaderValues("vary") |> List.exists (fun v -> v.Contains "Accept-Encoding"))
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``a gzipped page keeps its etag and answers conditional gets`` () =
+    task {
+        let! app, path = startApp true KitConfig.Default
+        use _ = app
+        try
+            let! plain = app.Send(get "/page")
+            let! gzipped = app.Send(gz (get "/page"))
+            Assert.Equal(plain.Header "etag", gzipped.Header "etag")
+            // The second gzip of the same body comes from the cache, and is the same bytes.
+            let! again = app.Send(gz (get "/page"))
+            Assert.Equal<byte[]>(gzipped.Body, again.Body)
+            let! conditional = app.Send((gz (get "/page")).With("if-none-match", nonNull (plain.Header "etag" |> Option.toObj)))
+            Assert.Equal(304, conditional.Status)
+            Assert.Empty conditional.Body
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``the deflater on HEAD, and when nothing is acceptable`` () =
+    task {
+        let! app, path = startApp true KitConfig.Default
+        use _ = app
+        try
+            let! head = app.Send(gz ((get "/page").AsMethod "HEAD"))
+            Assert.Equal(200, head.Status)
+            Assert.Equal(Some "gzip", head.Header "content-encoding")
+            Assert.Equal(None, head.Header "content-length")
+            Assert.Empty head.Body
+
+            let! refused = app.Send((get "/page").With("accept-encoding", "identity;q=0"))
+            Assert.Equal(406, refused.Status)
+            Assert.Equal(Some "text/plain", refused.Header "content-type")
+            Assert.Equal("An acceptable encoding for the requested resource /page could not be found.", refused.Text)
+            // It comes from outside the kit's own middleware.
+            Assert.Equal(None, refused.Header "x-request-id")
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``static files skip the request headers and are gzipped with their mtime`` () =
+    task {
+        let! app, path = startApp true KitConfig.Default
+        use _ = app
+        try
+            let! plain = app.Send(get "/static.css")
+            Assert.Equal(200, plain.Status)
+            Assert.Equal(None, plain.Header "x-request-id")
+            Assert.Equal(None, plain.Header "x-runtime")
+            let! gzipped = app.Send(gz (get "/static.css"))
+            Assert.Equal(Some "gzip", gzipped.Header "content-encoding")
+            // The gzip header carries the file's Last-Modified (100 seconds after the epoch).
+            Assert.Equal<byte[]>([| 100uy; 0uy; 0uy; 0uy |], gzipped.Body[4..7])
+            Assert.Equal(page, gunzip gzipped.Body)
+            // A length of 0 the app set is left alone (error pages and empty files).
+            let! emptied = app.Send(gz (get "/static-empty.css"))
+            Assert.Equal(None, emptied.Header "content-encoding")
+            Assert.Equal(Some "0", emptied.Header "content-length")
+            // The kit's own responses do have them.
+            let! kits = app.Send(get "/page")
+            Assert.True(kits.Header("x-request-id").IsSome)
+            Assert.True(kits.Header("x-runtime").IsSome)
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``errors in actions are rails error pages`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            let! boom = app.Send(get "/boom")
+            Assert.Equal(500, boom.Status)
+            Assert.Equal("<h1>Boom</h1>", boom.Text)
+            let! missing = app.Send(get "/missing")
+            Assert.Equal(404, missing.Status)
+            Assert.Equal("<h1>Not found</h1>", missing.Text)
+            let! teapot = app.Send(get "/teapot")
+            Assert.Equal(418, teapot.Status)
+            // JSON clients get the hash PublicExceptions renders.
+            let! json = app.Send((get "/missing").With("accept", "application/json"))
+            Assert.Equal("""{"status":404,"error":"Not Found"}""", json.Text)
+            Assert.Equal(Some "application/json; charset=UTF-8", json.Header "content-type")
+            // And HEAD gets the format's content type and no body.
+            let! head = app.Send((get "/missing").AsMethod "HEAD")
+            Assert.Equal(404, head.Status)
+            Assert.Equal(Some "0", head.Header "content-length")
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``requests reach the action as the proxy headers and the target describe them`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            let! reply = app.Send((get "/echo?x=1").With("x-forwarded-proto", "https").With("host", "chat.example.com"))
+            Assert.Equal(Some(Value.String "https://chat.example.com/echo?x=1"), reply.Json.TryGet "url")
+            Assert.Equal(Some(Value.Bool true), reply.Json.TryGet "ssl")
+
+            // An absolute-form target, as a proxy sends it.
+            let! absolute = app.Send({ get "http://proxied.example/echo?y=2" with Headers = [ "host", "proxied.example" ] })
+            Assert.Equal(200, absolute.Status)
+            Assert.Equal(Some(Value.String "/echo?y=2"), absolute.Json.TryGet "path")
+
+            // Cookie headers split over several lines are one jar.
+            let! cookies = app.Send({ get "/echo" with Headers = [ "host", "chat.example.com"; "cookie", "a=1"; "cookie", "b=two" ] })
+            Assert.Equal(Some(Value.String "two"), cookies.Json.TryGet "cookie")
+
+            // The query keeps its bytes: a plus is a space, and %2B is a plus.
+            let! encoded = app.Send(formPost "/echo?q=a+b%2Bc" "k=v+w")
+            Assert.Equal(Some(json """{"k": "v w", "q": "a b+c"}"""), encoded.Json.TryGet "params")
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``request bodies are bounded by the limit whether or not their length is announced`` () =
+    task {
+        let! app, path = startApp false { KitConfig.Default with MaxBodyBytes = ValueSome 64 }
+        use _ = app
+        try
+            let! announced = app.Send(formPost "/echo" (String.replicate 100 "a=1&"))
+            Assert.Equal(413, announced.Status)
+            let! small = app.Send(formPost "/echo" "a=1")
+            Assert.Equal(200, small.Status)
+            // Chunked, with no length announced: read up to the limit, then refused.
+            let chunked (payload: string) =
+                let bytes = Encoding.UTF8.GetBytes payload
+                let body = $"{bytes.Length:x}\r\n{payload}\r\n0\r\n\r\n"
+                (post "/echo").With("content-type", "application/x-www-form-urlencoded").With("transfer-encoding", "chunked")
+                |> fun r -> { r with Body = ValueSome(Encoding.UTF8.GetBytes body) }
+            // (Send adds content-length for a body, so write the chunked request by hand.)
+            use client = new System.Net.Sockets.TcpClient()
+            do! client.ConnectAsync(System.Net.IPAddress.Loopback, app.Port)
+            let stream = client.GetStream()
+            let write (s: string) = stream.WriteAsync(Encoding.UTF8.GetBytes s).AsTask()
+            do! write "POST /echo HTTP/1.1\r\nhost: chat.example.com\r\ncontent-type: application/x-www-form-urlencoded\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n"
+            let payload = String.replicate 100 "a=1&"
+            do! write $"{payload.Length:x}\r\n{payload}\r\n0\r\n\r\n"
+            use received = new MemoryStream()
+            do! stream.CopyToAsync received
+            Assert.StartsWith("HTTP/1.1 413", Encoding.UTF8.GetString(received.ToArray()))
+            ignore chunked
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``a multipart body over the limit is 413 and leaves no temp files`` () =
+    task {
+        let! app, path = startApp false { KitConfig.Default with MaxBodyBytes = ValueSome 2000 }
+        use _ = app
+        try
+            let marker = "kit-413-" + Guid.NewGuid().ToString("N")
+            let body =
+                $"--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"x\"\r\n\r\n{marker}{String('x', 5000)}\r\n--B--\r\n"
+            let! reply = app.Send((post "/echo").With("content-type", "multipart/form-data; boundary=B").WithBody body)
+            Assert.Equal(413, reply.Status)
+            let leftovers = Directory.GetFiles(Path.GetTempPath(), "RackMultipart*") |> Array.filter (fun f -> (try File.ReadAllText(f).Contains marker with _ -> false))
+            Assert.Empty leftovers
+        finally
+            File.Delete path
+    }

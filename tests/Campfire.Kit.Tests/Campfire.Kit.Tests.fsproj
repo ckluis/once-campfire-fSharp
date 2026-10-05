@@ -5,12 +5,30 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
-    <Compile Include="Tests.fs" />
+    <Compile Include="Helpers.fs" />
+    <Compile Include="Harness.fs" />
+    <Compile Include="FormatTests.fs" />
+    <Compile Include="ClockTests.fs" />
+    <Compile Include="ParamsTests.fs" />
+    <Compile Include="CookiesTests.fs" />
+    <Compile Include="SessionTests.fs" />
+    <Compile Include="RequestTests.fs" />
+    <Compile Include="ResponseTests.fs" />
+    <Compile Include="BodyTests.fs" />
+    <Compile Include="DeflaterTests.fs" />
+    <Compile Include="ServerTests.fs" />
+    <Compile Include="HttpTests.fs" />
+    <Compile Include="CtxTests.fs" />
+    <Compile Include="AdapterTests.fs" />
+    <Compile Include="LoggingTests.fs" />
+    <Compile Include="ParamsVectorTests.fs" />
+    <Compile Include="RailsVectorTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.Kit/Campfire.Kit.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Falco" />
   </ItemGroup>
 </Project>
