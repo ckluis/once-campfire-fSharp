@@ -84,6 +84,12 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
 - `bin/richtext-differential` compares `Campfire.RichText` with the Rust crate on generated inputs: how markup
   parses in 20 contexts, and what a body presents as, as plain text, as an editor value and for its mentions.
   It needs mise for the Rust toolchain; run it after changing the parser, the sanitizer or the pipeline.
+- `Campfire.Storage` needs libvips (`brew install vips` on macOS; `bin/verify` points NetVips at Homebrew's) and,
+  for video, ffmpeg and ffprobe. The storage vectors' byte comparisons run only against libvips 8.16.1 and
+  ffmpeg 7.1.5 (rust/Dockerfile's builds); otherwise they are skipped with a note on stderr, so say so when
+  reporting. `bin/storage-media-vectors` runs them in `Dockerfile.toolchain` inside colima, with
+  `CAMPFIRE_REQUIRE_MEDIA_VECTORS=1` (the header says why it checks vectors the reference image makes there
+  rather than `vectors/storage.json` on aarch64).
 - Tests that need the parity seed (`parity/.seed/default`) must skip with a message when it isn't
   built; `CAMPFIRE_REQUIRE_SEED=1` turns the skip into a failure.
 - Commit each logical unit on the current branch with a message saying what and why. Don't push.
