@@ -46,6 +46,8 @@ Library mapping:
 | bcrypt | BCrypt.Net-Next |
 | libvips FFI | NetVips over the same libvips 8.16.1 build |
 | ffmpeg subprocess | same argv, `System.Diagnostics.Process` |
+| multer + mime + httparse (multipart) | `Campfire.Kit/Multipart.fs`, a port of multer 3.1.0 with the `mime` and `httparse` code it leans on: ASP.NET's `MultipartReader` accepted bodies multer refuses (no closing boundary, bodies cut short) and read part headers its own way, and the Rust port is what Rails parity was proved against. `bin/kit-differential` shows no difference on 9 kinds of input, multipart among them |
+| flate2 / crc32fast (gzip) | `System.IO.Compression.DeflateStream` for the deflate, with the gzip header and trailer written by hand (the modification time and the Unix OS code Rack writes) and a CRC-32 on the ARM instructions or slicing-by-8 tables. Compressed bytes differ from flate2's; what they decode to doesn't |
 | tungstenite-style socket | ASP.NET Core WebSockets (permessage-deflate as Rust does it) |
 | web-push / p256 / hkdf | System.Security.Cryptography ECDH + HKDF + AES-GCM |
 | rustls + instant-acme | Kestrel TLS + an ACME client (choose in Phase 3) |
