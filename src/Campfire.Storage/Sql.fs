@@ -18,9 +18,18 @@ let private caches = ConditionalWeakTable<SqliteConnection, Dictionary<string, S
 [<Literal>]
 let private SqliteConstraintUnique = 2067
 
+/// Microsoft.Data.Sqlite retries a statement SQLite reports as busy for `CommandTimeout` seconds (30 by
+/// default) after SQLite's busy handler has given up, so a locked database would fail after
+/// `busy_timeout` plus that, where rusqlite fails after `busy_timeout`. One second ends the retrying
+/// as soon as the busy handler has. (Campfire.Db sets the same on its commands, `Timeouts` in its
+/// Sql.fs; Storage doesn't reference it.)
+[<Literal>]
+let private CommandTimeoutSeconds = 1
+
 let private create (conn: SqliteConnection) (sql: string) (count: int) : SqliteCommand =
     let command = conn.CreateCommand()
     command.CommandText <- sql
+    command.CommandTimeout <- CommandTimeoutSeconds
     for i in 1..count do
         command.Parameters.Add(SqliteParameter($"?{i}", DBNull.Value)) |> ignore
     command.Prepare()

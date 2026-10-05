@@ -228,3 +228,39 @@ let ``deleting a prefix removes what starts with it`` () =
     Assert.False(DiskService.exist service "variants/abc/one")
     Assert.False(DiskService.exist service "variants/abc/two")
     Assert.True(DiskService.exist service "variants/abd/other")
+
+// --- sql.rs's stand-in for rusqlite -----------------------------------------------------------------
+
+/// Microsoft.Data.Sqlite retries a busy statement for CommandTimeout (30 s by default) after SQLite's
+/// busy handler gives up; rusqlite doesn't, so a locked database fails after busy_timeout.
+[<Fact>]
+let ``a locked database fails after the busy timeout, not after the command timeout`` () =
+    let path = Path.Combine(Path.GetTempPath(), $"campfire-storage-busy-{Guid.NewGuid():N}.sqlite3")
+    try
+        let open' () =
+            let conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False")
+            conn.Open()
+            conn
+        use holder = open' ()
+        use waiter = open' ()
+        let run (conn: Microsoft.Data.Sqlite.SqliteConnection) (sql: string) =
+            use command = conn.CreateCommand()
+            command.CommandText <- sql
+            command.ExecuteNonQuery() |> ignore
+        run holder "CREATE TABLE things (id INTEGER PRIMARY KEY)"
+        run waiter "PRAGMA busy_timeout = 100"
+        run holder "BEGIN IMMEDIATE"
+        let started = Diagnostics.Stopwatch.StartNew()
+        let result = Sql.execute waiter "INSERT INTO things (id) VALUES (?1)" [| box 1L |]
+        let elapsed = started.Elapsed
+        run holder "ROLLBACK"
+        match result with
+        | Error(StorageError.Sql(:? Microsoft.Data.Sqlite.SqliteException as e)) -> Assert.Equal(5, e.SqliteErrorCode) // SQLITE_BUSY
+        | other -> failwith $"expected SQLITE_BUSY, got {other}"
+        Assert.True(elapsed < TimeSpan.FromSeconds 5.0, $"a locked statement took {elapsed.TotalSeconds:F1} s to fail")
+    finally
+        for suffix in [ ""; "-wal"; "-shm"; "-journal" ] do
+            try
+                File.Delete(path + suffix)
+            with _ ->
+                ()
