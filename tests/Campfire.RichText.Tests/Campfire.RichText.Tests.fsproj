@@ -7,6 +7,7 @@
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
     <Compile Include="Support.fs" />
     <Compile Include="DomTests.fs" />
+    <Compile Include="TokenizerTests.fs" />
     <Compile Include="SanitizerTests.fs" />
     <Compile Include="RubyTests.fs" />
     <Compile Include="UriTests.fs" />

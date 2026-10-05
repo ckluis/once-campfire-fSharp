@@ -239,8 +239,10 @@ type Proc =
 module internal TokenizerChars =
     let inline isAsciiAlphanumeric (c: char) = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 
-    /// `lower_ascii_letter`: the lowercase letter for an ASCII letter, else -1.
-    let inline lowerAsciiLetter (c: char) : int =
+    /// `lower_ascii_letter`: the lowercase letter for an ASCII letter, else -1. (Not `inline`, which the
+    /// F# compiler can't expand in the test assembly; the JIT inlines it.)
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)>]
+    let lowerAsciiLetter (c: char) : int =
         if c >= 'a' && c <= 'z' then int c
         elif c >= 'A' && c <= 'Z' then int c + 32
         else -1
