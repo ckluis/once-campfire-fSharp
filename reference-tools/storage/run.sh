@@ -3,6 +3,8 @@
 #
 #   docker build -t campfire-reference reference
 #   reference-tools/storage/run.sh            # → vectors/storage.json + vectors/storage/
+#   reference-tools/storage/run.sh tables-fsharp  # → src/Campfire.RailsCompat/ContentDispositionApproximations.fs
+#                                             #   (F# port; the next to come are the Marcel tables for Campfire.Storage)
 #   reference-tools/storage/run.sh tables     # → crates/storage/src/tables.rs and
 #                                             #   crates/rails_compat/src/content_disposition/approximations.rs
 #
@@ -12,6 +14,13 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 image="${IMAGE:-campfire-reference}"
+
+if [[ "${1:-}" == "tables-fsharp" ]]; then
+  docker run --rm --entrypoint "" -v "$root/reference-tools/storage:/tools:ro" "${IMAGE_FSHARP:-campfire-reference:app}" \
+    bundle exec ruby /tools/dump_tables.rb approximations-fsharp \
+    > "$root/src/Campfire.RailsCompat/ContentDispositionApproximations.fs"
+  exit
+fi
 
 if [[ "${1:-}" == "tables" ]]; then
   dump() {
