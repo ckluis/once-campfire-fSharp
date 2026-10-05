@@ -5,7 +5,24 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
-    <Compile Include="Tests.fs" />
+    <Compile Include="Support.fs" />
+    <Compile Include="TimeTests.fs" />
+    <Compile Include="ErrorTests.fs" />
+    <Compile Include="SqlTests.fs" />
+    <Compile Include="SchemaTests.fs" />
+    <Compile Include="DatabaseTests.fs" />
+    <Compile Include="UnitTests.fs" />
+    <Compile Include="AccountTests.fs" />
+    <Compile Include="CallbacksTests.fs" />
+    <Compile Include="ColumnsTests.fs" />
+    <Compile Include="DifferentialTests.fs" />
+    <Compile Include="FirstRunTests.fs" />
+    <Compile Include="FixturesTests.fs" />
+    <Compile Include="MembershipTests.fs" />
+    <Compile Include="MessageTests.fs" />
+    <Compile Include="PushTests.fs" />
+    <Compile Include="RoomTests.fs" />
+    <Compile Include="UserTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.Db/Campfire.Db.fsproj" />
