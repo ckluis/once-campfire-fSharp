@@ -109,7 +109,10 @@ module internal Timeouts =
 /// a query is compiled once per connection rather than on every call, as Active Record keeps
 /// a prepared-statement cache per connection too. Not safe for concurrent use.
 type Conn(raw: SqliteConnection, capacity: int) =
-    let cache = Dictionary<string, SqliteCommand>()
+    // Each statement with the tick at which it was last given back, for evicting the least recently
+    // used (rusqlite's cache is an LRU too). A scan at eviction beats a list node per use.
+    let cache = Dictionary<string, struct (SqliteCommand * int64)>()
+    let mutable tick = 0L
     let mutable closed = false
 
     let create (sql: string) : SqliteCommand =
@@ -124,7 +127,7 @@ type Conn(raw: SqliteConnection, capacity: int) =
 
     let rent (sql: string) : SqliteCommand =
         match cache.TryGetValue sql with
-        | true, cmd ->
+        | true, struct (cmd, _) ->
             cache.Remove sql |> ignore
             cmd
         | _ -> create sql
@@ -133,11 +136,18 @@ type Conn(raw: SqliteConnection, capacity: int) =
         if cache.ContainsKey sql then
             cmd.Dispose()
         else
-            if cache.Count >= capacity then
-                let oldest = Seq.head cache.Keys
-                cache[oldest].Dispose()
+            if cache.Count >= capacity && cache.Count > 0 then
+                let mutable oldest = sql
+                let mutable oldestTick = Int64.MaxValue
+                for KeyValue(key, struct (_, at)) in cache do
+                    if at < oldestTick then
+                        oldest <- key
+                        oldestTick <- at
+                let struct (evicted, _) = cache[oldest]
+                evicted.Dispose()
                 cache.Remove oldest |> ignore
-            cache[sql] <- cmd
+            tick <- tick + 1L
+            cache[sql] <- struct (cmd, tick)
 
     let bind (cmd: SqliteCommand) (args: SqlArg[]) : unit =
         if args.Length <> cmd.Parameters.Count then
@@ -247,13 +257,16 @@ type Conn(raw: SqliteConnection, capacity: int) =
     /// Prepared statements waiting in the cache.
     member internal _.CachedStatementCount : int = cache.Count
 
+    /// The SQL of the statements waiting in the cache.
+    member internal _.CachedStatements : string list = cache.Keys |> List.ofSeq
+
     member _.IsClosed = closed
 
     interface IDisposable with
         member _.Dispose() =
             if not closed then
                 closed <- true
-                for cmd in cache.Values do
+                for struct (cmd, _) in cache.Values do
                     cmd.Dispose()
                 cache.Clear()
                 raw.Dispose()

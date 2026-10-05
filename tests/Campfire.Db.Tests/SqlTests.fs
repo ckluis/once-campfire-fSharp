@@ -39,6 +39,26 @@ let ``the statement cache holds only its capacity`` () =
     Assert.Equal(10L, conn.Count("SELECT COUNT(*) FROM things", [||]))
 
 [<Fact>]
+let ``the statement cache evicts the least recently used statement`` () =
+    use conn = Conn.Open(":memory:", 3)
+    table conn
+    let a = "SELECT id FROM things WHERE id = ?"
+    let b = "SELECT name FROM things WHERE id = ?"
+    let c = "SELECT at FROM things WHERE id = ?"
+    let d = "SELECT n FROM things WHERE id = ?"
+    let run (sql: string) = conn.QueryAll(sql, [| I 1L |], fun _ -> ()) |> ignore
+    for sql in [ a; b; c ] do
+        run sql
+    // `a` was the first in, and is used again: `b` is now the one unused for longest.
+    run a
+    run d
+    Assert.Equal<string list>(List.sort [ a; c; d ], conn.CachedStatements |> List.sort)
+    // A statement a read has borrowed and returned counts as used then, as in rusqlite.
+    run c
+    run b
+    Assert.Equal<string list>(List.sort [ b; c; d ], conn.CachedStatements |> List.sort)
+
+[<Fact>]
 let ``a failed statement is dropped from the cache`` () =
     use conn = Conn.OpenInMemory()
     table conn
