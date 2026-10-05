@@ -25,7 +25,7 @@ let ``erb escapes like erb util`` () =
 [<Fact>]
 let ``strips nul and ascii whitespace`` () =
     Assert.Equal("x", Ruby.strip "\000 \t\u000b x \000\n")
-    Assert.Equal(" x ", Ruby.strip "  x  ")
+    Assert.Equal("\u00a0x\u00a0", Ruby.strip " \u00a0x\u00a0 ")
 
 // uri.rs
 
@@ -42,7 +42,7 @@ let ``to_i like ruby`` () =
     Assert.Equal(1717243200000L, toI "1717243200000")
     Assert.Equal(12L, toI " +12abc")
     Assert.Equal(7L, toI "\t\n\u000b\u000c\r 7")
-    Assert.Equal(0L, toI " 5")
+    Assert.Equal(0L, toI "\u00a05")
     Assert.Equal(0L, toI "abc")
     Assert.Equal(-5L, toI "-5")
     Assert.Equal(0L, toI "--5")
@@ -85,7 +85,7 @@ let ``casts like active record`` () =
           "9223372036854775808", None
           "-9223372036854775809", None
           "99999999999999999999", None
-          " 5", None
+          "\u00a05", None
           "\000 5", None
           "_5", None
           "--5", None
@@ -116,7 +116,7 @@ let private rackRanges: (string * uint64 * (uint64 * uint64) list option) list =
       "bytes=1-+2", 10UL, Some [ (1UL, 2UL) ]
       "bytes=1_0-2_0", 100UL, Some [ (10UL, 20UL) ]
       "bytes=0d5-0d9", 100UL, Some [ (5UL, 9UL) ]
-      "bytes= 1-2", 10UL, Some [ (0UL, 2UL) ]
+      "bytes=\u00a01-2", 10UL, Some [ (0UL, 2UL) ]
       "bytes=a-b", 10UL, Some [ (0UL, 0UL) ]
       "bytes=0-0x5", 10UL, Some [ (0UL, 0UL) ]
       "bytes=0-1 ", 10UL, Some [ (0UL, 1UL) ]

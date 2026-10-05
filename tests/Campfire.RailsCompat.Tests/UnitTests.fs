@@ -72,13 +72,13 @@ let ``iso8601 truncates to milliseconds`` () =
 [<Fact>]
 let ``escapes html entities but not separators or slashes`` () =
     Assert.Equal(
-        "{\"key\":\"\\u003ca href=\\\"/x\\\"\\u003e\\u0026\\u003c/a\\u003e \"}",
-        Json.encode (Value.Object [ "key", Value.String "<a href=\"/x\">&</a> " ])
+        "{\"key\":\"\\u003ca href=\\\"/x\\\"\\u003e\\u0026\\u003c/a\\u003e\u2028\"}",
+        Json.encode (Value.Object [ "key", Value.String "<a href=\"/x\">&</a>\u2028" ])
     )
     Assert.Equal("\"<&>\"", Json.generate (Value.String "<&>"))
     Assert.Equal(
-        "\"\\u003ca href=\\\"x\\\"\\u003e\\u0026' é\\n\\t\\u0001\u007f/\\u003c/a\\u003e\"",
-        Json.encode (Value.String "<a href=\"x\">&' é\n\t\u0001\u007f/</a>")
+        "\"\\u003ca href=\\\"x\\\"\\u003e\\u0026'\u2028é\\n\\t\\u0001\u007f/\\u003c/a\\u003e\"",
+        Json.encode (Value.String "<a href=\"x\">&'\u2028é\n\t\u0001\u007f/</a>")
     )
 
 [<Fact>]

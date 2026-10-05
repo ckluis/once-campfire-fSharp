@@ -267,7 +267,7 @@ let ``write_rust_output_for_rails_to_verify`` () =
               [ Value.Object [ "session_id", str' "rust-session-id"; "return_to_after_authenticating", str' "/rooms/1" ]
                 Value.Object [ "return_to_after_authenticating", str' "http://campfire.test/rooms/1?a=1&b=<2>"; "n", Value.Int 1L ]
                 str' "plain"
-                Value.Array [ Value.Int 1L; Value.Null; str' "☃ " ] ] ->
+                Value.Array [ Value.Int 1L; Value.Null; str' "☃\u2028" ] ] ->
               Value.Object
                   [ "name", str' "_campfire_session"
                     "raw", str' (Cookies.encrypt secrets "_campfire_session" value (Some permanent))
