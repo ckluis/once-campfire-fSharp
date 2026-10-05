@@ -45,9 +45,9 @@ response to a null stream, after warm-up):
 
 | | before | after |
 |---|---|---|
-| tiny page, bytes allocated per request on Kestrel | 3,839 | 2,463 |
-| 100 KB page, bytes per request on Kestrel | 5,630 | 4,250 |
-| tiny page, microseconds per request, steady state | 1.89 | 1.73 |
+| tiny page, bytes allocated per request on Kestrel | 3,839 | 2,551 |
+| 100 KB page, bytes per request on Kestrel | 5,630 | 4,342 |
+| tiny page, microseconds per request, steady state | 1.89 | 1.84 |
 
 including about 0.8 us and 1.5 KB for building the `DefaultHttpContext`. Raw Kestrel with the
 middleware allocates 560 bytes per request; the rest is `Ctx`, `Request`, the params maps, the
@@ -59,3 +59,9 @@ request so that this doesn't regress, and prints the numbers.
     bench/kit/run both --secs 8     # needs wrk, the .NET SDK, and mise's rust (the Rust build is offline)
     bench/kit/run fsharp            # one side only
     target/kit-bench/fsharp/KitBench micro   # the cookie and hash building blocks, after a run of the above
+
+## Later changes
+
+The figures above were taken before the multipart reader became a port of multer, headers with non-ASCII
+bytes became absent as in Rust, and the deflater's 406 stopped carrying HSTS; none touches the paths
+measured (no body, no multipart, no deflater 406). The allocation row is from after them.
