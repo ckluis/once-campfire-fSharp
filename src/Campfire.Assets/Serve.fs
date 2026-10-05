@@ -58,20 +58,25 @@ let private isWordByte (b: byte) : bool =
     (b >= byte 'a' && b <= byte 'z') || (b >= byte 'A' && b <= byte 'Z') || (b >= byte '0' && b <= byte '9') || b = byte '_'
 
 /// `accept_encoding.any? { |enc, _| /\b#{encoding}\b/i.match?(enc) }` over Rack's parsed header.
-let private accepts (acceptEncoding: string) (encoding: string) : bool =
+/// Internal so the tests can reach it: no embedded file has a `.br` or `.gz` sibling yet.
+let internal accepts (acceptEncoding: string) (encoding: string) : bool =
+    let needle = Encoding.ASCII.GetBytes encoding
     acceptEncoding.Split ','
     |> Array.exists (fun part ->
         let semicolon = part.IndexOf ';'
-        let value = (if semicolon < 0 then part else part.Substring(0, semicolon)).Trim().ToLowerInvariant()
-        let bytes = Encoding.UTF8.GetBytes value
+        let value = (if semicolon < 0 then part else part.Substring(0, semicolon)).Trim()
+        // The search and the boundary checks share one index space, the UTF-8 bytes, as in Rust;
+        // only ASCII letters are lowercased (`to_ascii_lowercase`).
+        let bytes = Encoding.UTF8.GetBytes value |> Array.map (fun b -> if b >= byte 'A' && b <= byte 'Z' then b + 32uy else b)
         let mutable from = 0
         let mutable found = false
-        while not found && from <= value.Length - encoding.Length do
-            match value.IndexOf(encoding, from, StringComparison.Ordinal) with
-            | -1 -> from <- value.Length
-            | i ->
+        while not found && from <= bytes.Length - needle.Length do
+            match bytes.AsSpan(from).IndexOf(ReadOnlySpan needle) with
+            | -1 -> from <- bytes.Length
+            | offset ->
+                let i = from + offset
                 let before = i = 0 || not (isWordByte bytes[i - 1])
-                let after = i + encoding.Length >= bytes.Length || not (isWordByte bytes[i + encoding.Length])
+                let after = i + needle.Length >= bytes.Length || not (isWordByte bytes[i + needle.Length])
                 if before && after then found <- true else from <- i + 1
         found)
 

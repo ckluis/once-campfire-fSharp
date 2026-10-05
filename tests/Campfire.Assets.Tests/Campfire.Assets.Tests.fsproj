@@ -6,6 +6,7 @@
   <ItemGroup>
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
     <Compile Include="HelpersTests.fs" />
+    <Compile Include="ServeTests.fs" />
     <Compile Include="ReferenceTests.fs" />
   </ItemGroup>
   <ItemGroup>
