@@ -15,3 +15,6 @@ bench/kit/*/bin/
 bench/kit/*/obj/
 bench/kit/rust/Cargo.lock
 bench/front/rust/Cargo.lock
+bench/cable/*/bin/
+bench/cable/*/obj/
+bench/cable/rust/Cargo.lock
