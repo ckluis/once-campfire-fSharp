@@ -80,6 +80,14 @@ module internal Binding =
                 out.Append c |> ignore
         out.ToString(), count
 
+module internal Timeouts =
+    /// Microsoft.Data.Sqlite retries a statement that SQLite reports as busy for `CommandTimeout` seconds
+    /// (30 by default, and 0 means for ever), on top of SQLite's own busy handler. One second ends that
+    /// retrying as soon as the busy handler has given up, so that a lock is waited for as long as
+    /// `PRAGMA busy_timeout` says (`Schema.BusyTimeoutMs`) and no longer, as with rusqlite.
+    [<Literal>]
+    let CommandTimeoutSeconds = 1
+
 /// A SQLite connection and the prepared statements it keeps (`rusqlite`'s `prepare_cached`):
 /// a query is compiled once per connection rather than on every call, as Active Record keeps
 /// a prepared-statement cache per connection too. Not safe for concurrent use.
@@ -91,6 +99,7 @@ type Conn(raw: SqliteConnection, capacity: int) =
         let numbered, count = Binding.numberPlaceholders sql
         let cmd = raw.CreateCommand()
         cmd.CommandText <- numbered
+        cmd.CommandTimeout <- Timeouts.CommandTimeoutSeconds
         for i in 1..count do
             cmd.Parameters.Add(SqliteParameter($"?{i}", DBNull.Value)) |> ignore
         cmd.Prepare()
@@ -143,6 +152,7 @@ type Conn(raw: SqliteConnection, capacity: int) =
     member _.ExecuteBatch(sql: string) : unit =
         use cmd = raw.CreateCommand()
         cmd.CommandText <- sql
+        cmd.CommandTimeout <- Timeouts.CommandTimeoutSeconds
         cmd.ExecuteNonQuery() |> ignore
 
     /// `Connection::execute` through the statement cache; the number of rows changed.
@@ -162,6 +172,7 @@ type Conn(raw: SqliteConnection, capacity: int) =
         let numbered, _ = Binding.numberPlaceholders sql
         use cmd = raw.CreateCommand()
         cmd.CommandText <- numbered
+        cmd.CommandTimeout <- Timeouts.CommandTimeoutSeconds
         args |> Array.iteri (fun i a -> cmd.Parameters.Add(SqliteParameter($"?{i + 1}", Binding.toValue a)) |> ignore)
         cmd.ExecuteNonQuery()
 

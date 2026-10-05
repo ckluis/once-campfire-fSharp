@@ -326,3 +326,82 @@ let ``the wal stays bounded under sustained writes`` () =
         )
     let wal = mainFileLen (path + "-wal")
     Assert.True(wal < (int64 Pragmas.WalLimitPages + 1000L) * 4200L, $"WAL of {wal} bytes")
+
+// `reference/config/database.yml` and the sqlite3 adapter's connection settings (see `Schema.fs`).
+
+let private pragma (conn: Conn) (name: string) : int64 = conn.QueryRow($"PRAGMA {name}", [||], fun r -> r.Int64 0)
+
+[<Fact>]
+let ``connections are configured as Rails configures them`` () =
+    use dir = new TempDir()
+    use db = openWithReaders dir 1
+    let check (conn: Conn) =
+        Assert.Equal(5000L, pragma conn "busy_timeout")
+        Assert.Equal(1L, pragma conn "foreign_keys")
+        Assert.Equal(1L, pragma conn "synchronous") // NORMAL
+        Assert.Equal(67_108_864L, pragma conn "journal_size_limit")
+        Assert.Equal(2000L, pragma conn "cache_size")
+        Assert.Equal(0L, pragma conn "mmap_size") // memory mapping is off
+        Assert.Equal("wal", conn.QueryRow("PRAGMA journal_mode", [||], fun r -> r.Text 0))
+    unwrap (db.ReadBlocking check)
+    unwrap (db.WriteBlocking(fun tx -> check tx.Conn))
+    // Only the writer writes, and it doesn't checkpoint by itself (the checkpointer thread does).
+    Assert.Equal(0L, unwrap (db.WriteBlocking(fun tx -> pragma tx.Conn "wal_autocheckpoint")))
+    Assert.Equal(1L, unwrap (db.ReadBlocking(fun conn -> pragma conn "query_only")))
+    Assert.True(
+        (db.ReadBlocking(fun conn -> conn.ExecuteBatch "CREATE TABLE refused (id INTEGER)") |> Result.isError),
+        "a reader writes"
+    )
+
+/// `default_transaction_mode: immediate`: a write takes the write lock when it begins, not at its first
+/// statement that writes, so another connection can't begin a write in the meantime.
+[<Fact>]
+let ``a write holds the write lock from the start`` () =
+    use dir = new TempDir()
+    use db = openWithReaders dir 1
+    unwrap (db.WriteBlocking(fun tx -> tx.Conn.ExecuteBatch "CREATE TABLE things (id INTEGER)"))
+    let refused =
+        unwrap (
+            db.WriteBlocking(fun _ ->
+                use other = Conn.Open(dir.File "test.sqlite3")
+                other.ExecuteBatch "PRAGMA busy_timeout = 0"
+                try
+                    other.ExecuteBatch "BEGIN IMMEDIATE"
+                    false
+                with :? Microsoft.Data.Sqlite.SqliteException as e ->
+                    e.SqliteErrorCode = 5) // SQLITE_BUSY
+        )
+    Assert.True(refused, "another connection began a write inside a write that had only read")
+
+[<Fact>]
+let ``a database opened with prepare off leaves the schema alone`` () =
+    use dir = new TempDir()
+    let config = { Config.create (dir.File "test.sqlite3") with Prepare = false }
+    use db = Database.Open(config, Testing.defaultEnv ())
+    Assert.Equal(0L, unwrap (db.ReadBlocking(fun conn -> conn.Count("SELECT COUNT(*) FROM sqlite_master", [||]))))
+
+[<Fact>]
+let ``a database opened with prepare on loads the schema and the paging index`` () =
+    use dir = new TempDir()
+    use db = openWithReaders dir 1
+    let names = unwrap (db.ReadBlocking(fun conn -> conn.QueryAll("SELECT name FROM sqlite_master WHERE type = 'index'", [||], fun r -> r.Text 0)))
+    Assert.Contains("index_messages_on_room_id_and_created_at", names)
+    Assert.Contains("index_users_on_email_address", names)
+
+/// Microsoft.Data.Sqlite retries a busy statement for 30 s unless told otherwise; a lock is waited for as
+/// long as `busy_timeout` says, as with rusqlite.
+[<Fact>]
+let ``a locked statement waits for the busy timeout and no longer`` () =
+    use dir = new TempDir()
+    use db = openWithReaders dir 1
+    let waited =
+        unwrap (
+            db.WriteBlocking(fun _ ->
+                use other = Conn.Open(dir.File "test.sqlite3")
+                other.ExecuteBatch "PRAGMA busy_timeout = 400"
+                let sw = System.Diagnostics.Stopwatch.StartNew()
+                Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(fun () -> other.ExecuteBatch "BEGIN IMMEDIATE") |> ignore
+                sw.Elapsed)
+        )
+    Assert.True(waited >= TimeSpan.FromMilliseconds 350.0, $"gave up after {waited}")
+    Assert.True(waited < TimeSpan.FromSeconds 3.0, $"waited {waited}")
