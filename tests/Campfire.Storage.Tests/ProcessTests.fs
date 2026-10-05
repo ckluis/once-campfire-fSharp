@@ -58,6 +58,12 @@ let ``output_within captures a quick child`` () =
     Assert.Equal<byte[]>("out\n"B, output.Stdout)
     Assert.Equal<byte[]>("err\n"B, output.Stderr)
 
+[<Fact>]
+let ``output_within reports a program that is not there`` () =
+    match outputWithin (ProcessStartInfo "no-such-program-for-campfire") (TimeSpan.FromSeconds 1.0) with
+    | Error(ProcessError.NotFound _) -> ()
+    | other -> failwith $"{other}"
+
 /// `command.output()`: no timeout, so no polling either.
 let private plainOutput (info: ProcessStartInfo) : int =
     info.UseShellExecute <- false

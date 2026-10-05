@@ -129,3 +129,102 @@ let ``a copy that fails leaves no file behind`` () =
     | Error(StorageError.Io error) -> Assert.Equal("the disk went away", error.Message)
     | other -> failwith $"a broken copy was staged: {other}"
     Assert.False(DiskService.exist storage.Service blob.Key)
+
+// --- What Rust leaves to the app's tests: the paths through Storage that fail --------------------
+
+let private testStorage (root: TempDir) : Storage =
+    Storage.create (DiskService.create root.Path "local") (RailsCompat.appVerifier (Secrets.create "test") "ActiveStorage")
+
+let private at = (Timestamps.tryParse "2026-09-26T12:00:00Z").Value
+
+[<Fact>]
+let ``opening a blob whose file is missing is file not found`` () =
+    use root = TempDir.Create()
+    use conn = openDatabase ()
+    let storage = testStorage root
+    let blob = (Storage.createAndUpload storage conn "bytes"B (Filename.create "a.txt") None at).Value
+    DiskService.delete storage.Service blob.Key |> ignore
+    match Storage.openBlob storage blob with
+    | Error StorageError.FileNotFound -> ()
+    | other -> failwith $"{other}"
+
+[<Fact>]
+let ``opening a blob whose file changed is an integrity error`` () =
+    use root = TempDir.Create()
+    use conn = openDatabase ()
+    let storage = testStorage root
+    let blob = (Storage.createAndUpload storage conn "bytes"B (Filename.create "a.txt") None at).Value
+    File.WriteAllText(Storage.pathFor storage blob, "other bytes")
+    match Storage.openBlob storage blob with
+    | Error StorageError.Integrity -> ()
+    | other -> failwith $"{other}"
+
+[<Fact>]
+let ``an opened blob is a copy named for its id and extension`` () =
+    use root = TempDir.Create()
+    use conn = openDatabase ()
+    let storage = testStorage root
+    let blob = (Storage.createAndUpload storage conn "bytes"B (Filename.create "a.txt") None at).Value
+    let copy = (Storage.openBlob storage blob).Value
+    let path = copy.Path
+    let name = nonNull (Path.GetFileName path)
+    Assert.True(name.StartsWith $"ActiveStorage-{blob.Id}-" && name.EndsWith ".txt", name)
+    Assert.Equal<byte[]>("bytes"B, File.ReadAllBytes path)
+    (copy :> IDisposable).Dispose()
+    Assert.False(File.Exists path)
+
+[<Fact>]
+let ``a blob is stored by its key and described by its row`` () =
+    use root = TempDir.Create()
+    use conn = openDatabase ()
+    let storage = testStorage root
+    let blob = (Storage.createAndUpload storage conn "hello"B (Filename.create "hello.txt") None at).Value
+    Assert.Equal(Some "text/plain", blob.ContentType)
+    Assert.Equal("2026-09-26 12:00:00", blob.CreatedAt)
+    Assert.Equal(Some "XUFAKrxLKna5cZ2REBfFkg==", blob.Checksum)
+    Assert.Equal(Path.Combine(root.Path, blob.Key.Substring(0, 2), blob.Key.Substring(2, 2), blob.Key), Storage.pathFor storage blob)
+    Assert.Equal(Some blob, (Blob.findByKey conn blob.Key).Value)
+    Assert.Equal(Some blob, (Blob.find conn blob.Id).Value)
+    Assert.Equal("{\"identified\":true}", JsonValue.encode blob.Metadata)
+
+[<Fact>]
+let ``timestamps are written as Active Record writes them`` () =
+    let at = (Timestamps.tryParse "2026-09-26T12:00:00.5Z").Value
+    Assert.Equal("2026-09-26 12:00:00.500000", Blob.formatTimestamp at)
+    Assert.Equal("2026-09-26 12:00:00", Blob.formatTimestamp (at.AddMilliseconds -500.0))
+
+[<Fact>]
+let ``a variant record is inserted once`` () =
+    use root = TempDir.Create()
+    use conn = openDatabase ()
+    let storage = testStorage root
+    let blob = (Storage.createAndUpload storage conn "bytes"B (Filename.create "a.txt") None at).Value
+    let first = (Blob.insertVariantRecord conn blob.Id "digest").Value
+    Assert.True first.IsSome
+    Assert.Equal(None, (Blob.insertVariantRecord conn blob.Id "digest").Value)
+    Assert.Equal(first, (Blob.findVariantRecord conn blob.Id "digest").Value)
+
+[<Fact>]
+let ``folders come from the first four characters of the key`` () =
+    let service = DiskService.create "/root" "local"
+    Assert.Equal("/root/ab/cd/abcdef", DiskService.pathFor service "abcdef")
+    Assert.Equal("/root/ab/c/abc", DiskService.pathFor service "abc")
+    Assert.Equal("/root/a/a", DiskService.pathFor service "a")
+    Assert.Equal("/root/ab/ab", DiskService.pathFor service "ab")
+    // The cut is by bytes, as Rust's `str::get` makes it: whole characters stay whole, and a cut that
+    // would split one finds no folder.
+    Assert.Equal("/root/\u00e9/xy/\u00e9xyz", DiskService.pathFor service "\u00e9xyz")
+    Assert.Equal("/root/\u00e9/\u00e9/\u00e9\u00e9\u00e9\u00e9", DiskService.pathFor service "\u00e9\u00e9\u00e9\u00e9")
+    Assert.Equal("/root/x\u00e9yz/x\u00e9yz", DiskService.pathFor service "x\u00e9yz")
+
+[<Fact>]
+let ``deleting a prefix removes what starts with it`` () =
+    use root = TempDir.Create()
+    let service = DiskService.create root.Path "local"
+    for key in [ "variants/abc/one"; "variants/abc/two"; "variants/abd/other" ] do
+        use reader = new MemoryStream("x"B)
+        Assert.Equal(Ok(), DiskService.upload service key reader None)
+    Assert.Equal(Ok(), DiskService.deletePrefixed service "variants/abc/")
+    Assert.False(DiskService.exist service "variants/abc/one")
+    Assert.False(DiskService.exist service "variants/abc/two")
+    Assert.True(DiskService.exist service "variants/abd/other")
