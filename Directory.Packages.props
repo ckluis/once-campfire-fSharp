@@ -5,6 +5,8 @@
     <PackageVersion Include="Falco" Version="5.2.0" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageVersion Include="BCrypt.Net-Next" Version="4.0.3" />
+    <!-- The managed binding only: libvips comes from the system (NetVips.Native is not used). -->
+    <PackageVersion Include="NetVips" Version="3.2.0" />
     <PackageVersion Include="xunit.v3" Version="3.2.0" />
   </ItemGroup>
 </Project>

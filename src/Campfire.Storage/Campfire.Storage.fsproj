@@ -1,9 +1,35 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <Compile Include="Error.fs" />
+    <Compile Include="TempFile.fs" />
+    <Compile Include="JsonValue.fs" />
+    <Compile Include="Key.fs" />
+    <Compile Include="Filename.fs" />
+    <Compile Include="ContentTypes.fs" />
+    <Compile Include="Disposition.fs" />
     <Compile Include="Tables.fs" />
+    <Compile Include="Marcel.fs" />
+    <Compile Include="Marshal.fs" />
+    <Compile Include="Variation.fs" />
+    <Compile Include="Vips.fs" />
+    <Compile Include="Process.fs" />
+    <Compile Include="Analyze.fs" />
+    <Compile Include="Disk.fs" />
+    <Compile Include="Sql.fs" />
+    <Compile Include="Blob.fs" />
+    <Compile Include="Paths.fs" />
+    <Compile Include="FileServer.fs" />
+    <Compile Include="Storage.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
     <ProjectReference Include="../Campfire.Ruby/Campfire.Ruby.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="NetVips" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.Storage.Tests" />
   </ItemGroup>
 </Project>

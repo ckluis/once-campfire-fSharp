@@ -5,13 +5,19 @@ open System
 open System.IO
 open System.Text.Json
 
+/// The repository root: `CAMPFIRE_ROOT` when set (a build whose output isn't under the repository,
+/// as in Dockerfile.toolchain), otherwise the directory above the test assembly that holds
+/// CampfireFs.slnx.
 let root =
     let rec up (dir: DirectoryInfo | null) =
         match dir with
         | null -> failwith "repository root (CampfireFs.slnx) not found"
         | dir when File.Exists(Path.Combine(dir.FullName, "CampfireFs.slnx")) -> dir.FullName
         | dir -> up dir.Parent
-    up (DirectoryInfo AppContext.BaseDirectory)
+    match Environment.GetEnvironmentVariable "CAMPFIRE_ROOT" with
+    | null
+    | "" -> up (DirectoryInfo AppContext.BaseDirectory)
+    | dir -> dir
 
 let path (relative: string) = Path.Combine(root, relative)
 
