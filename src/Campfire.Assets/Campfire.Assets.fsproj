@@ -43,8 +43,20 @@
     <WriteLinesToFile File="$(AssetsGenDir)source-date-epoch.txt" Lines="$(SOURCE_DATE_EPOCH)" Overwrite="true" WriteOnlyWhenDifferent="true" />
   </Target>
 
-  <Target Name="GenerateAssets" AfterTargets="StampAssetsEnvironment" Inputs="@(AssetInput);$(AssetsBuildDll);$(AssetsGenDir)source-date-epoch.txt" Outputs="$(AssetsGenDir)EmbeddedData.fs;$(AssetsGenDir)assets.bin;$(AssetsGenDir)importmap-tags.html">
+  <!--
+    Inputs/Outputs only sees files that still exist, so deleting an input would leave the target
+    "up to date" and its outputs stale. cargo:rerun-if-changed on a directory also reruns on a
+    deletion; this stamp of the input paths does the same, since it is rewritten (and so newer
+    than the outputs) when a path appears or disappears.
+  -->
+  <Target Name="StampAssetsInputs" AfterTargets="StampAssetsEnvironment">
+    <WriteLinesToFile File="$(AssetsGenDir)inputs.txt" Lines="@(AssetInput->'%(FullPath)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
+  <Target Name="GenerateAssets" AfterTargets="StampAssetsInputs" Inputs="@(AssetInput);$(AssetsBuildDll);$(AssetsGenDir)source-date-epoch.txt;$(AssetsGenDir)inputs.txt" Outputs="$(AssetsGenDir)EmbeddedData.fs;$(AssetsGenDir)assets.bin;$(AssetsGenDir)importmap-tags.html">
     <Error Condition="!Exists('$(ReferenceRoot)config/importmap.rb')" Text="reference/ submodule is missing (git submodule update --init reference)" />
     <Exec Command="&quot;$(DOTNET_HOST_PATH)&quot; &quot;$(AssetsBuildDll)&quot; --reference &quot;$(ReferenceRoot)&quot; --assets &quot;$(MSBuildProjectDirectory)&quot; --out &quot;$(AssetsGenDir)&quot;" />
+    <!-- The tool leaves an unchanged output alone; touching them keeps the stamps from being newer than the outputs for good. -->
+    <Touch Files="$(AssetsGenDir)EmbeddedData.fs;$(AssetsGenDir)assets.bin;$(AssetsGenDir)importmap-tags.html" />
   </Target>
 </Project>
