@@ -319,3 +319,53 @@ let ``a multipart body over the limit is 413 and leaves no temp files`` () =
         finally
             File.Delete path
     }
+
+
+[<Fact>]
+let ``header values go out as UTF-8 and without control characters`` () =
+    task {
+        let kit = kitWith KitConfig.Default (obj ())
+        let route = Adapter.route kit
+        let action (c: Ctx) =
+            act {
+                c.SetHeader("x-name", "café ✓")
+                c.SetHeader("x-lines", "a\nb\u0001c\nd")
+                return c.Head Status.Ok
+            }
+        use! app = start kit [ route "/h" [ "GET", action ] ]
+        let! reply = app.Send(get "/h")
+        Assert.Equal(Some "café ✓", reply.Header "x-name")
+        // Each line on its own, and the one with a control character left out.
+        Assert.Equal<string list>([ "a"; "d" ], reply.HeaderValues "x-lines")
+    }
+
+/// HTTP/2 can send a body with no Content-Length at all, so "no length" is not "no body".
+[<Fact>]
+let ``an http2 request body without a content length is read`` () =
+    task {
+        let kit = kitWith KitConfig.Default (obj ())
+        let route = Adapter.route kit
+        use! app = startProtocols Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2 kit [ route "/echo" [ "POST", (fun c -> act { return c.Json(Status.Ok, Value.Object [ "params", c.Params.ToJson(); "raw", Value.String(Encoding.UTF8.GetString c.Request.RawPost.Span) ]) }); "GET", (fun c -> act { return c.Html "get" }) ] ] ignore
+        use client = new System.Net.Http.HttpClient()
+        let send (request: System.Net.Http.HttpRequestMessage) =
+            request.Version <- System.Net.HttpVersion.Version20
+            request.VersionPolicy <- System.Net.Http.HttpVersionPolicy.RequestVersionExact
+            client.SendAsync request
+        let uri = $"http://127.0.0.1:{app.Port}/echo"
+        // `StreamContent` has no length, so the client sends the body in DATA frames alone.
+        use content = new System.Net.Http.StreamContent(new MemoryStream(Encoding.UTF8.GetBytes "a=1&b[]=2&b[]=3"))
+        content.Headers.ContentType <- System.Net.Http.Headers.MediaTypeHeaderValue("application/x-www-form-urlencoded")
+        use post = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, uri, Content = content)
+        use! response = send post
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode)
+        Assert.Equal(System.Net.HttpVersion.Version20, response.Version)
+        let! body = response.Content.ReadAsStringAsync()
+        Assert.Equal(Some(json """{"a": "1", "b": ["2", "3"]}"""), (json body).TryGet "params")
+        Assert.Equal(Some(Value.String "a=1&b[]=2&b[]=3"), (json body).TryGet "raw")
+        // And a GET, with no body to read.
+        use get' = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, uri)
+        use! response = send get'
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode)
+        let! text = response.Content.ReadAsStringAsync()
+        Assert.Equal("get", text)
+    }

@@ -160,13 +160,13 @@ let private peerFromHeader (app: Microsoft.AspNetCore.Builder.IApplicationBuilde
     )
     |> ignore
 
-/// Serve `endpoints` through the kit on a free loopback port.
-let startWith (kit: Kit) (endpoints: HttpEndpoint list) (configure: IApplicationBuilder -> unit) : Task<TestApp> =
+/// Serve `endpoints` through the kit on a free loopback port, speaking `protocols`.
+let startProtocols (protocols: HttpProtocols) (kit: Kit) (endpoints: HttpEndpoint list) (configure: IApplicationBuilder -> unit) : Task<TestApp> =
     task {
         let builder = WebApplication.CreateBuilder()
         builder.WebHost.ConfigureKestrel(fun (options: KestrelServerOptions) ->
             Adapter.configureKestrel options
-            options.Listen(IPAddress.Loopback, 0))
+            options.Listen(IPAddress.Loopback, 0, fun listen -> listen.Protocols <- protocols))
         |> ignore
         builder.Logging.ClearProviders() |> ignore
         let app = builder.Build()
@@ -178,6 +178,9 @@ let startWith (kit: Kit) (endpoints: HttpEndpoint list) (configure: IApplication
         let port = Uri(Seq.head addresses).Port
         return new TestApp(app, port)
     }
+
+let startWith (kit: Kit) (endpoints: HttpEndpoint list) (configure: IApplicationBuilder -> unit) : Task<TestApp> =
+    startProtocols HttpProtocols.Http1 kit endpoints configure
 
 let start (kit: Kit) (endpoints: HttpEndpoint list) : Task<TestApp> = startWith kit endpoints ignore
 

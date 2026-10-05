@@ -28,7 +28,10 @@ See [`AGENTS.md`](AGENTS.md) for the layout and working rules.
 The differences the Rust port lists from Rails apply here too (see its README). Differences
 specific to this port are listed below, each citing the reference file it departs from.
 
-- None yet.
+- **Response headers set before the response exists** (`Ctx.SetHeader`, e.g. `X-Version` in a before-action)
+  keep every line of a multi-line value. The Rust port keeps only the first line; Puma writes them all
+  (puma 7.2.1, `Puma::Request#str_headers`, the reference's server). Tested by `AdapterTests`
+  ("header values go out as UTF-8 and without control characters").
 
 ## License
 

@@ -774,10 +774,12 @@ type Ctx internal (kit: Kit, request: Request, pathParams: ParamMap, queryParams
             match headers with
             | null -> ()
             | preset ->
+                // Every line of a header the response doesn't set itself (Rust stops after the first).
+                let missing = ResizeArray<int>()
                 for i in 0 .. preset.Count - 1 do
-                    let name = preset.NameAt i
-                    if not (response.Headers.Contains name) then
-                        response.Headers.Append(name, preset.ValueAt i)
+                    if not (response.Headers.Contains(preset.NameAt i)) then missing.Add i
+                for i in missing do
+                    response.Headers.Append(preset.NameAt i, preset.ValueAt i)
             match this.VerifySameOriginRequest response with
             | Error error -> this.ErrorResponse error
             | Ok() ->

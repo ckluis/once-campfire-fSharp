@@ -120,6 +120,32 @@ module Adapter =
         let length = http.Request.ContentLength
         if length.HasValue then ValueSome length.Value else ValueNone
 
+    /// Whether bytes may follow the headers: HTTP/1 announces a body with `Content-Length` or
+    /// `Transfer-Encoding`, but HTTP/2 can send one with neither, so the host says.
+    let private canHaveBody (http: HttpContext) : bool =
+        match http.Features.Get<IHttpRequestBodyDetectionFeature>() with
+        | null ->
+            let announced = http.Request.ContentLength
+            (announced.HasValue && announced.Value > 0L) || http.Request.Headers.ContainsKey "transfer-encoding"
+        | feature -> feature.CanHaveBody
+
+    /// Read and parse the request's body. One with nothing to read is not read (an empty multipart
+    /// body is still a malformed one).
+    let private parseBody (kit: Kit) (http: HttpContext) (originalMethod: string) : Task<Result<ParsedBody, BodyError>> =
+        let multipart =
+            match RequestHeaders.get http.Request.Headers Hdr.ContentType with
+            | null -> false
+            | ct -> ct.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase)
+        if canHaveBody http || multipart then
+            RequestBody.parse originalMethod http.Request.Headers (contentLength http) http.Request.Body kit.Config.MaxBodyBytes
+        else
+            Task.FromResult(
+                Ok
+                    { Raw = ReadOnlyMemory.Empty
+                      Params = Ok(ParamMap())
+                      Files = Array.empty }
+            )
+
     // --- writing responses ------------------------------------------------------------------------
 
     /// Delete the files a request's multipart body spooled.
@@ -373,7 +399,7 @@ module Adapter =
                 let mutable refused = ValueNone
                 let mutable fromParam: string | null = null
                 if formData then
-                    match! RequestBody.parse "POST" http.Request.Headers (contentLength http) http.Request.Body kit.Config.MaxBodyBytes with
+                    match! parseBody kit http "POST" with
                     | Error error -> refused <- ValueSome(Response(BodyError.status error))
                     | Ok parsed ->
                         state.Parsed <- ValueSome parsed
@@ -437,12 +463,6 @@ module Adapter =
     let private actionPanicked (e: exn) : Error =
         Internal(Exception($"action panicked: {e.Message}", e))
 
-    /// What a request with no body carries: nothing, and no params.
-    let private noBody () : ParsedBody =
-        { Raw = ReadOnlyMemory.Empty
-          Params = Ok(ParamMap())
-          Files = Array.empty }
-
     /// Run one action for one request, as an `HttpContext -> Task` Falco and ASP.NET Core can route to.
     let dispatch (kit: Kit) (action: ActionFn) (http: HttpContext) : Task =
         task {
@@ -464,19 +484,8 @@ module Adapter =
             match state.Parsed with
             | ValueSome already -> parsed <- Ok already
             | ValueNone ->
-                // No `Content-Length` and no `Transfer-Encoding` is no body, so there is nothing to read
-                // (an empty multipart body is still a malformed one).
-                let announced = http.Request.ContentLength
-                let hasBody = (announced.HasValue && announced.Value > 0L) || http.Request.Headers.ContainsKey "transfer-encoding"
-                let multipart =
-                    match RequestHeaders.get http.Request.Headers Hdr.ContentType with
-                    | null -> false
-                    | ct -> ct.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase)
-                if hasBody || multipart then
-                    let! read = RequestBody.parse originalMethod http.Request.Headers (contentLength http) http.Request.Body kit.Config.MaxBodyBytes
-                    parsed <- read
-                else
-                    parsed <- Ok(noBody ())
+                let! read = parseBody kit http originalMethod
+                parsed <- read
             let struct (raw, bodyParams, bodyError) =
                 match parsed with
                 | Ok body ->

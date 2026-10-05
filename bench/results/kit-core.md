@@ -58,4 +58,4 @@ request so that this doesn't regress, and prints the numbers.
 
     bench/kit/run both --secs 8     # needs wrk, the .NET SDK, and mise's rust (the Rust build is offline)
     bench/kit/run fsharp            # one side only
-    dotnet bench/kit/... micro      # the cookie and hash building blocks (see bench/kit/fsharp/Program.fs)
+    target/kit-bench/fsharp/KitBench micro   # the cookie and hash building blocks, after a run of the above
