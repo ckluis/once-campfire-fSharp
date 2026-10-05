@@ -1,9 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <Compile Include="Library.fs" />
+    <Compile Include="Html5ever/Types.fs" />
+    <Compile Include="Html5ever/NamedEntities.fs" />
+    <Compile Include="Html5ever/Tokenizer.fs" />
+    <Compile Include="Html5ever/TreeBuilder.fs" />
+    <Compile Include="Dom.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
     <ProjectReference Include="../Campfire.Ruby/Campfire.Ruby.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.RichText.Tests" />
   </ItemGroup>
 </Project>

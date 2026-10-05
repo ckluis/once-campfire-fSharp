@@ -41,7 +41,7 @@ Library mapping:
 | axum + hyper + tokio | ASP.NET Core Kestrel + Falco routing; controllers take our `Ctx`, never `HttpContext` |
 | rusqlite (writer task + reader pool) | Microsoft.Data.Sqlite, same topology |
 | askama templates | one F# render function per ERB file writing UTF-8 into pooled buffers |
-| html5ever (Gumbo limits) | AngleSharp, with Rust's corpus and hardening tests deciding parse equivalence |
+| html5ever (Gumbo limits) | a port of the vendored html5ever's tokenizer and tree builder (`Campfire.RichText/Html5ever`): AngleSharp can't stop at Gumbo's tree depth limit while it builds the tree (its tree builder is internal) or count a tag's attributes as the tokenizer reads them. Rust's corpus and hardening tests decide parse equivalence |
 | hmac/sha/pbkdf2/aes-gcm | System.Security.Cryptography |
 | bcrypt | BCrypt.Net-Next |
 | libvips FFI | NetVips over the same libvips 8.16.1 build |
