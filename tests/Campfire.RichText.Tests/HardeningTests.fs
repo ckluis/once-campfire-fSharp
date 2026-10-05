@@ -5,7 +5,6 @@
 module Campfire.RichText.Tests.HardeningTests
 
 open System
-open System.Diagnostics
 open Xunit
 open Campfire.RichText
 open Campfire.RichText.Tests.Support
@@ -14,7 +13,7 @@ let private ctx = render (NoRecords()) (Some "once.campfire.test")
 
 let private presentation (body: string) : string = okR (ActionText.messagePresentation body ctx)
 
-let private assertQuick (started: Stopwatch) (what: string) =
+let private assertQuick (started: CpuTimer) (what: string) =
     // Generous enough for a debug build; release takes a few milliseconds.
     let limit = bound (TimeSpan.FromSeconds 5.0) (TimeSpan.FromSeconds 1.0)
     Assert.True(started.Elapsed < limit, $"{what} took {started.Elapsed}")
@@ -65,10 +64,17 @@ let ``urls_in_text_are_still_linked`` () =
 
 // --- Bounded work ----------------------------------------------------------------------------------
 
+/// Runs the pipeline once on something small, so that compiling it isn't part of what a bound times.
+let private warmUp () =
+    presentation "<p>see http://example.com and <b>me@example.com</b></p><table><tr><td>x</td></tr></table>" |> ignore
+    ActionText.toPlainText "<p>x</p>" ctx |> ignore
+    ActionText.messagePresentation (String.replicate 401 "<div>") ctx |> ignore
+
 [<Fact>]
 let ``many_bare_domains_autolink_in_linear_time`` () =
     let body = String.replicate (64 * 1024 / 16) "<p>www.a.com</p>"
-    let started = Stopwatch.StartNew()
+    warmUp ()
+    let started = CpuTimer()
     let html = presentation body
     assertQuick started "autolinking 64 KB of bare domains"
     Assert.Equal(64 * 1024 / 16, countOf html "<a target=\"_blank\" href=\"http://www.a.com\">")
@@ -91,14 +97,16 @@ let ``content_attachments_render_eight_levels_deep`` () =
 let ``deeply_nested_content_attachments_render_quickly`` () =
     let body = nestedContentAttachments 200 (String('x', 1000))
     Assert.True(body.Length > 200_000)
-    let started = Stopwatch.StartNew()
+    warmUp ()
+    let started = CpuTimer()
     presentation body |> ignore
     assertQuick started "rendering 200 nested content attachments"
 
 /// Both the page and the search index (which is written inside the database transaction) have to
 /// refuse `body`.
 let private assertRefusedQuickly (body: string) (what: string) =
-    let started = Stopwatch.StartNew()
+    warmUp ()
+    let started = CpuTimer()
     Assert.True(isError (ActionText.messagePresentation body ctx), $"{what} rendered")
     Assert.True(isError (ActionText.toPlainText body ctx), $"{what} was indexed")
     assertQuick started what
@@ -122,7 +130,8 @@ let ``the_rest_of_a_body_is_not_read_once_it_is_too_deep`` () =
         [ "tags", tooDeep + String.replicate (rest.Length / 6) "<a><b>"
           "a comment", tooDeep + "<!--" + rest
           "a tag name", tooDeep + "<" + rest ] do
-        let started = Stopwatch.StartNew()
+        warmUp ()
+        let started = CpuTimer()
         Assert.True(isError (ActionText.messagePresentation body ctx) && isError (ActionText.toPlainText body ctx))
         // Copying the body to parse it is all that's left
         let limit = bound (TimeSpan.FromSeconds 1.0) (TimeSpan.FromMilliseconds 100.0)
@@ -144,7 +153,8 @@ let ``html_tags_in_the_body_parse_in_linear_time`` () =
               $"<html {String.Join(' ', names)}>" ]
         |> String.concat ""
     Assert.True(body.Length > 500_000)
-    let started = Stopwatch.StartNew()
+    warmUp ()
+    let started = CpuTimer()
     Assert.Equal("", okR (ActionText.toPlainText body ctx))
     Assert.Equal(presentation "", presentation body)
     assertQuick started "550 KB of <html> tags, each with 400 new attributes"
@@ -154,7 +164,8 @@ let ``elements_misplaced_in_a_table_parse_in_linear_time`` () =
     // Foster parenting inserts each of them before the table. Finding the table from the front of
     // its parent's children made that quadratic: 480 KB of them took 1.5 seconds.
     let body = "<table>" + String.replicate 200_000 "<br>"
-    let started = Stopwatch.StartNew()
+    warmUp ()
+    let started = CpuTimer()
     Assert.True(not (isError (ActionText.toPlainText body ctx)))
     assertQuick started "800 KB of <br>s in a table"
 

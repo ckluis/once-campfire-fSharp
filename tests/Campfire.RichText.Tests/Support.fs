@@ -2,6 +2,7 @@
 module Campfire.RichText.Tests.Support
 
 open System
+open System.Diagnostics
 open Campfire.RichText
 
 /// The value of an `Ok`, or a failed assertion saying what the `Error` was.
@@ -55,3 +56,14 @@ let private isDebugBuild =
 
 /// The bound a timing assertion allows: generous in a debug build, tight in release.
 let bound (debug: TimeSpan) (release: TimeSpan) : TimeSpan = if isDebugBuild then debug else release
+
+/// The tests don't run in parallel in this assembly: the timing tests below measure this process's
+/// CPU time, which is only theirs when nothing else in it is running (and, unlike the clock, isn't
+/// stretched when other test assemblies share the machine).
+[<assembly: Xunit.CollectionBehavior(DisableTestParallelization = true)>]
+do ()
+
+/// How much CPU time the process has used since the timer started.
+type CpuTimer() =
+    let started = Process.GetCurrentProcess().TotalProcessorTime
+    member _.Elapsed : TimeSpan = Process.GetCurrentProcess().TotalProcessorTime - started
