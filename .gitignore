@@ -11,3 +11,6 @@ parity/node_modules/
 parity/out/
 bench/loadgen/target/
 target/
+bench/kit/*/bin/
+bench/kit/*/obj/
+bench/kit/rust/Cargo.lock

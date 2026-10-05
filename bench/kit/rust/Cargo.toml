@@ -1,0 +1,20 @@
+[package]
+name = "kitbench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Its own workspace: this crate only borrows rust/crates/kit (unmodified) as a dependency.
+[workspace]
+
+[dependencies]
+campfire_kit = { path = "../../../rust/crates/kit" }
+rails_compat = { path = "../../../rust/crates/rails_compat" }
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
+tokio = { version = "1", features = ["full"] }
+bytes = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
