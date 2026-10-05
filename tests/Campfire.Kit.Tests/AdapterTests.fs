@@ -363,3 +363,37 @@ let ``an http2 request body without a content length is read`` () =
         let! text = response.Content.ReadAsStringAsync()
         Assert.Equal("get", text)
     }
+
+
+[<Fact>]
+let ``a post that _method turned into a head sends no body`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            // The wire says POST, so the host would hold the response to its Content-Length: with the body
+            // dropped as for any HEAD, there is none.
+            let! reply = app.Send((post "/page").With("content-type", "application/x-www-form-urlencoded").WithBody "_method=head")
+            Assert.Equal(200, reply.Status)
+            Assert.Empty reply.Body
+            // The host says "0" itself where the response had no length: the framing holds.
+            Assert.True((reply.Header "content-length" = None || reply.Header "content-length" = Some "0"))
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``a header with anything but visible ascii in it is no header`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            // As `HeaderValue::to_str` sees it in Rust, a value with a byte from 0x80 isn't there at all, so
+            // the request id is made, not taken from it.
+            let! reply = app.Send((get "/page").With("x-request-id", "café-123"))
+            Assert.Equal(36, (reply.Header "x-request-id").Value.Length)
+            let! sane = app.Send((get "/page").With("x-request-id", "cafe-123"))
+            Assert.Equal(Some "cafe-123", sane.Header "x-request-id")
+        finally
+            File.Delete path
+    }

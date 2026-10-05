@@ -271,8 +271,12 @@ module Adapter =
                 | _ -> ()
                 http.Response.StatusCode <- Status.InternalServerError
             else
+                // A POST that `_method` turned into a HEAD is still a POST on the wire, whose body the host
+                // expects to be as long as the response says: with no body written, it says nothing.
+                if head && not (isNull state.OriginalMethod) then response.Headers.Remove Hdr.ContentLength
                 // The length the host will send: known for a buffer, parts and a file.
                 match response.Body with
+                | _ when head && not (isNull state.OriginalMethod) -> ()
                 | Body.Bytes bytes -> response.Headers.Insert(Hdr.ContentLength, string bytes.Length)
                 | Body.Pooled pooled -> response.Headers.Insert(Hdr.ContentLength, string pooled.Length)
                 | Body.Parts parts -> response.Headers.Insert(Hdr.ContentLength, string parts.BodyLength)

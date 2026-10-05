@@ -356,15 +356,18 @@ let ``multipart uploads with method override`` () =
     task {
         use! app = defaultApp ()
         let boundary = "----campfire"
+        // Unique to this run, so that finding it on disk afterwards means this request left it there.
+        let content = "PNGDATA-" + Guid.NewGuid().ToString("N")
         let body =
             $"--{boundary}\r\nContent-Disposition: form-data; name=\"_method\"\r\n\r\npatch\r\n\
               --{boundary}\r\nContent-Disposition: form-data; name=\"user[name]\"\r\n\r\nJo\r\n\
-              --{boundary}\r\nContent-Disposition: form-data; name=\"user[avatar]\"; filename=\"me.png\"\r\nContent-Type: image/png\r\n\r\nPNGDATA\r\n\
+              --{boundary}\r\nContent-Disposition: form-data; name=\"user[avatar]\"; filename=\"me.png\"\r\nContent-Type: image/png\r\n\r\n{content}\r\n\
               --{boundary}--\r\n"
         let! reply = app.Send((post "/upload").With("content-type", $"multipart/form-data; boundary={boundary}").WithBody body)
-        Assert.Equal(json """{"method": "PATCH", "name": "Jo", "filename": "me.png", "content": "PNGDATA"}""", reply.Json)
+        let expected = """{"method": "PATCH", "name": "Jo", "filename": "me.png", "content": "%CONTENT%"}""".Replace("%CONTENT%", content)
+        Assert.Equal(json expected, reply.Json)
         // The spooled file is gone with the request.
-        let spooled = Directory.GetFiles(Path.GetTempPath(), "RackMultipart*") |> Array.filter (fun f -> File.ReadAllText f = "PNGDATA")
+        let spooled = Directory.GetFiles(Path.GetTempPath(), "RackMultipart*") |> Array.filter (fun f -> (try File.ReadAllText f = content with _ -> false))
         Assert.Empty spooled
     }
 

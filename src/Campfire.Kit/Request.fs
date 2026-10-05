@@ -117,10 +117,22 @@ module ProxyConfig =
           AssumeSsl = false }
 
 module RequestHeaders =
-    /// The first value of `name`, null when there is none.
+    /// `HeaderValue::to_str`: visible ASCII (and tab) only. A value with anything else (a byte
+    /// from 0x80, a control character) is not a header to the Rust code, nor to this.
+    let private isVisible (value: string) : bool =
+        not (value.AsSpan().ContainsAnyExceptInRange(' ', '~'))
+        || (let mutable ok = true
+            for c in value do
+                if (c < ' ' && c <> '\t') || c > '~' then ok <- false
+            ok)
+
+    /// The first value of `name`, null when there is none (or when it isn't visible ASCII).
     let get (headers: IHeaderDictionary) (name: string) : string | null =
         match headers.TryGetValue name with
-        | true, values when values.Count > 0 -> values[0]
+        | true, values when values.Count > 0 ->
+            match values[0] with
+            | null -> null
+            | value -> if isVisible value then value else null
         | _ -> null
 
     /// The `type/subtype` part of `Content-Type`, lowercased (`Rack::MediaType.type`).
