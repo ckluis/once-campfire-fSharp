@@ -14,11 +14,19 @@ module CacheCosts =
 /// A map in two generations, bounded by what its entries cost: reading an old entry promotes it,
 /// and when the young generation costs more than half the budget it becomes the old one (dropping
 /// the previous old one). Bounded, and what pages keep using stays. Not thread-safe: callers lock.
+///
+/// `storedKey` is the key an entry is kept under when a lookup promotes it: for keys that borrow
+/// their bytes (a lookup by a span of a page's text) it hands back the copy the entry owns, where
+/// Rust's `remove_entry` returns the stored key.
 [<Sealed>]
-type Generations<'K, 'V when 'K: equality and 'K: not null>(budget: int, cost: 'K -> 'V -> int, comparer: IEqualityComparer<'K>) =
+type Generations<'K, 'V when 'K: equality and 'K: not null>
+    (budget: int, cost: 'K -> 'V -> int, comparer: IEqualityComparer<'K>, storedKey: 'K -> 'V -> 'K) =
     let mutable young = Dictionary<'K, 'V>(comparer)
     let mutable old = Dictionary<'K, 'V>(comparer)
     let mutable youngCost = 0
+
+    new(budget: int, cost: 'K -> 'V -> int, comparer: IEqualityComparer<'K>) =
+        Generations<'K, 'V>(budget, cost, comparer, (fun key _ -> key))
 
     new(budget: int, cost: 'K -> 'V -> int) = Generations<'K, 'V>(budget, cost, EqualityComparer<'K>.Default)
 
@@ -53,6 +61,6 @@ type Generations<'K, 'V when 'K: equality and 'K: not null>(budget: int, cost: '
             | true, value ->
                 old.Remove key |> ignore
                 let found = read value
-                this.Insert(key, value)
+                this.Insert(storedKey key value, value)
                 ValueSome found
             | _ -> ValueNone
