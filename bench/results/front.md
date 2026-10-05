@@ -46,7 +46,30 @@ What the front keeps per request is its response object, the cache key, the forw
 the `OnStarting` callback; the cache's lookup takes no lock, `Variant` is built only when a stored response
 or a cacheable one needs it, and `X-Request-Start`'s text is shared by every request in a millisecond.
 
+## Page parts: splice, ETag and gzip of a page of cached fragments
+
+`FrontBench micro` and `splice` (`bench/front/rust/src/bin/splice.rs`) time what a page of 40 cached fragments
+(10 KB each, a 15 KB layout before them and 1.4 KB after, 424 KB in all) costs a request once its gzip pieces
+are stored: `PageParts::splice`, the ETag and the gzip member, on a fresh copy of the layout text each time
+(as a template renders it). Single thread, steady state, microseconds per page:
+
+| | Campfire.Kit | campfire_kit |
+|---|---|---|
+| splice (text hashed or recognised, parts built) | 1.12 | 1.28 |
+| ETag (SHA-256 over the parts' digests) | 0.99 | 0.98 |
+| gzip member from stored pieces (CRCs combined) | 1.17 | 1.45 |
+| the whole page, with the copy of the text | 3.92 | 3.99-4.10 |
+
+What got it there, from 5.5 us for the first version: the gzip step (1.58 us then) combines the parts' CRCs by
+carry-less multiplication and Barrett's reduction where zlib's `multmodp` is a 32-step loop for each part;
+the splice step (2.27 us then) recognises the layout text by comparing it with the text in a slot picked by a
+few of its bytes (hashing 15 KB takes 0.6 us even on the CRC-32C instructions, and the compare, 0.25 us, is
+what keeps a collision from handing back another text's pieces), and builds the parts and gaps into arrays of
+their exact size.
+
 ## Reproduce
 
     bench/front/run both --secs 6     # needs wrk, the .NET SDK, and mise's rust (the Rust build is offline)
     bench/front/run fsharp            # one side only
+    target/front-bench/fsharp/FrontBench micro 300000   # the page-parts table, after a run of the above
+    target/front-bench/rust/release/splice 300000       # (cargo build --release --bin splice in bench/front/rust)

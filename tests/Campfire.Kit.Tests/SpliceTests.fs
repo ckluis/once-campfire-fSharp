@@ -345,3 +345,46 @@ let ``crcs concatenate`` () =
         let bounds = [ 0 ] @ cuts @ [ bytes.Length ]
         let crcs = bounds |> List.pairwise |> List.map (fun (a, b) -> Crc32.ofBytes (ReadOnlySpan<byte>(bytes, a, b - a))) |> Array.ofList
         Assert.Equal(Deflater.crc32Update 0u (ReadOnlySpan<byte> bytes), Crc32.concatenated (ReadOnlySpan<Crc> crcs))
+
+[<Fact>]
+let ``the carry-less multiplication agrees with the bitwise one`` () =
+    // `multiply` is the instruction version where the CPU has one, `multiplySlowly` is zlib's `multmodp`.
+    let random = Random 20261005
+    let values = Array.zeroCreate<byte> 4
+    let next () =
+        random.NextBytes values
+        BitConverter.ToUInt32(values, 0)
+    let edge = [ 0u; 1u; 0x80000000u; 0xFFFFFFFFu; 0xedb88320u; 0x40000000u ]
+    for a in edge do
+        for b in edge do
+            Assert.Equal(Crc32.multiplySlowly a b, Crc32.multiplyFast a b)
+    for _ in 1..200_000 do
+        let a, b = next (), next ()
+        Assert.Equal(Crc32.multiplySlowly a b, Crc32.multiplyFast a b)
+
+[<Fact>]
+let ``texts that hash alike are told apart`` () =
+    // The fast hash covers every byte, whatever the length: texts of every length around the lane and
+    // word steps, differing in their last byte, hash differently (a collision here would be bad luck,
+    // not a bug, but none of these should collide).
+    let hashes = System.Collections.Generic.HashSet<int>()
+    for length in [ 0; 1; 7; 8; 9; 31; 32; 33; 40; 100; 1000; 40000 ] do
+        let text = Array.init length (fun i -> byte (i * 7))
+        Assert.True(hashes.Add(TextKey.Hash(ReadOnlySpan<byte> text)))
+        if length > 0 then
+            let changed = Array.copy text
+            changed[length - 1] <- changed[length - 1] + 1uy
+            Assert.NotEqual(TextKey.Hash(ReadOnlySpan<byte> text), TextKey.Hash(ReadOnlySpan<byte> changed))
+
+[<Fact>]
+let ``texts that share a recent slot each get their own sha256`` () =
+    // The same length and the same first and last bytes, so the same slot: only a compare of the whole
+    // text tells them apart, as it must (a stored piece is found by the SHA-256).
+    let make (middle: byte) = Array.concat [ "AAAAAAAA"B; Array.create 100 middle; "BBBBBBBB"B ]
+    let one, two = make 1uy, make 2uy
+    let sha (bytes: byte[]) =
+        let hash = SHA256.HashData bytes
+        BitConverter.ToUInt64(hash, 0)
+    for _ in 1..4 do
+        Assert.Equal(sha one, (SpliceCaches.textSha (ReadOnlyMemory<byte> one)).A)
+        Assert.Equal(sha two, (SpliceCaches.textSha (ReadOnlyMemory<byte> two)).A)

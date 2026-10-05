@@ -19,6 +19,7 @@
     <Compile Include="DeflaterTests.fs" />
     <Compile Include="SpliceTests.fs" />
     <Compile Include="ServerTests.fs" />
+    <Compile Include="LoggingTests.fs" />
     <Compile Include="FrontHarness.fs" />
     <Compile Include="FrontConfigTests.fs" />
     <Compile Include="FrontCacheTests.fs" />
@@ -33,7 +34,6 @@
     <Compile Include="CtxTests.fs" />
     <Compile Include="AdapterTests.fs" />
     <Compile Include="PerfTests.fs" />
-    <Compile Include="LoggingTests.fs" />
     <Compile Include="ParamsVectorTests.fs" />
     <Compile Include="RailsVectorTests.fs" />
     <Compile Include="DifferentialTests.fs" />

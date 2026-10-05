@@ -492,3 +492,34 @@ let ``speaks h2c only when enabled`` () =
         Assert.True(refused, "HTTP/2 without H2C_ENABLED")
         do! server.Stop()
     }
+
+[<Fact>]
+let ``logs each request as thruster does`` () =
+    task {
+        let logs = LoggingTests.CapturingLogger()
+        let factory =
+            { new Microsoft.Extensions.Logging.ILoggerFactory with
+                member _.CreateLogger(_: string) = logs :> Microsoft.Extensions.Logging.ILogger
+                member _.AddProvider(_: Microsoft.Extensions.Logging.ILoggerProvider) = ()
+                member _.Dispose() = () }
+        let renders = Counter()
+        let http = freePort ()
+        let! started = tryStart [ "LOG_REQUESTS", "true" ] (testApp renders) ValueNone factory http (freePort ())
+        let server = started.Value
+        let! first = exchange server.Http (getRequest "/public?x=1" "User-Agent: probe/1\r\nAccept-Encoding: identity\r\n")
+        let! second = exchange server.Http (getRequest "/public?x=1" "User-Agent: probe/1\r\nAccept-Encoding: identity\r\nX-Forwarded-For: 203.0.113.9\r\n")
+        Assert.Equal(some "hit", second.Get "x-cache")
+        Assert.Equal(200, first.Status)
+        // The log line is written as the response ends, which can be just after the client has read it.
+        do! Task.Delay 300
+        do! server.Stop()
+        let text: string = logs.Text
+        let lines = text.Split('\n') |> Array.filter (fun l -> l.Contains "Request path=")
+        Assert.Equal(2, lines.Length)
+        let miss = lines |> Array.find (fun l -> l.Contains "cache=miss")
+        for expected in [ "path=/public"; "status=200"; "method=GET"; "req_content_length=0"; "resp_content_length=8"; "resp_content_type=text/css"; "user_agent=probe/1"; "query=x=1"; "proto=HTTP/1.1"; "remote_addr=127.0.0.1:" ] do
+            Assert.Contains(expected, miss)
+        // The client's own X-Forwarded-For is what a request is logged under, as Thruster logs it.
+        let hit = lines |> Array.find (fun l -> l.Contains "cache=hit")
+        Assert.Contains("remote_addr=203.0.113.9", hit)
+    }
