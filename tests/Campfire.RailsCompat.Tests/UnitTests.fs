@@ -118,8 +118,9 @@ let ``floats match the json gem`` () =
           1e21, "1e+21"
           1e100, "1e+100"
           Double.MaxValue, "1.7976931348623157e+308"
-          // Exact decimal ties: the json gem (and Rust's `{:e}`) take the upper digit, where .NET's
-          // "R" takes the even one. Checked against json 2.21.2 in campfire-reference:app.
+          // Exact decimal ties: Rust's `{:e}` takes the upper digit, where .NET's "R" takes the even
+          // one, and the port follows Rust. The expected values are Rust's output; they were not
+          // compared against the json gem here.
           667020902720176.25, "667020902720176.3"
           1125899906842624.25, "1125899906842624.3"
           24603114260468.0625, "24603114260468.063"

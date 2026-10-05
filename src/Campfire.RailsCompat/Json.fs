@@ -112,9 +112,9 @@ module Json =
     /// read back is replaced by the first correctly rounded length that does.
     ///
     /// Where the value is an exact tie between two candidates of that length, .NET takes the even
-    /// last digit and Rust's `{:e}` the upper one (rust/crates/ruby/src/float.rs: "Ruby's dtoa
-    /// takes the even one and Rust the upper one"), which is what the json gem writes. So the
-    /// upper candidate wins a tie, as it does in Rust.
+    /// last digit and Rust's `{:e}` the upper one (checked for `{:e}`, not for the json gem; see
+    /// rust/crates/ruby/src/float.rs: "Ruby's dtoa takes the even one and Rust the upper one").
+    /// This port takes the upper candidate on a tie so that it matches Rust's output.
     let private shortestDigits (magnitude: float) : string * int =
         let roundTrips (text: string) =
             Double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture) = magnitude
