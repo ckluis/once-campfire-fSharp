@@ -21,7 +21,10 @@
 // (with the WAL header's fsync when the next write restarts the WAL, ~12 ms here, every ~64
 // message posts), and every write queued behind it waits. Here the writer's commits only note
 // the WAL's size, and every 1,000 pages it grows wake the checkpointer, which runs the same
-// PASSIVE checkpoint while writes carry on appending to the WAL.
+// PASSIVE checkpoint while writes carry on appending to the WAL. (Rust notes the size in
+// `sqlite3_wal_hook`, which the .NET bindings don't expose. The writer connection has SQLite's
+// auto-checkpoint turned off, and the writer asks `PRAGMA wal_checkpoint(NOOP)`, which does no
+// checkpointing and takes no locks, for the size after each commit.)
 //
 // Durability is the same as Rails': `journal_mode=wal` with `synchronous=normal`, so a commit
 // doesn't fsync, and what was committed since the WAL was last synced can be lost to a power
@@ -387,7 +390,11 @@ type Database
     /// checkpointer and reader threads.
     static member Open(config: Config, env: Env) : Database =
         let conn = Pragmas.openConnection config.Path false
-        if config.Prepare then Schema.prepare conn config.Environment env.Clock |> ignore
+        try
+            if config.Prepare then Schema.prepare conn config.Environment env.Clock |> ignore
+        with _ ->
+            (conn :> IDisposable).Dispose()
+            reraise ()
         let checkpoints = Checkpoints config.Path
         // In place of the auto-checkpoint, which the writer's commits note the WAL size for instead
         // (Rust installs `sqlite3_wal_hook`, which the .NET bindings don't expose).
