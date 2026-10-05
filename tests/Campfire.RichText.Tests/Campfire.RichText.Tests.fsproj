@@ -15,6 +15,7 @@
     <Compile Include="FiltersTests.fs" />
     <Compile Include="ReferenceTests.fs" />
     <Compile Include="HardeningTests.fs" />
+    <Compile Include="CorpusResolver.fs" />
     <Compile Include="CorpusTests.fs" />
   </ItemGroup>
   <ItemGroup>

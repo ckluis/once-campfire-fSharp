@@ -81,6 +81,9 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
 - `bin/db-differential` compares `Campfire.Db` with the reference app: the fixtures and a long scenario
   loaded through Active Record against what the F# models write, the schemas, and the reference booting on
   a database F# wrote. It needs the reference image and colima; run it after changing a model or the schema.
+- `bin/richtext-differential` compares `Campfire.RichText` with the Rust crate on generated inputs: how markup
+  parses in 20 contexts, and what a body presents as, as plain text, as an editor value and for its mentions.
+  It needs mise for the Rust toolchain; run it after changing the parser, the sanitizer or the pipeline.
 - Tests that need the parity seed (`parity/.seed/default`) must skip with a message when it isn't
   built; `CAMPFIRE_REQUIRE_SEED=1` turns the skip into a failure.
 - Commit each logical unit on the current branch with a message saying what and why. Don't push.

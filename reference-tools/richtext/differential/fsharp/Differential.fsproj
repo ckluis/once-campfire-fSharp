@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../../tests/Campfire.RichText.Tests/CorpusResolver.fs" Link="CorpusResolver.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Campfire.RichText/Campfire.RichText.fsproj" />
+    <ProjectReference Include="../../../../src/Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
+    <ProjectReference Include="../../../../src/Campfire.Ruby/Campfire.Ruby.fsproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,13 @@
+# Parses and renders what the F# port is given with the Rust crate, for bin/richtext-differential to
+# compare. Not part of rust/'s workspace: the crate is a path dependency, built where it is.
+[package]
+name = "richtext-differential"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+campfire_richtext = { path = "../../../rust/crates/richtext" }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[workspace]
