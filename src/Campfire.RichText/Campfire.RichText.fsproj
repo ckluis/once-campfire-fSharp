@@ -10,6 +10,13 @@
     <Compile Include="RubyExt.fs" />
     <Compile Include="Sanitizer.fs" />
     <Compile Include="RubyUri.fs" />
+    <Compile Include="Error.fs" />
+    <Compile Include="Attachables.fs" />
+    <Compile Include="PlainText.fs" />
+    <Compile Include="Content.fs" />
+    <Compile Include="Filters.fs" />
+    <Compile Include="Autolink.fs" />
+    <Compile Include="ActionText.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />

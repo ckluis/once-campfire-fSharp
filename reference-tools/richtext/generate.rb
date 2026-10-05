@@ -1,4 +1,4 @@
-# Generates the expected outputs for crates/richtext/tests/corpus by running Campfire's real rich
+# Generates the expected outputs for tests/Campfire.RichText.Tests/corpus by running Campfire's real rich
 # text pipeline. Run inside the campfire-reference image with reference-tools/richtext/run.sh.
 #
 # For every stored body in inputs.yml it records what Rails produces for:

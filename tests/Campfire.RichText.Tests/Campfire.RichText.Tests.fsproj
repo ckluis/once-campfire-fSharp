@@ -10,6 +10,12 @@
     <Compile Include="SanitizerTests.fs" />
     <Compile Include="RubyTests.fs" />
     <Compile Include="UriTests.fs" />
+    <Compile Include="AutolinkTests.fs" />
+    <Compile Include="AttachablesTests.fs" />
+    <Compile Include="FiltersTests.fs" />
+    <Compile Include="ReferenceTests.fs" />
+    <Compile Include="HardeningTests.fs" />
+    <Compile Include="CorpusTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.RichText/Campfire.RichText.fsproj" />
