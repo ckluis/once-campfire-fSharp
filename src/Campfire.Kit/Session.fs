@@ -31,7 +31,8 @@ type SessionConfig =
       ExpireAfterYears: int voption
       HttpOnly: bool }
 
-    static member Default: SessionConfig =
+module SessionConfig =
+    let Default: SessionConfig =
         { Key = SessionConstants.SessionKey
           ExpireAfterYears = ValueSome SessionConstants.ExpireAfterYears
           HttpOnly = true }

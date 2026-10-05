@@ -75,6 +75,7 @@ module Adapter =
         | true, (:? RequestState as state) -> state
         | _ ->
             let state = RequestState(kit, http)
+            state.Ssl <- kit.Config.Proxy.AssumeSsl || RequestHeaders.schemeIsHttps http.Request.Headers http.Request.Scheme
             http.Items[stateKey] <- state
             state
 
@@ -255,16 +256,15 @@ module Adapter =
                 let mutable gzipMtime: uint32 voption = ValueNone
                 if state.Deflate then
                     let accept = RequestHeaders.get http.Request.Headers Hdr.AcceptEncoding
-                    let struct (path, query, _) = splitTarget http
-                    let target = match query with null -> path | q -> path + "?" + q
-                    match Deflater.apply accept target response appSetLength with
+                    match Deflater.apply accept response appSetLength with
                     | Unchanged -> ()
                     | Gzip mtime -> gzipMtime <- ValueSome mtime
-                    | NotAcceptable replacement ->
+                    | NotAcceptable ->
                         // The deflater answers outside the layers below it.
                         state.SkipRequestHeaders <- true
                         releaseBody response.Body
-                        response <- replacement
+                        let struct (path, query, _) = splitTarget http
+                        response <- Deflater.notAcceptable (match query with null -> path | q -> path + "?" + q)
                 copyHeaders http response
                 try
                     try
@@ -406,7 +406,6 @@ module Adapter =
                 state.Started <- Stopwatch.GetTimestamp()
                 state.RequestId <- makeRequestId (RequestHeaders.get http.Request.Headers Hdr.XRequestId)
                 let config = kit.Config
-                state.Ssl <- config.Proxy.AssumeSsl || RequestHeaders.schemeIsHttps http.Request.Headers http.Request.Scheme
                 // The kit has its own limits, answered with a 413 of its own.
                 match http.Features.Get<IHttpMaxRequestBodySizeFeature>() with
                 | null -> ()
@@ -416,7 +415,10 @@ module Adapter =
                     let response = redirectToHttps http
                     do! write kit http response (http.Request.Method = "HEAD")
                 else
-                    match! methodOverride kit state http with
+                    // Only a POST can carry `_method`, and most requests are not.
+                    let! refused =
+                        if http.Request.Method = "POST" then methodOverride kit state http else Task.FromResult ValueNone
+                    match refused with
                     | ValueSome response -> do! write kit http response (http.Request.Method = "HEAD")
                     | ValueNone -> do! next.Invoke http
             }
@@ -432,83 +434,85 @@ module Adapter =
 
     // --- running actions -----------------------------------------------------------------------------
 
-    /// A parsed value and no error, or the default (so the error page still gets a context) and the
-    /// error.
-    let private split (result: Result<'a, Error>) (fallback: unit -> 'a) : struct ('a * Error voption) =
-        match result with
-        | Ok value -> struct (value, ValueNone)
-        | Error error -> struct (fallback (), ValueSome error)
-
     let private actionPanicked (e: exn) : Error =
         Internal(Exception($"action panicked: {e.Message}", e))
+
+    /// What a request with no body carries: nothing, and no params.
+    let private noBody () : ParsedBody =
+        { Raw = ReadOnlyMemory.Empty
+          Params = Ok(ParamMap())
+          Files = Array.empty }
 
     /// Run one action for one request, as an `HttpContext -> Task` Falco and ASP.NET Core can route to.
     let dispatch (kit: Kit) (action: ActionFn) (http: HttpContext) : Task =
         task {
             let state = stateOf kit http
-            let originalMethod = match state.OriginalMethod with null -> http.Request.Method | m -> m
-            let head = http.Request.Method = "HEAD"
-            let pathParams =
-                let pars = ParamMap()
-                for kv in http.Request.RouteValues do
+            let meth = http.Request.Method
+            let originalMethod = match state.OriginalMethod with null -> meth | m -> m
+            let head = String.Equals(meth, "HEAD", StringComparison.Ordinal)
+            let pathParams = ParamMap()
+            let routeValues = http.Request.RouteValues
+            if routeValues.Count > 0 then
+                for kv in routeValues do
                     match kv.Value with
                     | null -> ()
                     | value ->
                         match Convert.ToString(value, Globalization.CultureInfo.InvariantCulture) with
                         | null -> ()
-                        | text -> pars.Insert(kv.Key, Param.Str text)
-                pars
-            let! parsed =
-                task {
-                    match state.Parsed with
-                    | ValueSome parsed -> return Ok parsed
-                    | ValueNone ->
-                        return!
-                            RequestBody.parse originalMethod http.Request.Headers (contentLength http) http.Request.Body kit.Config.MaxBodyBytes
-                }
+                        | text -> pathParams.Insert(kv.Key, Param.Str text)
+            let mutable parsed: Result<ParsedBody, BodyError> = Unchecked.defaultof<_>
+            match state.Parsed with
+            | ValueSome already -> parsed <- Ok already
+            | ValueNone ->
+                // No `Content-Length` and no `Transfer-Encoding` is no body, so there is nothing to read
+                // (an empty multipart body is still a malformed one).
+                let announced = http.Request.ContentLength
+                let hasBody = (announced.HasValue && announced.Value > 0L) || http.Request.Headers.ContainsKey "transfer-encoding"
+                let multipart =
+                    match RequestHeaders.get http.Request.Headers Hdr.ContentType with
+                    | null -> false
+                    | ct -> ct.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase)
+                if hasBody || multipart then
+                    let! read = RequestBody.parse originalMethod http.Request.Headers (contentLength http) http.Request.Body kit.Config.MaxBodyBytes
+                    parsed <- read
+                else
+                    parsed <- Ok(noBody ())
             let struct (raw, bodyParams, bodyError) =
                 match parsed with
-                | Ok parsed ->
-                    match parsed.Params with
-                    | Ok pars -> struct (parsed.Raw, pars, ValueNone)
-                    | Error e -> struct (parsed.Raw, ParamMap(), ValueSome(Error.ofParamError e))
+                | Ok body ->
+                    match body.Params with
+                    | Ok pars -> struct (body.Raw, pars, ValueNone)
+                    | Error e -> struct (body.Raw, ParamMap(), ValueSome(Error.ofParamError e))
                 | Error error -> struct (ReadOnlyMemory<byte>.Empty, ParamMap(), ValueSome(Status(BodyError.status error)))
             let struct (path, query, authority) = splitTarget http
             let request =
-                Request(
-                    http.Request.Method,
-                    originalMethod,
-                    path,
-                    query,
-                    authority,
-                    http.Request.Scheme,
-                    http.Request.Headers,
-                    peerOf http,
-                    raw,
-                    kit.Config.Proxy
-                )
+                Request(meth, originalMethod, path, query, authority, state.Ssl, http.Request.Headers, peerOf http, raw, kit.Config.Proxy)
+            request.RequestId <- state.RequestId
             let struct (queryParams, queryError) =
-                split (Params.fromQueryString request.QueryString |> Result.mapError Error.ofParamError) ParamMap
+                if request.QueryString.Length = 0 then
+                    struct (ParamMap(), ValueNone)
+                else
+                    match Params.fromQueryString request.QueryString with
+                    | Ok pars -> struct (pars, ValueNone)
+                    | Error e -> struct (ParamMap(), ValueSome(Error.ofParamError e))
             let cookies = CookieJar(kit.Secrets, kit.Clock)
             for header in http.Request.Headers.Cookie do
                 match header with
                 | null -> ()
                 | header -> cookies.AddHeader header
-            request.RequestId <- state.RequestId
             let ctx = Ctx(kit, request, pathParams, queryParams, bodyParams, cookies)
             let failure = if queryError.IsSome then queryError else bodyError
-            let! result =
-                task {
-                    match failure with
-                    | ValueSome error -> return Error error
-                    | ValueNone ->
-                        // A throwing action is an exception like any other: Rails' `ShowExceptions` answers
-                        // 500 with `public/500.html`, where an unwinding handler would drop the connection.
-                        try
-                            return! action ctx
-                        with e ->
-                            return Error(actionPanicked e)
-                }
+            let mutable result: Result<Response, Error> = Unchecked.defaultof<_>
+            match failure with
+            | ValueSome error -> result <- Error error
+            | ValueNone ->
+                // A throwing action is an exception like any other: Rails' `ShowExceptions` answers
+                // 500 with `public/500.html`, where an unwinding handler would drop the connection.
+                try
+                    let! produced = action ctx
+                    result <- produced
+                with e ->
+                    result <- Error(actionPanicked e)
             let response =
                 try
                     ctx.Finish result
@@ -517,7 +521,9 @@ module Adapter =
             try
                 do! write kit http response head
             finally
-                cleanUp (match parsed with Ok p -> ValueSome p | Error _ -> ValueNone)
+                match parsed with
+                | Ok body when body.Files.Length > 0 -> cleanUp (ValueSome body)
+                | _ -> ()
         }
         :> Task
 

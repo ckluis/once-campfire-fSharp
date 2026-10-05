@@ -25,8 +25,8 @@ type Deflated =
     /// Gzipped with this modification time: the headers already say so, and the body goes out as a
     /// gzip member without a length.
     | Gzip of mtime: uint32
-    /// The client accepts nothing the app can send: this 406 replaces the response.
-    | NotAcceptable of Response
+    /// The client accepts nothing the app can send: a 406 (`Deflater.notAcceptable`) replaces the response.
+    | NotAcceptable
 
 module Deflater =
     /// A bound on the bytes of kept gzip members (a sidebar's is ~6 KB).
@@ -271,21 +271,47 @@ module Deflater =
 
     // --- the middleware ----------------------------------------------------------------------------
 
+    /// The encodings a client has asked for, as `select_best_encoding` picks among them. Clients send a
+    /// handful of distinct `Accept-Encoding` values, so each is worked out once (up to a bound, so that a
+    /// client inventing values can't grow it).
+    let private choices = System.Collections.Concurrent.ConcurrentDictionary<string, string voption>(StringComparer.Ordinal)
+
+    let private chosenEncoding (acceptEncoding: string | null) : string voption =
+        let choose (accept: string) = selectBestEncoding [ "gzip"; "identity" ] (parseAcceptEncoding accept)
+        match acceptEncoding with
+        | null
+        | "" -> ValueSome "identity"
+        | accept ->
+            match choices.TryGetValue accept with
+            | true, choice -> choice
+            | _ ->
+                let choice = choose accept
+                if choices.Count < 512 then choices.TryAdd(accept, choice) |> ignore
+                choice
+
+    /// The 406 `Rack::Deflater` answers with for the request to `path` (its path and query).
+    let notAcceptable (path: string) : Response =
+        let message = $"An acceptable encoding for the requested resource {path} could not be found."
+        let replacement = Response(Status.NotAcceptable).ContentType("text/plain").SetBody message
+        replacement.Headers.Insert(Hdr.ContentLength, string message.Length)
+        replacement
+
     /// `Rack::Deflater`: decide what to do with `response` for a request with this
-    /// `Accept-Encoding`, updating its headers. `path` is the request's path and query, for the 406
-    /// message; `appSetLength` is whether the app itself set `Content-Length` (see `shouldDeflate`).
-    let apply (acceptEncoding: string | null) (path: string) (response: Response) (appSetLength: bool) : Deflated =
+    /// `Accept-Encoding`, updating its headers. `appSetLength` is whether the app itself set
+    /// `Content-Length` (see `shouldDeflate`).
+    let apply (acceptEncoding: string | null) (response: Response) (appSetLength: bool) : Deflated =
         if not (shouldDeflate response appSetLength) then
             Unchanged
         else
-            let accept = match acceptEncoding with null -> "" | a -> a
-            let encoding = selectBestEncoding [ "gzip"; "identity" ] (parseAcceptEncoding accept)
-            let varyValues =
-                response.Headers.GetAll Hdr.Vary
-                |> List.collect (fun v -> v.Split ',' |> Array.map (fun t -> t.Trim()) |> List.ofArray)
-            if not (varyValues |> List.exists (fun v -> v = "*" || v.Equals("accept-encoding", StringComparison.OrdinalIgnoreCase))) then
-                let existing = if response.Headers.Contains Hdr.Vary then varyValues else []
-                response.Headers.Insert(Hdr.Vary, String.Join(",", existing @ [ "Accept-Encoding" ]))
+            let encoding = chosenEncoding acceptEncoding
+            if not (response.Headers.Contains Hdr.Vary) then
+                response.Headers.Append(Hdr.Vary, "Accept-Encoding")
+            else
+                let varyValues =
+                    response.Headers.GetAll Hdr.Vary
+                    |> List.collect (fun v -> v.Split ',' |> Array.map (fun t -> t.Trim()) |> List.ofArray)
+                if not (varyValues |> List.exists (fun v -> v = "*" || v.Equals("accept-encoding", StringComparison.OrdinalIgnoreCase))) then
+                    response.Headers.Insert(Hdr.Vary, String.Join(",", varyValues @ [ "Accept-Encoding" ]))
             match encoding with
             | ValueSome "gzip" ->
                 let mtime =
@@ -299,8 +325,4 @@ module Deflater =
                 response.Headers.Remove Hdr.ContentLength
                 Gzip mtime
             | ValueSome _ -> Unchanged
-            | ValueNone ->
-                let message = $"An acceptable encoding for the requested resource {path} could not be found."
-                let replacement = Response(Status.NotAcceptable).ContentType("text/plain").SetBody message
-                replacement.Headers.Insert(Hdr.ContentLength, string message.Length)
-                NotAcceptable replacement
+            | ValueNone -> NotAcceptable

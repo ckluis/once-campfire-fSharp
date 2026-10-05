@@ -25,7 +25,8 @@ type Redirect =
         AllowOtherHost: bool
     }
 
-    static member Default: Redirect =
+module Redirect =
+    let Default: Redirect =
         { Status = ValueNone
           Notice = null
           Alert = null
@@ -43,14 +44,16 @@ type Freshness =
         Template: string | null
     }
 
-    static member Default: Freshness =
+module Freshness =
+    let Default: Freshness =
         { Etag = null
           StrongEtag = null
           LastModified = ValueNone
           Public = false
           Template = null }
 
-    static member OfEtag(validator: string) : Freshness = { Freshness.Default with Etag = validator }
+    /// A weak validator, as `fresh_when(record)` makes.
+    let OfEtag (validator: string) : Freshness = { Default with Etag = validator }
 
 module private CtxHelpers =
     /// `request.fresh?(response)` with `strict_freshness` (the 8.0 default), which `fresh_when` and
@@ -189,7 +192,9 @@ type Ctx internal (kit: Kit, request: Request, pathParams: ParamMap, queryParams
         merged.Merge pathParams
         merged
 
-    let session = Session(kit.Config.Session)
+    // Most requests never look at the session, so it exists once they do.
+    let mutable session: Session | null = null
+    let mutable headers: HeaderMap = null
     let mutable flash: Flash | null = null
     let mutable extensions: Dictionary<Type, objnull> | null = null
     let mutable markedForSameOriginVerification = false
@@ -197,7 +202,15 @@ type Ctx internal (kit: Kit, request: Request, pathParams: ParamMap, queryParams
     let mutable renderedFormat: Format voption = ValueNone
     let mutable live = false
 
-    member val Headers: HeaderMap = HeaderMap()
+    /// Response headers set before the response exists (e.g. `X-Version` in a before-action). Merged
+    /// into the final response without overriding what it already sets.
+    member _.Headers: HeaderMap =
+        match headers with
+        | null ->
+            let created = HeaderMap()
+            headers <- created
+            created
+        | existing -> existing
 
     /// `response.cache_control`, applied to the final response.
     member val CacheControl: CacheControl = CacheControl.Empty with get, set
@@ -276,12 +289,20 @@ type Ctx internal (kit: Kit, request: Request, pathParams: ParamMap, queryParams
 
     // --- Session and flash ---------------------------------------------------------------------
 
+    member private _.SessionObject: Session =
+        match session with
+        | null ->
+            let created = Session(kit.Config.Session)
+            session <- created
+            created
+        | existing -> existing
+
     /// `session`, loaded from the cookie on first use.
-    member _.Session() : Session = session.Load cookies
+    member this.Session() : Session = this.SessionObject.Load cookies
 
     /// `reset_session`: new session id, no data, no flash.
-    member _.ResetSession() : unit =
-        session.Reset()
+    member this.ResetSession() : unit =
+        this.SessionObject.Reset()
         flash <- null
 
     /// `flash`, loaded from the session on first use.
@@ -680,9 +701,14 @@ type Ctx internal (kit: Kit, request: Request, pathParams: ParamMap, queryParams
                 match pending.ToSessionValue() with
                 | ValueSome value -> this.Session().Insert("flash", value)
                 | ValueNone -> this.Session().Insert("flash", Value.Null)
-        if session.IsLoaded && session.ContainsKey "flash" && (session.Get "flash").IsNone then
-            session.Remove "flash" |> ignore
-        match session.Commit(cookies, this.Now()) with
+        let committed =
+            match session with
+            | null -> Ok()
+            | session ->
+                if session.IsLoaded && session.ContainsKey "flash" && (session.Get "flash").IsNone then
+                    session.Remove "flash" |> ignore
+                session.Commit(cookies, this.Now())
+        match committed with
         | Error e -> Error e
         | Ok() ->
             if cookies.HasChanges then
@@ -745,10 +771,13 @@ type Ctx internal (kit: Kit, request: Request, pathParams: ParamMap, queryParams
             | Error error -> this.ErrorResponse error
             | Ok _ -> failwith "unreachable"
         | ValueSome response ->
-            for i in 0 .. this.Headers.Count - 1 do
-                let name = this.Headers.NameAt i
-                if not (response.Headers.Contains name) then
-                    response.Headers.Append(name, this.Headers.ValueAt i)
+            match headers with
+            | null -> ()
+            | preset ->
+                for i in 0 .. preset.Count - 1 do
+                    let name = preset.NameAt i
+                    if not (response.Headers.Contains name) then
+                        response.Headers.Append(name, preset.ValueAt i)
             match this.VerifySameOriginRequest response with
             | Error error -> this.ErrorResponse error
             | Ok() ->

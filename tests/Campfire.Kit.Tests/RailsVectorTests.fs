@@ -130,7 +130,7 @@ let private ctxFor (config: KitConfig) (meth: string) (headers: (string * string
     let map = HeaderDictionary()
     for (k, v) in headers do
         map.Append(k, v)
-    let request = Request(meth, meth, "/session", null, null, null, map, IPAddress.Loopback, ReadOnlyMemory.Empty, config.Proxy)
+    let request = Request.Create(meth, meth, "/session", null, null, null, map, IPAddress.Loopback, ReadOnlyMemory.Empty, config.Proxy)
     Ctx(kit, request, ParamMap(), ParamMap(), ParamMap(), CookieJar(kit.Secrets, kit.Clock))
 
 [<Fact>]

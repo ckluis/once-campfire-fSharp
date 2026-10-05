@@ -257,13 +257,12 @@ type Request
         path: string,
         query: string | null,
         authority: string | null,
-        scheme: string | null,
+        ssl: bool,
         headers: IHeaderDictionary,
         peer: IPAddress | null,
         body: ReadOnlyMemory<byte>,
         proxy: ProxyConfig
     ) =
-    let ssl = proxy.AssumeSsl || RequestHeaders.schemeIsHttps headers scheme
     let mutable remoteIp: Result<string, unit> voption = ValueNone
     let mutable rawHost: string | null = null
 
@@ -272,6 +271,24 @@ type Request
 
     /// The method the app sees (after `Rack::MethodOverride`).
     member _.Method = meth
+
+    /// A request whose TLS-ness is worked out from the proxy headers and the connection's scheme
+    /// (`Rack::Request#ssl?`), as `AssumeSsl` and the headers say.
+    static member Create
+        (
+            meth: string,
+            originalMethod: string,
+            path: string,
+            query: string | null,
+            authority: string | null,
+            scheme: string | null,
+            headers: IHeaderDictionary,
+            peer: IPAddress | null,
+            body: ReadOnlyMemory<byte>,
+            proxy: ProxyConfig
+        ) : Request =
+        let ssl = proxy.AssumeSsl || RequestHeaders.schemeIsHttps headers scheme
+        Request(meth, originalMethod, path, query, authority, ssl, headers, peer, body, proxy)
 
     /// The method on the wire (`request.method` in Rails).
     member _.OriginalMethod = originalMethod

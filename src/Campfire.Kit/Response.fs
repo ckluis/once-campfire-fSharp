@@ -483,19 +483,6 @@ type CacheControl =
       Immutable: bool
       Extras: string list }
 
-    static member Empty: CacheControl =
-        { MaxAge = ValueNone
-          Public = false
-          Private = false
-          MustRevalidate = false
-          NoCache = false
-          NoStore = false
-          MustUnderstand = false
-          StaleWhileRevalidate = ValueNone
-          StaleIfError = ValueNone
-          Immutable = false
-          Extras = [] }
-
     override this.Equals(other: obj) =
         match other with
         | :? CacheControl as o ->
@@ -514,7 +501,18 @@ type CacheControl =
 
     override this.GetHashCode() = hash (this.MaxAge, this.Public, this.NoStore, this.NoCache)
 
-    member this.IsEmpty: bool = this.Equals CacheControl.Empty
+    member this.IsEmpty: bool =
+        this.MaxAge.IsNone
+        && not this.Public
+        && not this.Private
+        && not this.MustRevalidate
+        && not this.NoCache
+        && not this.NoStore
+        && not this.MustUnderstand
+        && this.StaleWhileRevalidate.IsNone
+        && this.StaleIfError.IsNone
+        && not this.Immutable
+        && this.Extras.IsEmpty
 
     member this.ToHeader() : string | null =
         if this.IsEmpty then
@@ -545,6 +543,21 @@ type CacheControl =
                 options.AddRange this.Extras
             String.Join(", ", options)
 
+module CacheControl =
+    /// No directives at all (`Cache-Control` left to the middleware).
+    let Empty: CacheControl =
+        { MaxAge = ValueNone
+          Public = false
+          Private = false
+          MustRevalidate = false
+          NoCache = false
+          NoStore = false
+          MustUnderstand = false
+          StaleWhileRevalidate = ValueNone
+          StaleIfError = ValueNone
+          Immutable = false
+          Extras = [] }
+
 /// Options for `expires_in`.
 type ExpiresIn =
     { Public: bool
@@ -553,7 +566,8 @@ type ExpiresIn =
       StaleIfError: uint64 voption
       Immutable: bool }
 
-    static member Default: ExpiresIn =
+module ExpiresIn =
+    let Default: ExpiresIn =
         { Public = false
           MustRevalidate = false
           StaleWhileRevalidate = ValueNone
@@ -569,14 +583,16 @@ type SendOptions =
       Disposition: string | null
       Status: int }
 
-    static member Default: SendOptions =
+module SendOptions =
+    let Default: SendOptions =
         { Filename = null
           ContentType = null
           Disposition = "attachment"
           Status = Status.Ok }
 
-    static member Inline(contentType: string) : SendOptions =
-        { SendOptions.Default with
+    /// `type: content_type, disposition: "inline"`
+    let Inline (contentType: string) : SendOptions =
+        { Default with
             ContentType = contentType
             Disposition = "inline" }
 

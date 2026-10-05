@@ -230,8 +230,9 @@ type Param =
 /// linear time, not quadratic.
 and [<Sealed>] ParamMap() =
     static let indexAfter = 8
-    let mutable keys: string[] = Array.zeroCreate 4
-    let mutable values: Param[] = Array.zeroCreate 4
+    // Most requests carry no query or body params, so nothing is allocated until the first insert.
+    let mutable keys: string[] = Array.Empty<string>()
+    let mutable values: Param[] = Array.Empty<Param>()
     let mutable count = 0
     let mutable index: Dictionary<string, int> | null = null
 
@@ -274,8 +275,9 @@ and [<Sealed>] ParamMap() =
         match this.Find key with
         | -1 ->
             if count = keys.Length then
-                Array.Resize(&keys, count * 2)
-                Array.Resize(&values, count * 2)
+                let capacity = if count = 0 then 4 else count * 2
+                Array.Resize(&keys, capacity)
+                Array.Resize(&values, capacity)
             keys[count] <- key
             values[count] <- value
             match index with

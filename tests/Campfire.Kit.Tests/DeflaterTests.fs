@@ -188,7 +188,7 @@ let ``should deflate follows rack`` () =
 [<Fact>]
 let ``apply gzips adds vary and answers 406 when nothing is acceptable`` () =
     let gzipped = responseWith 200 [ "last-modified", "Thu, 01 Jan 1970 00:01:40 GMT"; "content-length", "5" ]
-    match Deflater.apply "gzip, deflate" "/x" gzipped false with
+    match Deflater.apply "gzip, deflate" gzipped false with
     | Gzip mtime -> Assert.Equal(100u, mtime)
     | other -> failwith $"{other}"
     Assert.Equal("gzip", gzipped.GetHeader "content-encoding")
@@ -196,19 +196,18 @@ let ``apply gzips adds vary and answers 406 when nothing is acceptable`` () =
     Assert.Equal("Accept-Encoding", gzipped.GetHeader "vary")
 
     let varying = responseWith 200 [ "vary", "Accept" ]
-    Deflater.apply "gzip" "/x" varying false |> ignore
+    Deflater.apply "gzip" varying false |> ignore
     Assert.Equal("Accept,Accept-Encoding", varying.GetHeader "vary")
     let varied = responseWith 200 [ "vary", "accept-encoding" ]
-    Deflater.apply "gzip" "/x" varied false |> ignore
+    Deflater.apply "gzip" varied false |> ignore
     Assert.Equal("accept-encoding", varied.GetHeader "vary")
 
     let identity = responseWith 200 []
-    Assert.Equal(Unchanged, Deflater.apply "identity" "/x" identity false)
+    Assert.Equal(Unchanged, Deflater.apply "identity" identity false)
     Assert.Null(identity.GetHeader "content-encoding")
 
-    match Deflater.apply "identity;q=0" "/x?y=1" (responseWith 200 []) false with
-    | NotAcceptable replacement ->
-        Assert.Equal(406, replacement.Status)
-        Assert.Equal("An acceptable encoding for the requested resource /x?y=1 could not be found.", bodyText replacement)
-        Assert.Equal("text/plain", replacement.GetHeader "content-type")
-    | other -> failwith $"{other}"
+    Assert.Equal(NotAcceptable, Deflater.apply "identity;q=0" (responseWith 200 []) false)
+    let replacement = Deflater.notAcceptable "/x?y=1"
+    Assert.Equal(406, replacement.Status)
+    Assert.Equal("An acceptable encoding for the requested resource /x?y=1 could not be found.", bodyText replacement)
+    Assert.Equal("text/plain", replacement.GetHeader "content-type")

@@ -20,6 +20,7 @@
     <Compile Include="HttpTests.fs" />
     <Compile Include="CtxTests.fs" />
     <Compile Include="AdapterTests.fs" />
+    <Compile Include="PerfTests.fs" />
     <Compile Include="LoggingTests.fs" />
     <Compile Include="ParamsVectorTests.fs" />
     <Compile Include="RailsVectorTests.fs" />

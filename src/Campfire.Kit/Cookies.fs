@@ -68,7 +68,8 @@ type DeleteOptions =
       Domain: string | null
       SameSite: SameSite voption }
 
-    static member Default: DeleteOptions =
+module DeleteOptions =
+    let Default: DeleteOptions =
         { Path = "/"
           Domain = null
           SameSite = ValueSome SameSite.Lax }

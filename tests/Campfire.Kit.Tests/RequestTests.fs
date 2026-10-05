@@ -11,7 +11,7 @@ let private request (headers: (string * string) list) (peer: string) (proxy: Pro
     let map = HeaderDictionary()
     for (k, v) in headers do
         map.Append(k, v)
-    Request("GET", "GET", "/rooms/1", "x=1", null, null, map, IPAddress.Parse peer, ReadOnlyMemory.Empty, proxy)
+    Request.Create("GET", "GET", "/rooms/1", "x=1", null, null, map, IPAddress.Parse peer, ReadOnlyMemory.Empty, proxy)
 
 let private remoteIp (r: Request) : string =
     match r.RemoteIp() with
