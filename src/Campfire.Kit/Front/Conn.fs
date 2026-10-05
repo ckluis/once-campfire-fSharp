@@ -54,7 +54,8 @@ type internal DeadlineStream(inner: Stream, deadline: int64) =
         and set _ = raise (NotSupportedException())
 
     override _.Flush() = ()
-    override _.Read(buffer: byte[], offset: int, count: int) : int = inner.ReadAsync(buffer, offset, count, (new CancellationTokenSource(remaining ())).Token).GetAwaiter().GetResult()
+    // Synchronous reads are refused, as Kestrel refuses them by default.
+    override _.Read(_: byte[], _: int, _: int) : int = raise (InvalidOperationException "Synchronous operations are disallowed. Call ReadAsync instead.")
     override _.Seek(_: int64, _: SeekOrigin) : int64 = raise (NotSupportedException())
     override _.SetLength(_: int64) = raise (NotSupportedException())
     override _.Write(_: byte[], _: int, _: int) = raise (NotSupportedException())

@@ -523,3 +523,29 @@ let ``logs each request as thruster does`` () =
         let hit = lines |> Array.find (fun l -> l.Contains "cache=hit")
         Assert.Contains("remote_addr=203.0.113.9", hit)
     }
+
+[<Fact>]
+let ``a request body that stalls past the read timeout fails the request`` () =
+    task {
+        let! server, _ = startApp [ "HTTP_READ_TIMEOUT", "1" ]
+        use client = new TcpClient()
+        do! client.ConnectAsync(IPAddress.Loopback, server.Http)
+        let stream = client.GetStream()
+        // Headers and 5 of the 100 bytes the request promises: the rest never comes.
+        do! stream.WriteAsync(Encoding.ASCII.GetBytes "POST /upload HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\nhello")
+        let buffer = Array.zeroCreate<byte> 4096
+        use cts = new CancellationTokenSource(TimeSpan.FromSeconds 8.0)
+        let started = Diagnostics.Stopwatch.StartNew()
+        let! n =
+            task {
+                try
+                    return! stream.ReadAsync(Memory<byte> buffer, cts.Token)
+                with
+                | :? IOException -> return 0
+            }
+        // Closed, or answered with an error, once the read timeout is up; never `5 bytes` or `100 bytes`.
+        let answer = Encoding.ASCII.GetString(buffer, 0, n)
+        Assert.False(answer.StartsWith "HTTP/1.1 200", answer)
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds 5.0, $"{started.Elapsed}")
+        do! server.Stop()
+    }

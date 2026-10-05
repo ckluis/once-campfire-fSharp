@@ -545,8 +545,9 @@ and [<Sealed>] internal FrontStream(response: FrontResponse) =
     override _.Read(_: byte[], _: int, _: int) : int = raise (NotSupportedException())
     override _.Seek(_: int64, _: SeekOrigin) : int64 = raise (NotSupportedException())
     override _.SetLength(_: int64) = raise (NotSupportedException())
-    override _.Write(buffer: byte[], offset: int, count: int) = (response.Write(ReadOnlyMemory<byte>(buffer, offset, count))).AsTask().GetAwaiter().GetResult()
-    override _.Write(buffer: ReadOnlySpan<byte>) = (response.Write(ReadOnlyMemory<byte>(buffer.ToArray()))).AsTask().GetAwaiter().GetResult()
+    // Synchronous writes are refused, as Kestrel refuses them by default.
+    override _.Write(_: byte[], _: int, _: int) = raise (InvalidOperationException "Synchronous operations are disallowed. Call WriteAsync instead.")
+    override _.Write(_: ReadOnlySpan<byte>) = raise (InvalidOperationException "Synchronous operations are disallowed. Call WriteAsync instead.")
     override _.WriteAsync(buffer: byte[], offset: int, count: int, _: CancellationToken) : Task =
         (response.Write(ReadOnlyMemory<byte>(buffer, offset, count))).AsTask()
     override _.WriteAsync(buffer: ReadOnlyMemory<byte>, _: CancellationToken) : ValueTask = response.Write buffer

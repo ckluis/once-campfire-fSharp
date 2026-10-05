@@ -91,6 +91,11 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   `tests/http.rs` from both kits and sends them the same random requests, comparing status, headers and body.
   It needs mise for the Rust toolchain; run it after changing params, cookies, formats, request, the multipart
   reader, `Ctx` or the adapter.
+- `Campfire.Kit`'s front server tests (`FrontTests`, `FrontAcmeIntegrationTests`) open real sockets on loopback and take
+  about 20 seconds; ACME is tested against a stub CA in the tests, and against a real Pebble CA when `PEBBLE_MINICA`
+  names its `pebble.minica.pem` (the recipe is at the top of `FrontAcmeIntegrationTests.fs`; in colima, give Pebble
+  `--add-host campfire.test:192.168.5.2`, the VM's name for the Mac, and `docker cp` the root into `target/`).
+  `bench/front/run` measures the front server against Rust's; run it after changing `Front/` or `Splice.fs`.
 - `Campfire.Storage` needs libvips (`brew install vips` on macOS; `bin/verify` points NetVips at Homebrew's) and,
   for video, ffmpeg and ffprobe. The storage vectors' byte comparisons run only against libvips 8.16.1 and
   ffmpeg 7.1.5 (rust/Dockerfile's builds); otherwise they are skipped with a note on stderr, so say so when
