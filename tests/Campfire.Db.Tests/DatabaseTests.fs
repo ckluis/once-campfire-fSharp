@@ -418,3 +418,25 @@ let ``a database with pending migrations is refused and left closed`` () =
         File.Delete(path + suffix)
     use db = openWithReaders dir 1
     Assert.Equal(1L, unwrap (db.ReadBlocking selectOne))
+
+[<Fact>]
+let ``a stored datetime that does not parse comes back as an error from every kind of read and write`` () =
+    use dir = new TempDir()
+    use db = openWithReaders dir 2
+    unwrap (db.WriteBlocking(fun tx -> tx.Conn.ExecuteBatch "CREATE TABLE things (id INTEGER PRIMARY KEY, at TEXT); INSERT INTO things VALUES (1, 'garbage'); INSERT INTO things (id) VALUES (2)"))
+    let readAt (id: int64) (conn: Conn) : Timestamp =
+        conn.QueryRow("SELECT at FROM things WHERE id = ?", [| I id |], fun r -> r.Timestamp 0)
+    let isFormatError (result: Result<'T, DbError>) =
+        match result with
+        | Error(Other(:? FormatException | :? InvalidCastException)) -> true
+        | _ -> false
+    Assert.True(isFormatError (db.ReadBlocking(readAt 1L)))
+    Assert.True(isFormatError (db.ReadBlocking(readAt 2L)))
+    Assert.True(isFormatError (db.Read(readAt 1L).GetAwaiter().GetResult()))
+    Assert.True(isFormatError (db.ReadOffloaded(readAt 1L).GetAwaiter().GetResult()))
+    Assert.True(isFormatError (db.Write(fun tx -> readAt 1L tx.Conn).GetAwaiter().GetResult()))
+    Assert.True(isFormatError (db.WriteBlocking(fun tx -> readAt 1L tx.Conn)))
+    // The reader and the writer carry on.
+    Assert.Equal(1L, unwrap (db.ReadBlocking(fun conn -> conn.Count("SELECT COUNT(*) FROM things WHERE id = 1", [||]))))
+    Assert.Equal(1L, unwrap (db.Read(fun conn -> conn.Count("SELECT 1", [||])).GetAwaiter().GetResult()))
+    unwrap (db.WriteBlocking(fun tx -> tx.Conn.Execute("INSERT INTO things (id) VALUES (3)", [||]) |> ignore))

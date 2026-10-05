@@ -38,7 +38,8 @@
 // stalling writes as Rails' commits do, but once per 10,000 pages instead of per 1,000.
 //
 // Errors: a model raises `DbException` (or SQLite raises `SqliteException`) where Rust returns
-// `Err`, and the `Database` methods return it as a `Result` at the boundary. Any other exception
+// `Err` (a stored value a `Row` accessor can't read, such as a NULL or a datetime that doesn't parse,
+// raises `DbException` too, as rusqlite's `row.get` returns `Err` for it), and the `Database` methods return it as a `Result` at the boundary. Any other exception
 // is a bug in the closure: the write rolls back, and the exception reaches the caller.
 namespace Campfire.Db
 

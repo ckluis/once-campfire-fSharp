@@ -18,20 +18,37 @@ type SqlArg =
     /// A datetime, written the way Active Record writes it (`Timestamp.ToDb`).
     | T of t: Timestamp
 
-/// The columns of a row being read, by position (see `Columns`).
+module internal RowErrors =
+    /// A stored value that can't be read as asked, which rusqlite returns from `row.get` as
+    /// `Error::InvalidColumnType` or `FromSqlConversionFailure` (an `Err` the caller handles, so a
+    /// `DbException`, not a bug in the closure).
+    let nullColumn (i: int) : 'a =
+        raise (DbException(Other(InvalidCastException $"column {i} is NULL")))
+
+    let invalidDatetime (text: string) : 'a =
+        raise (DbException(Other(FormatException $"invalid datetime \"{text}\"")))
+
+/// The columns of a row being read, by position (see `Columns`). An accessor raises a `DbException`
+/// (`Error::Sqlite` in Rust) for a value it can't read: a NULL where a value is required, or a
+/// datetime that doesn't parse.
 type Row internal (reader: SqliteDataReader) =
-    member _.Int64(i: int) : int64 = reader.GetInt64 i
-    member _.Text(i: int) : string = reader.GetString i
+    member _.Int64(i: int) : int64 =
+        if reader.IsDBNull i then RowErrors.nullColumn i else reader.GetInt64 i
+
+    member _.Text(i: int) : string =
+        if reader.IsDBNull i then RowErrors.nullColumn i else reader.GetString i
+
     member _.IsNull(i: int) : bool = reader.IsDBNull i
     member _.OptInt64(i: int) : int64 option = if reader.IsDBNull i then None else Some(reader.GetInt64 i)
     member _.OptText(i: int) : string option = if reader.IsDBNull i then None else Some(reader.GetString i)
 
     /// A stored datetime, read the way Rails wrote it (`Timestamp.ParseDb`).
     member _.Timestamp(i: int) : Timestamp =
+        if reader.IsDBNull i then RowErrors.nullColumn i
         let text = reader.GetString i
         match Timestamp.ParseDbValue text with
         | ValueSome ts -> ts
-        | ValueNone -> raise (FormatException $"invalid datetime \"{text}\"")
+        | ValueNone -> RowErrors.invalidDatetime text
 
     member this.OptTimestamp(i: int) : Timestamp option = if reader.IsDBNull i then None else Some(this.Timestamp i)
     member _.ColumnName(i: int) : string = reader.GetName i

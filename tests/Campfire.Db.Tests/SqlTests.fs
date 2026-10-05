@@ -87,3 +87,36 @@ let ``the wrong number of arguments is refused`` () =
     use conn = Conn.OpenInMemory()
     table conn
     Assert.Throws<ArgumentException>(fun () -> conn.Execute("INSERT INTO things (id, name) VALUES (?, ?)", [| I 1L |]) |> ignore) |> ignore
+
+let private isConversionError (error: DbError) : bool =
+    match error with
+    | Other(:? FormatException)
+    | Other(:? InvalidCastException) -> true
+    | _ -> false
+
+[<Fact>]
+let ``a stored value that cannot be converted is an error, not an exception`` () =
+    use conn = Conn.OpenInMemory()
+    table conn
+    conn.Execute("INSERT INTO things (id, name, at) VALUES (?, ?, ?)", [| I 1L; S "garbage"; S "garbage" |]) |> ignore
+    conn.Execute("INSERT INTO things (id) VALUES (?)", [| I 2L |]) |> ignore
+    // rusqlite's `row.get` fails for a NULL read as `i64` or `String`, and for a text that is no datetime.
+    let failure (id: int64) (read: Row -> unit) =
+        let ex = Assert.ThrowsAny<exn>(fun () -> conn.QueryOne("SELECT id, name, at FROM things WHERE id = ?", [| I id |], read) |> ignore)
+        match ex with
+        | DbException e -> Assert.True(isConversionError e, DbError.display e)
+        | other -> failwith $"escaped as {other.GetType().Name}: {other.Message}"
+    failure 1L (fun r -> r.Timestamp 2 |> ignore)
+    failure 1L (fun r -> r.OptTimestamp 2 |> ignore)
+    failure 2L (fun r -> r.Text 1 |> ignore)
+    failure 2L (fun r -> r.Text 2 |> ignore)
+    failure 2L (fun r -> r.Timestamp 2 |> ignore)
+    // `row.get::<Option<_>>` is fine with NULL, and an ordinary value still reads.
+    Assert.Equal(None, conn.QueryRow("SELECT name FROM things WHERE id = 2", [||], fun r -> r.OptText 0))
+    Assert.Equal(2L, conn.QueryRow("SELECT id FROM things WHERE id = 2", [||], fun r -> r.Int64 0))
+    let nullInt = Assert.ThrowsAny<exn>(fun () -> conn.QueryRow("SELECT NULL", [||], fun r -> r.Int64 0) |> ignore)
+    match nullInt with
+    | DbException e -> Assert.True(isConversionError e, DbError.display e)
+    | other -> failwith $"escaped as {other.GetType().Name}: {other.Message}"
+    // The statement that raised is dropped and the connection still works.
+    Assert.Equal(1L, conn.Count("SELECT COUNT(*) FROM things WHERE id = 1", [||]))
