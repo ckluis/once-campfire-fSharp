@@ -6,6 +6,7 @@ namespace Campfire.RailsCompat
 
 open System
 open System.Globalization
+open System.Numerics
 open System.Text
 open System.Text.Json
 
@@ -91,10 +92,29 @@ module Json =
             | c -> out.Append c |> ignore
         out.Append '"' |> ignore
 
+    /// Whether `magnitude` is exactly halfway between the decimal `digits` (whose last digit is
+    /// `10^k`) and the same digits one higher: 2v = (2D + 1) * 10^k, compared as integers.
+    let private isTieAbove (magnitude: float) (digits: string) (k: int) : bool =
+        let bits = BitConverter.DoubleToInt64Bits magnitude
+        let biased = int ((bits >>> 52) &&& 0x7FFL)
+        let fraction = bits &&& 0xFFFFFFFFFFFFFL
+        let mantissa, exponent =
+            if biased = 0 then fraction, -1074 else (fraction ||| (1L <<< 52)), biased - 1075
+        let two = BigInteger 2
+        let ten = BigInteger 10
+        let left = BigInteger 2 * BigInteger mantissa * BigInteger.Pow(two, max exponent 0) * BigInteger.Pow(ten, max -k 0)
+        let right = (BigInteger 2 * BigInteger.Parse digits + BigInteger.One) * BigInteger.Pow(ten, max k 0) * BigInteger.Pow(two, max -exponent 0)
+        left = right
+
     /// The shortest digits that read back as `magnitude`, and where the decimal point goes in
     /// them (`1.2345e6` is "12345" and 7). .NET's "R" can write a form that reads back as the
     /// neighbour below at a power of two, where the interval is lopsided, so a form that doesn't
     /// read back is replaced by the first correctly rounded length that does.
+    ///
+    /// Where the value is an exact tie between two candidates of that length, .NET takes the even
+    /// last digit and Rust's `{:e}` the upper one (rust/crates/ruby/src/float.rs: "Ruby's dtoa
+    /// takes the even one and Rust the upper one"), which is what the json gem writes. So the
+    /// upper candidate wins a tie, as it does in Rust.
     let private shortestDigits (magnitude: float) : string * int =
         let roundTrips (text: string) =
             Double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture) = magnitude
@@ -109,16 +129,27 @@ module Json =
             let trimmed = raw.TrimStart '0'
             (trimmed.TrimEnd '0', integerLength - (raw.Length - trimmed.Length) + exponent)
         let r = magnitude.ToString("R", CultureInfo.InvariantCulture)
-        if roundTrips r then
-            split r
+        let (digits, point) =
+            if roundTrips r then
+                split r
+            else
+                let significand = ((r.Split 'E').[0]).Replace(".", "").TrimStart '0'
+                seq {
+                    for n in significand.Length + 1 .. 17 do
+                        yield magnitude.ToString("E" + string (n - 1), CultureInfo.InvariantCulture)
+                }
+                |> Seq.find roundTrips
+                |> split
+        // A carry (a last digit of 9) would have been found as a shorter form, so it is skipped.
+        if digits.Length >= 16 && digits[digits.Length - 1] <> '9' then
+            let k = point - digits.Length
+            if isTieAbove magnitude digits k then
+                let upper = digits.Substring(0, digits.Length - 1) + string (char (int digits[digits.Length - 1] + 1))
+                if roundTrips (upper + "E" + string k) then (upper, point) else (digits, point)
+            else
+                (digits, point)
         else
-            let significand = ((r.Split 'E').[0]).Replace(".", "").TrimStart '0'
-            seq {
-                for n in significand.Length + 1 .. 17 do
-                    yield magnitude.ToString("E" + string (n - 1), CultureInfo.InvariantCulture)
-            }
-            |> Seq.find roundTrips
-            |> split
+            (digits, point)
 
     /// A finite float as the json gem writes it, which is not `Float#to_s`: json 2.21.2's
     /// `fpconv_dtoa` (`ext/json/ext/vendor/fpconv.c`, `emit_digits`) writes `1e15` as `1e+15` and
@@ -242,7 +273,7 @@ module Json =
             None
         else
             try
-                let options = JsonDocumentOptions(MaxDepth = 128)
+                let options = JsonDocumentOptions(MaxDepth = 127)
                 use document = JsonDocument.Parse(ReadOnlyMemory bytes, options)
                 Some(convert document.RootElement)
             with

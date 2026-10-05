@@ -117,7 +117,15 @@ let ``floats match the json gem`` () =
           12345678901234567.0, "1.2345678901234568e+16"
           1e21, "1e+21"
           1e100, "1e+100"
-          Double.MaxValue, "1.7976931348623157e+308" ]
+          Double.MaxValue, "1.7976931348623157e+308"
+          // Exact decimal ties: the json gem (and Rust's `{:e}`) take the upper digit, where .NET's
+          // "R" takes the even one. Checked against json 2.21.2 in campfire-reference:app.
+          667020902720176.25, "667020902720176.3"
+          1125899906842624.25, "1125899906842624.3"
+          24603114260468.0625, "24603114260468.063"
+          210745403561986.125, "210745403561986.13"
+          Math.Pow(2.0, -25.0), "0.000000029802322387695313"
+          -667020902720176.25, "-667020902720176.3" ]
     for (f, json) in cases do
         Assert.True((Json.generate (Value.Float f) = json), $"{f:E}: {Json.generate (Value.Float f)} vs {json}")
         Assert.True((Json.encode (Value.Array [ Value.Float f ]) = $"[{json}]"), $"{f:E}")

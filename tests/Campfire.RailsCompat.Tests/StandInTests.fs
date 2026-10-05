@@ -37,8 +37,10 @@ let ``json parse refuses what serde_json refuses`` () =
         Assert.True((parse bad).IsNone, bad)
     Assert.True((Json.parse [| 0xEFuy; 0xBBuy; 0xBFuy; byte '1' |]).IsNone)
     Assert.True((Json.parse [| byte '"'; 0xFFuy; byte '"' |]).IsNone)
-    Assert.True((parse (String.replicate 129 "[" + String.replicate 129 "]")).IsNone)
-    Assert.True((parse (String.replicate 128 "[" + String.replicate 128 "]")).IsSome)
+    // serde_json's recursion limit: 127 nested containers parse, the 128th is refused (its
+    // test_stack_overflow).
+    Assert.True((parse (String.replicate 128 "[" + String.replicate 128 "]")).IsNone)
+    Assert.True((parse (String.replicate 127 "[" + String.replicate 127 "]")).IsSome)
     Assert.Equal(Some(Value.String "\u00e9\ud83d\ude00"), parse "\"\\u00e9\\ud83d\\ude00\"")
     Assert.Equal(Some(Value.Bool true), parse " true\n")
 
@@ -65,5 +67,5 @@ let ``timestamps parse rfc 3339 with an offset`` () =
     Assert.Equal(DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero).AddTicks 1234560L, utc "2026-01-01T12:00:00.123456Z")
     // Finer than 100ns is cut off.
     Assert.Equal(DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero).AddTicks 1239999L, utc "2026-01-01T12:00:00.123999999Z")
-    for bad in [ ""; "2026-01-01"; "2026-01-01T12:00:00"; "2026-13-01T12:00:00Z"; "2026-02-30T12:00:00Z"; "x2026-01-01T12:00:00Z"; "2026-01-01T12:00:00Z " ] do
+    for bad in [ ""; "2026-01-01"; "2026-01-01T12:00:00"; "2026-13-01T12:00:00Z"; "2026-02-30T12:00:00Z"; "x2026-01-01T12:00:00Z"; "2026-01-01T12:00:00Z "; "2026-01-01T12:00:00Z\n" ] do
         Assert.Equal(None, Timestamps.tryParse bad)
