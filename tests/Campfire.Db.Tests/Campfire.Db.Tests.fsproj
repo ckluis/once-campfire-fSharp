@@ -23,6 +23,7 @@
     <Compile Include="PushTests.fs" />
     <Compile Include="RoomTests.fs" />
     <Compile Include="UserTests.fs" />
+    <Compile Include="SeedTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.Db/Campfire.Db.fsproj" />
