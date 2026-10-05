@@ -1,0 +1,25 @@
+{
+  "name": "campfire-parity",
+  "private": true,
+  "type": "module",
+  "description": "Playwright capture/compare harness for Campfire Rails vs Rust parity",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "capture": "node capture/cli.ts capture",
+    "compare": "node capture/cli.ts compare",
+    "typecheck": "tsc --noEmit -p capture",
+    "test": "node --test capture/test/*.test.ts"
+  },
+  "dependencies": {
+    "parse5": "8.0.1",
+    "pixelmatch": "7.2.0",
+    "playwright": "1.63.0",
+    "pngjs": "7.0.0",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "@types/pngjs": "6.0.5",
+    "typescript": "5.9.3"
+  }
+}

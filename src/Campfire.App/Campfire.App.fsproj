@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>campfire</AssemblyName>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Library.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
+    <ProjectReference Include="../Campfire.Ruby/Campfire.Ruby.fsproj" />
+    <ProjectReference Include="../Campfire.Kit/Campfire.Kit.fsproj" />
+    <ProjectReference Include="../Campfire.Routes/Campfire.Routes.fsproj" />
+    <ProjectReference Include="../Campfire.Db/Campfire.Db.fsproj" />
+    <ProjectReference Include="../Campfire.RichText/Campfire.RichText.fsproj" />
+    <ProjectReference Include="../Campfire.Storage/Campfire.Storage.fsproj" />
+    <ProjectReference Include="../Campfire.Cable/Campfire.Cable.fsproj" />
+    <ProjectReference Include="../Campfire.Assets/Campfire.Assets.fsproj" />
+    <ProjectReference Include="../Campfire.Views/Campfire.Views.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Falco" />
+  </ItemGroup>
+</Project>

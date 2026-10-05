@@ -1,0 +1,3 @@
+# Templates under reference/app/views that no inventory state covers, and why.
+layouts/mailer: The app has no mailers (no app/mailers, no ActionMailer subclasses); the Rails generator's layout is never rendered.
+layouts/mailer.text: The app has no mailers; see layouts/mailer.

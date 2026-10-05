@@ -1,0 +1,13 @@
+bin/Debug/
+bin/Release/
+obj/
+src/*/bin/
+tests/*/bin/
+*.user
+.vs/
+.idea/
+parity/.seed/
+parity/node_modules/
+parity/out/
+bench/loadgen/target/
+target/

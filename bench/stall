@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Attribute the message POST's latency tail: closed-loop POSTs with every request's start and
+latency recorded (loadgen --trace) while an LD_PRELOAD shim (bench/lib/iotrace.c) logs each
+fsync/fdatasync the app makes, then match slow requests against those syscalls.
+
+  bench/stall --label base [--conc 1] [--secs 20] [--reps 3] [--out DIR]
+
+Runs native-<label> (NATIVE_<LABEL>_BIN) twice per rep: storage on the bench work dir (the real
+filesystem) and on /dev/shm (tmpfs: fsync is nearly free). Knobs as in bench/attrib.
+"""
+import argparse, bisect, json, os, statistics, subprocess, sys, time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib as b
+
+p = argparse.ArgumentParser()
+p.add_argument("--label", default="base")
+p.add_argument("--conc", default="1")
+p.add_argument("--secs", default="20")
+p.add_argument("--reps", type=int, default=3)
+p.add_argument("--out")
+a = p.parse_args()
+
+out = os.path.abspath(a.out or os.path.join(b.BENCH, "results", "stall-" + time.strftime("%Y%m%d-%H%M%S")))
+os.makedirs(out, exist_ok=True)
+shim = os.path.join(b.ROOT, "target", "bench", "iotrace.so")
+subprocess.run(["cc", "-O2", "-shared", "-fPIC", "-o", shim, os.path.join(b.BENCH, "lib", "iotrace.c"), "-ldl"], check=True)
+b.build_loadgen()
+label = a.label.upper().replace("-", "_")
+os.environ[f"NATIVE_{label}_PRELOAD"] = shim
+seed = b.WORK + "-seed"
+labels = b.snapshot_seed(seed)
+
+
+def pct(xs, q):
+    xs = sorted(xs)
+    return xs[min(len(xs) - 1, int(q * len(xs)))] if xs else None
+
+
+def analyze(trace_file, io_file):
+    reqs = [tuple(map(int, l.split()[:2])) for l in open(trace_file)]
+    ios = []
+    if os.path.exists(io_file):
+        for l in open(io_file):
+            t, d, what, path = l.split(maxsplit=3)
+            ios.append((int(t), int(d), what, os.path.basename(path.strip())))
+    ios.sort()
+    starts = [i[0] for i in ios]
+    lat = [l for _, l in reqs]
+    p50, p99 = pct(lat, 0.5), pct(lat, 0.99)
+    slow_cut = max(4 * p50, 3000)
+    overlapped, slow, slow_with_io, clean = [], [], 0, []
+    for s, l in reqs:
+        j = bisect.bisect_left(starts, s)
+        hit = []
+        while j < len(ios) and ios[j][0] < s + l:
+            hit.append(ios[j])
+            j += 1
+        if hit:
+            overlapped.append((l, hit))
+        else:
+            clean.append(l)
+        if l >= slow_cut:
+            slow.append(l)
+            slow_with_io += bool(hit)
+    by_file = {}
+    for t, d, what, f in ios:
+        key = f"{what} {f.replace('production.sqlite3', 'db')}"
+        by_file.setdefault(key, []).append(d)
+    return {
+        "requests": len(reqs), "p50_ms": p50 / 1000, "p90_ms": pct(lat, 0.9) / 1000, "p99_ms": p99 / 1000, "max_ms": max(lat) / 1000,
+        "slow_cut_ms": slow_cut / 1000, "slow_requests": len(slow), "slow_overlapping_fsync": slow_with_io,
+        "requests_overlapping_fsync": len(overlapped),
+        "overlapping_p50_ms": (pct([l for l, _ in overlapped], 0.5) or 0) / 1000,
+        "clean_p99_ms": (pct(clean, 0.99) or 0) / 1000,
+        "fsyncs": {k: {"n": len(v), "p50_ms": statistics.median(v) / 1000, "max_ms": max(v) / 1000, "total_ms": sum(v) / 1000} for k, v in by_file.items()},
+        "posts_per_checkpoint": round(len(reqs) / max(1, len(by_file.get("fdatasync db", by_file.get("fsync db", []))) or 1), 1),
+    }
+
+
+results = []
+for rep in range(1, a.reps + 1):
+    for where in ("disk", "tmpfs"):
+        if where == "tmpfs":
+            os.environ["BENCH_WORK_DIR"] = "/dev/shm/campfire-bench"
+        else:
+            os.environ.pop("BENCH_WORK_DIR", None)
+        import importlib
+        importlib.reload(b)
+        os.environ[f"NATIVE_{label}_PRELOAD"] = shim
+        io_file = os.path.join(out, f"io-{where}-{rep}.log")
+        if os.path.exists(io_file):
+            os.remove(io_file)
+        app = b.start(f"native-{a.label}", seed, {"IOTRACE_FILE": io_file})
+        try:
+            sess = b.session(app, labels)
+            rts = b.routes(sess)
+            b.lg("http", "--base", app.base, "--cookie", sess["cookie"], *rts["post_message"], "--conc", 1, "--duration", 2)
+            trace = os.path.join(out, f"trace-{where}-{rep}.txt")
+            t_start = time.time()
+            r = b.http(app, sess, rts["post_message"], a.conc, a.secs, extra=("--trace", trace))
+        finally:
+            app.stop()
+        # Only syscalls made during the measured window.
+        lines = [l for l in open(io_file)] if os.path.exists(io_file) else []
+        open(io_file, "w").writelines(l for l in lines if int(l.split()[0]) >= t_start * 1e6)
+        res = analyze(trace, io_file)
+        res.update(where=where, rep=rep, conc=a.conc, rps=r["rps"], campfire_cpu_ms_per_req=r["cpu_ms_per_req"]["campfire"], load=b.loadavg())
+        results.append(res)
+        b.log(json.dumps(res))
+json.dump(results, open(os.path.join(out, f"stall-c{a.conc}.json"), "w"), indent=1)
+if os.path.isdir("/dev/shm/campfire-bench"):
+    subprocess.run(["rm", "-rf", "/dev/shm/campfire-bench"])

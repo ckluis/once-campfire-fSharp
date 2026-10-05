@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Capture every state in parity/screens.yml against one server, inside the pinned Playwright image.
+#
+#   parity/bin/capture --target http://127.0.0.1:3100 [--name NAME] [--out DIR] [OPTIONS]
+#   parity/bin/capture list        [OPTIONS]      the expanded state x matrix cells
+#   parity/bin/capture breakpoints [OPTIONS]      width breakpoints and the swept widths per engine
+#
+# OPTIONS (see parity/capture/cli.ts): --seed NAME --time ISO --only GLOBS --engines LIST
+#   --viewports LIST --schemes LIST --breakpoints include|only|exclude --workers N --timeout MS
+#   --reset-host CMD   host command restoring a server before each `mutates: true` capture;
+#                      {port} {target} {url} are substituted
+# Artifacts: DIR/NAME/<state id>/<engine>-<viewport>-<scheme>.{png,server.html,server.norm.html,
+# live.norm.html,aria.yml,json}. Runtime: PARITY_CAPTURE_RUNTIME=docker|sandbox|host.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/../capture/sandbox/run.sh"
+
+command=capture
+case "${1:-}" in list|breakpoints) command=$1; shift ;; esac
+
+args=() reset_host=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --reset-host) reset_host=$2; shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+
+mkdir -p "$PARITY/out"
+trap parity_cleanup EXIT INT TERM
+if [ -n "$reset_host" ]; then
+  start_reset_loop "$reset_host"
+  args+=(--reset "$RESET_ARG")
+fi
+run_in_image "$command" "${args[@]}"
