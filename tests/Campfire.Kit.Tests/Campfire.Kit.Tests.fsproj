@@ -19,6 +19,13 @@
     <Compile Include="DeflaterTests.fs" />
     <Compile Include="SpliceTests.fs" />
     <Compile Include="ServerTests.fs" />
+    <Compile Include="FrontHarness.fs" />
+    <Compile Include="FrontConfigTests.fs" />
+    <Compile Include="FrontCacheTests.fs" />
+    <Compile Include="FrontCompressionTests.fs" />
+    <Compile Include="FrontTlsTests.fs" />
+    <Compile Include="FrontAcmeTests.fs" />
+    <Compile Include="FrontTests.fs" />
     <Compile Include="HttpApp.fs" />
     <Compile Include="HttpTests.fs" />
     <Compile Include="CtxTests.fs" />

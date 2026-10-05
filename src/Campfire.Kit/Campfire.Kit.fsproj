@@ -19,6 +19,14 @@
     <Compile Include="Actions.fs" />
     <Compile Include="Adapter.fs" />
     <Compile Include="Server.fs" />
+    <Compile Include="Front/Config.fs" />
+    <Compile Include="Front/Cache.fs" />
+    <Compile Include="Front/Compression.fs" />
+    <Compile Include="Front/Acme.fs" />
+    <Compile Include="Front/Handler.fs" />
+    <Compile Include="Front/Tls.fs" />
+    <Compile Include="Front/Conn.fs" />
+    <Compile Include="Front/Front.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
@@ -27,6 +35,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Falco" />
+    <PackageReference Include="ZstdSharp.Port" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Campfire.Kit.Tests" />
