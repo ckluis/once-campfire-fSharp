@@ -440,3 +440,31 @@ let ``a stored datetime that does not parse comes back as an error from every ki
     Assert.Equal(1L, unwrap (db.ReadBlocking(fun conn -> conn.Count("SELECT COUNT(*) FROM things WHERE id = 1", [||]))))
     Assert.Equal(1L, unwrap (db.Read(fun conn -> conn.Count("SELECT 1", [||])).GetAwaiter().GetResult()))
     unwrap (db.WriteBlocking(fun tx -> tx.Conn.Execute("INSERT INTO things (id) VALUES (3)", [||]) |> ignore))
+
+[<Fact>]
+let ``opening that fails partway stops its threads and closes its connections`` () =
+    use dir = new TempDir()
+    let config = { Config.create (dir.File "test.sqlite3") with Readers = 3 }
+    let threads = ResizeArray<Thread>()
+    let readerConnections = ResizeArray<Conn>()
+    let openReader (path: string) : Conn =
+        // The third reader can't be opened.
+        if readerConnections.Count = 2 then failwith "cannot open reader"
+        let conn = Pragmas.openConnection path true
+        readerConnections.Add conn
+        conn
+    let ex = Assert.Throws<Exception>(fun () -> Database.OpenWith(config, Testing.defaultEnv (), openReader, threads.Add) |> ignore)
+    Assert.Equal("cannot open reader", ex.Message)
+    // The writer, the checkpointer and the two readers that were started.
+    Assert.Equal<string list>(
+        [ "campfire-db-checkpointer"; "campfire-db-reader"; "campfire-db-reader"; "campfire-db-writer" ],
+        threads |> Seq.map (fun t -> t.Name |> Option.ofObj |> Option.defaultValue "") |> Seq.sort |> List.ofSeq
+    )
+    for thread in threads do
+        Assert.False(thread.IsAlive, $"{thread.Name} still running")
+    Assert.Equal(2, readerConnections.Count)
+    for conn in readerConnections do
+        Assert.True(conn.IsClosed, "a reader connection was left open")
+    // Nothing is left holding the database: it opens again.
+    use again = openWithReaders dir 1
+    Assert.Equal(1L, unwrap (again.ReadBlocking selectOne))

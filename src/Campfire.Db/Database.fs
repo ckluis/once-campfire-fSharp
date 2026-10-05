@@ -233,6 +233,8 @@ type internal Checkpoints(path: string) =
 
     do thread.Start()
 
+    member _.Thread : Thread = thread
+
     /// Wakes the checkpointer for every `AutocheckpointPages` the WAL grows.
     member _.WalGrewTo(pages: int) : unit =
         if pages < wokenAt then wokenAt <- 0 // the WAL restarted
@@ -390,54 +392,67 @@ type Database
     /// Opens (and with `Config.Prepare` prepares) the database at `config.Path`, and starts its writer,
     /// checkpointer and reader threads.
     static member Open(config: Config, env: Env) : Database =
+        Database.OpenWith(config, env, (fun path -> Pragmas.openConnection path true), ignore)
+
+    /// `Open` with the way reader connections are opened, and a call for every thread started, as the
+    /// tests' seam for a failure partway through.
+    static member internal OpenWith
+        (
+            config: Config,
+            env: Env,
+            openReader: string -> Conn,
+            started: Thread -> unit
+        ) : Database =
         let conn = Pragmas.openConnection config.Path false
+        let readerThreads = ResizeArray<Thread>()
+        let queue = WriteQueue(max config.WriteQueue 1)
+        let readers = ReadQueue()
+        let mutable checkpoints: Checkpoints option = None
+        let mutable writerThread: Thread option = None
         try
             if config.Prepare then Schema.prepare conn config.Environment env.Clock |> ignore
-        with _ ->
-            (conn :> IDisposable).Dispose()
-            reraise ()
-        let checkpoints = Checkpoints config.Path
-        // In place of the auto-checkpoint, which the writer's commits note the WAL size for instead
-        // (Rust installs `sqlite3_wal_hook`, which the .NET bindings don't expose).
-        conn.ExecuteBatch "PRAGMA wal_autocheckpoint = 0"
+            let cp = Checkpoints config.Path
+            checkpoints <- Some cp
+            started cp.Thread
+            // In place of the auto-checkpoint, which the writer's commits note the WAL size for instead
+            // (Rust installs `sqlite3_wal_hook`, which the .NET bindings don't expose).
+            conn.ExecuteBatch "PRAGMA wal_autocheckpoint = 0"
 
-        let queue = WriteQueue(max config.WriteQueue 1)
-        let writerThread =
-            Thread(
-                (fun () ->
-                    let mutable running = true
-                    while running do
-                        match queue.Take() with
-                        | None -> running <- false
-                        | Some job ->
-                            // A write that raises must not take the writer down with it. `runWrite`
-                            // rolls back as the exception goes; the rollback here is a backstop for a
-                            // job that fails some other way.
-                            let committed =
-                                try
-                                    job conn env
-                                with _ ->
-                                    if not conn.IsAutocommit then
-                                        try
-                                            conn.ExecuteBatch "ROLLBACK TRANSACTION"
-                                        with _ ->
-                                            ()
-                                    false
-                            if committed then
-                                match (try Checkpoint.walPages conn with _ -> 0) with
-                                | 0 -> ()
-                                | pages when pages >= Pragmas.WalLimitPages -> checkpoints.RestartWal conn
-                                | pages -> checkpoints.WalGrewTo pages),
-                Name = "campfire-db-writer",
-                IsBackground = true
-            )
-        writerThread.Start()
+            let thread =
+                Thread(
+                    (fun () ->
+                        let mutable running = true
+                        while running do
+                            match queue.Take() with
+                            | None -> running <- false
+                            | Some job ->
+                                // A write that raises must not take the writer down with it. `runWrite`
+                                // rolls back as the exception goes; the rollback here is a backstop for a
+                                // job that fails some other way.
+                                let committed =
+                                    try
+                                        job conn env
+                                    with _ ->
+                                        if not conn.IsAutocommit then
+                                            try
+                                                conn.ExecuteBatch "ROLLBACK TRANSACTION"
+                                            with _ ->
+                                                ()
+                                        false
+                                if committed then
+                                    match (try Checkpoint.walPages conn with _ -> 0) with
+                                    | 0 -> ()
+                                    | pages when pages >= Pragmas.WalLimitPages -> cp.RestartWal conn
+                                    | pages -> cp.WalGrewTo pages),
+                    Name = "campfire-db-writer",
+                    IsBackground = true
+                )
+            thread.Start()
+            writerThread <- Some thread
+            started thread
 
-        let readers = ReadQueue()
-        let threads = ResizeArray<Thread>()
-        try
             for _ in 1 .. max config.Readers 1 do
-                readers.GiveBack(Pragmas.openConnection config.Path true)
+                readers.GiveBack(openReader config.Path)
                 let thread =
                     Thread(
                         (fun () ->
@@ -457,12 +472,22 @@ type Database
                         IsBackground = true
                     )
                 thread.Start()
-                threads.Add thread
+                readerThreads.Add thread
+                started thread
+            new Database(env, config.Path, queue, readers, List.ofSeq readerThreads, cp, thread, conn)
         with _ ->
-            // A connection failing to open stops the threads started before.
+            // Rust's `?` drops what was built: the queue's sender, which ends the writer thread and
+            // with it the writer connection and the checkpointer, and the readers' connections.
+            // Disposing the finished database does the same, in the same order.
+            queue.Close()
+            writerThread |> Option.iter (fun t -> t.Join())
+            checkpoints |> Option.iter (fun c -> c.Stop())
+            (conn :> IDisposable).Dispose()
             readers.Close()
+            for thread in readerThreads do
+                thread.Join()
+            readers.DisposeConnections()
             reraise ()
-        new Database(env, config.Path, queue, readers, List.ofSeq threads, checkpoints, writerThread, conn)
 
     member _.Env : Env = env
 
