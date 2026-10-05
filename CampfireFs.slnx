@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Campfire.App/Campfire.App.fsproj" />
+    <Project Path="src/Campfire.Assets.Build/Campfire.Assets.Build.fsproj" />
     <Project Path="src/Campfire.Assets/Campfire.Assets.fsproj" />
     <Project Path="src/Campfire.Cable/Campfire.Cable.fsproj" />
     <Project Path="src/Campfire.Db/Campfire.Db.fsproj" />

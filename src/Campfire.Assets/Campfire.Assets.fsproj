@@ -1,8 +1,50 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Propshaft's digesting and compiling, the import map and reference/public are computed at build
+    time by Campfire.Assets.Build (the counterpart of crates/assets/build.rs) into obj/assets/:
+    EmbeddedData.fs is compiled in, and assets.bin and importmap-tags.html are embedded
+    resources. Startup then costs nothing (no scan, no hashing, no regex), the Docker image is
+    the assembly alone, and nothing reads reference/ or rust/ at run time.
+  -->
+  <PropertyGroup>
+    <AssetsGenDir>$(MSBuildProjectDirectory)/obj/assets/</AssetsGenDir>
+    <ReferenceRoot>$(MSBuildProjectDirectory)/../../reference/</ReferenceRoot>
+    <AssetsBuildDll>$(MSBuildProjectDirectory)/../Campfire.Assets.Build/bin/$(Configuration)/$(TargetFramework)/Campfire.Assets.Build.dll</AssetsBuildDll>
+  </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Library.fs" />
+    <Compile Include="$(AssetsGenDir)EmbeddedData.fs" Link="EmbeddedData.fs" />
+    <Compile Include="Embedded.fs" />
+    <Compile Include="Helpers.fs" />
+    <Compile Include="Tags.fs" />
+    <Compile Include="Serve.fs" />
+    <Compile Include="Assets.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(AssetsGenDir)assets.bin" LogicalName="assets.bin" />
+    <EmbeddedResource Include="$(AssetsGenDir)importmap-tags.html" LogicalName="importmap-tags.html" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.Ruby/Campfire.Ruby.fsproj" />
+    <ProjectReference Include="../Campfire.Assets.Build/Campfire.Assets.Build.fsproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.Assets.Tests" />
+  </ItemGroup>
+
+  <!-- Everything build.rs watches with cargo:rerun-if-changed. -->
+  <ItemGroup>
+    <AssetInput Include="vendor/**;overrides/**" />
+    <AssetInput Include="$(ReferenceRoot)app/assets/**;$(ReferenceRoot)app/javascript/**;$(ReferenceRoot)vendor/javascript/**;$(ReferenceRoot)public/**" />
+    <AssetInput Include="$(ReferenceRoot)config/importmap.rb;$(ReferenceRoot)config/initializers/assets.rb" />
+  </ItemGroup>
+
+  <!-- cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH -->
+  <Target Name="StampAssetsEnvironment" AfterTargets="ResolveProjectReferences">
+    <WriteLinesToFile File="$(AssetsGenDir)source-date-epoch.txt" Lines="$(SOURCE_DATE_EPOCH)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
+  <Target Name="GenerateAssets" AfterTargets="StampAssetsEnvironment" Inputs="@(AssetInput);$(AssetsBuildDll);$(AssetsGenDir)source-date-epoch.txt" Outputs="$(AssetsGenDir)EmbeddedData.fs;$(AssetsGenDir)assets.bin;$(AssetsGenDir)importmap-tags.html">
+    <Error Condition="!Exists('$(ReferenceRoot)config/importmap.rb')" Text="reference/ submodule is missing (git submodule update --init reference)" />
+    <Exec Command="&quot;$(DOTNET_HOST_PATH)&quot; &quot;$(AssetsBuildDll)&quot; --reference &quot;$(ReferenceRoot)&quot; --assets &quot;$(MSBuildProjectDirectory)&quot; --out &quot;$(AssetsGenDir)&quot;" />
+  </Target>
 </Project>
