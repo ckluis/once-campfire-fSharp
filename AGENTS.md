@@ -85,4 +85,6 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
 - Docker runs in colima. Run `parity/`, `bench/` and `reference-tools/` scripts inside the VM,
   where they get GNU userland and host networking:
   `colima ssh -- bash -c 'cd /Users/clank/Desktop/projects/once-campfire-fsharp && parity/bin/...'`.
-  The reference image is `campfire-reference:app`.
+  The reference image is `campfire-reference:app`. Set `PARITY_NET_DIR=/tmp/parity-net` (create it
+  first) for anything that captures pages: the repo is a virtiofs mount in the VM, and a Unix socket
+  there refuses connections between containers (`parity/capture/sandbox/run.sh`).

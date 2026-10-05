@@ -46,7 +46,9 @@ run_in_image() {
   # ERR_NETWORK_CHANGED whenever an interface comes or goes in its namespace, which on the host
   # network is every docker run/rm. Its proxies reach the servers through capture/forward.ts,
   # which runs on the host network, over a Unix socket in NET_DIR.
-  local net_dir; net_dir=$(mktemp -d "$PARITY/out/.net.XXXXXX")
+  # PARITY_NET_DIR moves the socket off the repo's filesystem: under colima on macOS the repo is a
+  # virtiofs mount, where a Unix socket bound in one container refuses connections from another.
+  local net_dir; net_dir=$(mktemp -d "${PARITY_NET_DIR:-$PARITY/out}/.net.XXXXXX")
   NET_DIRS+=("$net_dir")
   local socket=$net_dir/upstream.sock
   case "$runtime" in
@@ -56,13 +58,13 @@ run_in_image() {
       local name=parity-capture-$$-$RANDOM
       CAPTURE_CONTAINERS+=("$name" "$name-forward")
       docker run -d --rm --init --name "$name-forward" --network host -u "$(id -u):$(id -g)" \
-        -v "$ROOT:$ROOT" --tmpfs "$PARITY/node_modules" -w "$PARITY" \
+        -v "$ROOT:$ROOT" -v "$net_dir:$net_dir" --tmpfs "$PARITY/node_modules" -w "$PARITY" \
         "$image" node capture/forward.ts "$socket" >/dev/null
       wait_for_socket "$socket"
       docker run --rm --init --name "$name" --network none --ipc host \
         -u "$(id -u):$(id -g)" -e HOME=/tmp -e TZ=UTC -e CI="${CI:-}" -e PARITY_WORKERS="${PARITY_WORKERS:-}" \
         -e PARITY_UPSTREAM_SOCKET="$socket" \
-        -v "$ROOT:$ROOT" --tmpfs "$PARITY/node_modules" -w "$PARITY" \
+        -v "$ROOT:$ROOT" -v "$net_dir:$net_dir" --tmpfs "$PARITY/node_modules" -w "$PARITY" \
         "$image" node capture/cli.ts "$@" &
       local status=0
       wait $! || status=$? # in the background so an interrupt runs the caller's trap (parity_cleanup) at once
