@@ -398,6 +398,9 @@ type PooledBufferWriter(initialCapacity: int) =
 
     member _.Length = written
 
+    /// The bytes written so far, while the writer still holds them.
+    member this.WrittenMemory: ReadOnlyMemory<byte> = ReadOnlyMemory<byte>(this.Buffer, 0, written)
+
     member private this.Grow(hint: int) =
         let current = this.Buffer
         let needed = written + max hint 1

@@ -4,8 +4,8 @@
 // `ActionDispatch::Request#POST` do: JSON by content type, urlencoded forms (also for a POST
 // with no content type), and multipart with file parts spooled to temp files.
 //
-// Where Rust reads multipart with the `multer` crate, this uses ASP.NET Core's `MultipartReader`
-// (part of the shared framework) behind the same limits.
+// Where Rust reads multipart with the `multer` crate, `Multipart.fs` is a port of it (and of the `mime`
+// and `httparse` code it leans on), behind the same limits.
 namespace Campfire.Kit
 
 open System
@@ -16,7 +16,6 @@ open System.Text
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Http
-open Microsoft.AspNetCore.WebUtilities
 open Campfire.Kit
 
 /// The body as read: raw bytes (empty for multipart) and the params parsed from it.
@@ -78,57 +77,6 @@ module RequestBody =
     /// `PARSER_BYTESIZE_LIMIT`).
     [<Literal>]
     let MultipartBytesizeLimit = 10737418240L
-
-    /// `multer::parse_boundary`: the `boundary` of a `multipart/form-data` content type.
-    let internal parseBoundary (contentType: string) : string voption =
-        let segments = contentType.Split ';'
-        if not (String.Equals(segments[0].Trim(), "multipart/form-data", StringComparison.OrdinalIgnoreCase)) then
-            ValueNone
-        else
-            // Parameters, with quoted values read up to the closing quote.
-            let rest = contentType.Substring(segments[0].Length)
-            let mutable i = 0
-            let mutable found = ValueNone
-            while found.IsNone && i < rest.Length do
-                // at a ';'
-                i <- i + 1
-                let eq = rest.IndexOf('=', i)
-                let semi = rest.IndexOf(';', i)
-                if eq < 0 || (semi >= 0 && semi < eq) then
-                    // A parameter without a value.
-                    i <- if semi < 0 then rest.Length else semi
-                else
-                    let name = rest.Substring(i, eq - i).Trim()
-                    i <- eq + 1
-                    let value =
-                        if i < rest.Length && rest[i] = '"' then
-                            let out = StringBuilder()
-                            i <- i + 1
-                            let mutable closed = false
-                            while not closed && i < rest.Length do
-                                match rest[i] with
-                                | '"' ->
-                                    closed <- true
-                                    i <- i + 1
-                                | '\\' when i + 1 < rest.Length ->
-                                    out.Append rest[i + 1] |> ignore
-                                    i <- i + 2
-                                | c ->
-                                    out.Append c |> ignore
-                                    i <- i + 1
-                            // Up to the next parameter.
-                            let next = rest.IndexOf(';', i)
-                            i <- if next < 0 then rest.Length else next
-                            out.ToString()
-                        else
-                            let next = rest.IndexOf(';', i)
-                            let stop = if next < 0 then rest.Length else next
-                            let v = rest.Substring(i, stop - i).Trim()
-                            i <- stop
-                            v
-                    if String.Equals(name, "boundary", StringComparison.OrdinalIgnoreCase) && value.Length > 0 then
-                        found <- ValueSome value
-            found
 
     /// `Rack::Multipart::Parser#normalize_filename`: unescape when every `%` is a valid escape, then
     /// keep only the basename (browsers on Windows send full paths).
@@ -228,20 +176,24 @@ module RequestBody =
           ContentType = null
           Head = "" }
 
-    let private partFromHeaders (headers: IDictionary<string, Microsoft.Extensions.Primitives.StringValues>) : Part =
+    /// A part's `Content-Disposition` and `Content-Type`, with the headers as `Part::from_headers` records
+    /// them: names lowercased, values decoded leniently, in the order the part gave them.
+    let private partFromHeaders (headers: (string * byte[]) list) : Part =
+        let text (bytes: byte[]) = Encoding.UTF8.GetString bytes
         let value (name: string) : string | null =
-            let mutable result: string | null = null
-            for kv in headers do
-                if String.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase) && kv.Value.Count > 0 then
-                    result <- kv.Value[0]
-            result
+            match headers |> List.tryFind (fun (n, _) -> n = name) with
+            | Some(_, bytes) -> text bytes
+            | None -> null
         let head = StringBuilder()
-        for kv in headers do
-            for v in kv.Value do
-                head.Append(kv.Key.ToLowerInvariant()).Append(": ").Append(v).Append("\r\n") |> ignore
+        for (name, bytes) in headers do
+            head.Append(name).Append(": ").Append(text bytes).Append("\r\n") |> ignore
         let part =
             match value "content-disposition" with
-            | null -> { Name = value "content-id"; Filename = null; ContentType = null; Head = "" }
+            | null ->
+                { Name = value "content-id"
+                  Filename = null
+                  ContentType = null
+                  Head = "" }
             | disposition -> parseDisposition disposition
         { part with
             ContentType = value "content-type"
@@ -259,53 +211,15 @@ module RequestBody =
             | filename -> filename
         | name -> name
 
-    /// A body that stops, with `TooLarge`, once more than `limit` bytes have been read from it.
-    type private LimitedStream(inner: Stream, limit: int64) =
-        inherit Stream()
-        let mutable total = 0L
-
-        member _.Total = total
-
-        override _.CanRead = true
-        override _.CanSeek = false
-        override _.CanWrite = false
-        override _.Length = raise (NotSupportedException())
-
-        override _.Position
-            with get () = raise (NotSupportedException())
-            and set _ = raise (NotSupportedException())
-
-        override _.Flush() = ()
-        override _.Seek(_, _) = raise (NotSupportedException())
-        override _.SetLength _ = raise (NotSupportedException())
-        override _.Write(_, _, _) = raise (NotSupportedException())
-
-        member private _.Count(n: int) =
-            total <- total + int64 n
-            if total > limit then raise (BodyTooLarge())
-            n
-
-        override this.Read(buffer: byte[], offset: int, count: int) = this.Count(inner.Read(buffer, offset, count))
-
-        override this.ReadAsync(buffer: Memory<byte>, cancellationToken: CancellationToken) : ValueTask<int> =
-            let read = inner.ReadAsync(buffer, cancellationToken)
-            if read.IsCompletedSuccessfully then
-                ValueTask<int>(this.Count read.Result)
-            else
-                ValueTask<int>(
-                    task {
-                        let! n = read.AsTask()
-                        return this.Count n
-                    }
-                )
-
-    and private BodyTooLarge() =
-        inherit Exception("request body too large")
-
     /// Why reading a multipart body stopped early.
     type private Stop =
         | StopTooLarge
         | StopParams of ParamError
+
+    let private stopOf (error: MultipartError) : Stop =
+        match error with
+        | StreamSizeExceeded -> StopTooLarge
+        | _ -> StopParams ParamError.Parse
 
     let private tryDelete (path: string) : unit =
         try
@@ -313,21 +227,30 @@ module RequestBody =
         with _ ->
             ()
 
-    let private spool (section: MultipartSection) : Task<Result<struct (int64 * string), Stop>> =
+    /// Writes a file part to a temp file (`RackMultipart...`, as Rack names them), and returns its size and path.
+    let private spool (reader: Multipart.Reader) : Task<Result<struct (int64 * string), Stop>> =
         task {
             let path = UploadedFile.NewTempPath()
+            let mutable failure: Stop voption = ValueNone
+            let mutable size = 0L
             try
-                use file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous)
-                do! section.Body.CopyToAsync(file, 81920)
+                use file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous)
+                let mutable reading = true
+                while reading && failure.IsNone do
+                    match! reader.NextChunk() with
+                    | Error e -> failure <- ValueSome(stopOf e)
+                    | Ok ValueNone -> reading <- false
+                    | Ok(ValueSome chunk) ->
+                        size <- size + int64 chunk.Length
+                        do! file.WriteAsync chunk
                 do! file.FlushAsync()
-                return Ok(struct (file.Length, path))
-            with
-            | :? BodyTooLarge ->
+            with :? IOException as e ->
+                failure <- ValueSome(StopParams(ParamError.Invalid e.Message))
+            match failure with
+            | ValueSome stop ->
                 tryDelete path
-                return Error StopTooLarge
-            | :? IOException as e ->
-                tryDelete path
-                return Error(StopParams(ParamError.Invalid e.Message))
+                return Error stop
+            | ValueNone -> return Ok(struct (size, path))
         }
 
     let private parseMultipart (body: Stream) (boundary: string) (limit: int voption) : Task<Result<ParsedBody, BodyError>> =
@@ -336,82 +259,73 @@ module RequestBody =
                 match limit with
                 | ValueSome limit -> min (int64 limit) MultipartBytesizeLimit
                 | ValueNone -> MultipartBytesizeLimit
-            let stream = new LimitedStream(body, limit)
+            let reader = Multipart.Reader(body, boundary, limit)
             let pairs = ResizeArray<RawPair>()
             let mutable parts = 0
             let mutable files = 0
             let mutable text = 0
             let mutable stop: Stop voption = ValueNone
             try
-                try
-                    let reader = MultipartReader(boundary, stream)
-                    reader.HeadersCountLimit <- 32
-                    let mutable go = true
-                    while go && stop.IsNone do
-                        let! section = reader.ReadNextSectionAsync()
-                        match section with
-                        | null -> go <- false
-                        | section ->
-                            parts <- parts + 1
-                            if parts > MultipartPartLimit then
-                                stop <- ValueSome(StopParams(ParamError.Limit "too many multipart parts"))
-                            else
-                                let part =
-                                    partFromHeaders (
-                                        match section.Headers with
-                                        | null -> Dictionary()
-                                        | h -> h
-                                    )
-                                match part.Filename with
-                                // A blank filename means no file was selected: Rack drops the part.
-                                | "" -> do! section.Body.CopyToAsync Stream.Null
-                                | null ->
-                                    use value = new MemoryStream()
-                                    let buffer = ArrayPool<byte>.Shared.Rent 8192
-                                    try
-                                        let mutable reading = true
-                                        while reading && stop.IsNone do
-                                            let! n = section.Body.ReadAsync(Memory<byte>(buffer))
-                                            if n = 0 then
-                                                reading <- false
-                                            else
-                                                text <- text + n
-                                                if text > MultipartTextLimit then
-                                                    stop <- ValueSome StopTooLarge
-                                                else
-                                                    value.Write(buffer, 0, n)
-                                    finally
-                                        ArrayPool<byte>.Shared.Return buffer
-                                    if stop.IsNone then
-                                        let bytes = value.GetBuffer().AsSpan(0, int value.Length)
-                                        let decoded =
-                                            if System.Text.Unicode.Utf8.IsValid bytes then
-                                                { Text = Encoding.UTF8.GetString bytes
-                                                  Invalid = null }
-                                            else
-                                                { Text = null
-                                                  Invalid = bytes.ToArray() }
-                                        pairs.Add
-                                            { Key = { Text = partName part; Invalid = null }
-                                              Value = decoded
-                                              HasValue = true
-                                              File = null }
-                                | filename ->
-                                    files <- files + 1
-                                    if files > MultipartFileLimit then
-                                        stop <- ValueSome(StopParams(ParamError.Limit "too many files"))
-                                    else
-                                        match! spool section with
-                                        | Error s -> stop <- ValueSome s
-                                        | Ok(struct (size, path)) ->
-                                            let upload = new UploadedFile(filename, part.ContentType, part.Head, size, path)
-                                            pairs.Add(Params.filePair (partName part) upload)
-                with
-                | :? BodyTooLarge -> stop <- ValueSome StopTooLarge
-                | :? InvalidDataException
-                | :? IOException -> stop <- ValueSome(StopParams ParamError.Parse)
+                let mutable go = true
+                while go && stop.IsNone do
+                    match! reader.NextField() with
+                    | Error e -> stop <- ValueSome(stopOf e)
+                    | Ok false -> go <- false
+                    | Ok true ->
+                        parts <- parts + 1
+                        if parts > MultipartPartLimit then
+                            stop <- ValueSome(StopParams(ParamError.Limit "too many multipart parts"))
+                        else
+                            let part = partFromHeaders reader.Headers
+                            match part.Filename with
+                            // A blank filename means no file was selected: Rack drops the part.
+                            | "" ->
+                                let mutable draining = true
+                                while draining && stop.IsNone do
+                                    match! reader.NextChunk() with
+                                    | Error e -> stop <- ValueSome(stopOf e)
+                                    | Ok ValueNone -> draining <- false
+                                    | Ok(ValueSome _) -> ()
+                            | null ->
+                                use value = new PooledBufferWriter(256)
+                                let writer = value :> System.Buffers.IBufferWriter<byte>
+                                let mutable reading = true
+                                while reading && stop.IsNone do
+                                    match! reader.NextChunk() with
+                                    | Error e -> stop <- ValueSome(stopOf e)
+                                    | Ok ValueNone -> reading <- false
+                                    | Ok(ValueSome chunk) ->
+                                        text <- text + chunk.Length
+                                        if text > MultipartTextLimit then
+                                            stop <- ValueSome StopTooLarge
+                                        else
+                                            writer.Write chunk.Span
+                                if stop.IsNone then
+                                    let bytes = value.WrittenMemory.Span
+                                    let decoded =
+                                        if System.Text.Unicode.Utf8.IsValid bytes then
+                                            { Text = Encoding.UTF8.GetString bytes
+                                              Invalid = null }
+                                        else
+                                            { Text = null
+                                              Invalid = bytes.ToArray() }
+                                    pairs.Add
+                                        { Key = { Text = partName part; Invalid = null }
+                                          Value = decoded
+                                          HasValue = true
+                                          File = null }
+                            | filename ->
+                                files <- files + 1
+                                if files > MultipartFileLimit then
+                                    stop <- ValueSome(StopParams(ParamError.Limit "too many files"))
+                                else
+                                    match! spool reader with
+                                    | Error s -> stop <- ValueSome s
+                                    | Ok(struct (size, path)) ->
+                                        let upload = new UploadedFile(filename, part.ContentType, part.Head, size, path)
+                                        pairs.Add(Params.filePair (partName part) upload)
             finally
-                stream.Dispose()
+                reader.Release()
             let discard () =
                 for pair in pairs do
                     match pair.File with
@@ -495,9 +409,12 @@ module RequestBody =
                 | "" -> null
                 | ct -> ct
             let media = RequestHeaders.mediaType contentType
+            // `matches!(media, form-data | related | mixed) && multer::parse_boundary(ct).ok()`: only
+            // `multipart/form-data` parses, so the others are read as plain bodies.
             let boundary =
                 match media, contentType with
-                | "multipart/form-data", ct when not (isNull ct) -> parseBoundary (nonNull ct)
+                | ("multipart/form-data" | "multipart/related" | "multipart/mixed"), ct when not (isNull ct) ->
+                    Multipart.parseBoundary (nonNull ct)
                 | _ -> ValueNone
             match boundary with
             | ValueSome boundary -> return! parseMultipart body boundary limit

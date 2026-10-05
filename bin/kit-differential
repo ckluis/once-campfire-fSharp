@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Compares Campfire.Kit with the Rust kit on generated inputs: Accept headers and format negotiation,
+# cookie headers, host/protocol/client address from proxy headers, JSON and form bodies, strong
+# parameters, multipart bodies and content types (multer, mime and httparse, ported), each a few
+# thousand ways. Any difference fails; the first few are printed.
+#   bin/kit-differential                  the default amounts
+#   bin/kit-differential 2000 7           that many inputs of each kind, from that seed
+#   bin/kit-differential golden           rewrite tests/Campfire.Kit.Tests/differential.jsonl: a sample
+#                                         of inputs with the Rust kit's answers, which the F# tests replay
+# Needs mise for the Rust toolchain (the version in rust/Dockerfile) and python3.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.dotnet:$PATH" DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+tool=reference-tools/kit/differential
+out=target/kit-differential
+mkdir -p "$out"
+
+mode=compare
+if [ "${1:-}" = golden ]; then mode=golden; shift; fi
+count="${1:-3000}"
+seed="${2:-1}"
+[ $mode = golden ] && count=400
+
+CARGO_TARGET_DIR="$PWD/$out/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --offline --manifest-path "$tool/Cargo.toml"
+dotnet build "$tool/fsharp" -c Release -v quiet -nologo -o "$out/fsharp"
+
+python3 "$tool/generate.py" "$count" "$seed" > "$out/input"
+"$out/rust/release/kit-differential" < "$out/input" > "$out/rust.output"
+
+if [ $mode = golden ]; then
+  python3 "$tool/golden.py" "$out/input" "$out/rust.output" 150 > tests/Campfire.Kit.Tests/differential.jsonl
+  echo "tests/Campfire.Kit.Tests/differential.jsonl: $(wc -l < tests/Campfire.Kit.Tests/differential.jsonl) cases"
+  exit 0
+fi
+
+dotnet "$out/fsharp/Differential.dll" < "$out/input" > "$out/fsharp.output"
+python3 "$tool/compare.py" "$out/input" "$out/rust.output" "$out/fsharp.output"

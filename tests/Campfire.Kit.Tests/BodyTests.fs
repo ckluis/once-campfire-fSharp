@@ -174,7 +174,7 @@ let ``a body without a known length is read up to the limit`` () =
 
 [<Fact>]
 let ``boundaries are read as multer reads them`` () =
-    let boundary (ct: string) = RequestBody.parseBoundary ct
+    let boundary (ct: string) = Multipart.parseBoundary ct
     Assert.Equal(ValueSome "----campfire", boundary "multipart/form-data; boundary=----campfire")
     Assert.Equal(ValueSome "a b", boundary "multipart/form-data; charset=utf-8; boundary=\"a b\"")
     Assert.Equal(ValueSome "x", boundary "Multipart/Form-Data;BOUNDARY=x")

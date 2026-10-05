@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
+    <Compile Include="../../reference-tools/kit/differential/fsharp/Operations.fs" Link="Operations.fs" />
     <Compile Include="Helpers.fs" />
     <Compile Include="Harness.fs" />
     <Compile Include="FormatTests.fs" />
@@ -24,6 +25,7 @@
     <Compile Include="LoggingTests.fs" />
     <Compile Include="ParamsVectorTests.fs" />
     <Compile Include="RailsVectorTests.fs" />
+    <Compile Include="DifferentialTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.Kit/Campfire.Kit.fsproj" />

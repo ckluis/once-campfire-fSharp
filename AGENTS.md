@@ -84,6 +84,11 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
 - `bin/richtext-differential` compares `Campfire.RichText` with the Rust crate on generated inputs: how markup
   parses in 20 contexts, and what a body presents as, as plain text, as an editor value and for its mentions.
   It needs mise for the Rust toolchain; run it after changing the parser, the sanitizer or the pipeline.
+- `bin/kit-differential` compares `Campfire.Kit` with the Rust kit on generated inputs: Accept headers and format
+  negotiation, cookie headers, host/protocol/client address from proxy headers, JSON and form bodies, strong
+  parameters, and multipart bodies and content types. `bin/kit-differential golden` refreshes the sample of
+  Rust's answers that `Campfire.Kit.Tests` replays. It needs mise for the Rust toolchain; run it after changing
+  params, cookies, formats, request or the multipart reader.
 - `Campfire.Storage` needs libvips (`brew install vips` on macOS; `bin/verify` points NetVips at Homebrew's) and,
   for video, ffmpeg and ffprobe. The storage vectors' byte comparisons run only against libvips 8.16.1 and
   ffmpeg 7.1.5 (rust/Dockerfile's builds); otherwise they are skipped with a note on stderr, so say so when

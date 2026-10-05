@@ -1,0 +1,17 @@
+# What the Rust kit makes of the inputs bin/kit-differential generates, for the F# port to be compared
+# with. Not part of rust/'s workspace: the crates are path dependencies, built where they are.
+[package]
+name = "kit-differential"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+campfire_kit = { path = "../../../rust/crates/kit" }
+axum = { version = "0.8", default-features = false, features = ["tokio"] }
+bytes = "1"
+mime = "0.3"
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[workspace]
