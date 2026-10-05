@@ -32,7 +32,9 @@ fn ssl_app() -> Router {
 #[tokio::main]
 async fn main() {
     let port: u16 = std::env::args().nth(1).and_then(|p| p.parse().ok()).unwrap_or(4001);
+    // config.ru: `use Rack::Deflater` around the whole app.
     let router = if std::env::args().nth(2).as_deref() == Some("ssl") { ssl_app() } else { app() };
+    let router = router.layer(axum::middleware::from_fn(campfire_kit::deflater::deflater));
     let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await.unwrap();
     axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
 }

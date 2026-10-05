@@ -188,6 +188,7 @@ let ``the deflater on HEAD, and when nothing is acceptable`` () =
             Assert.Equal("An acceptable encoding for the requested resource /page could not be found.", refused.Text)
             // It comes from outside the kit's own middleware.
             Assert.Equal(None, refused.Header "x-request-id")
+            Assert.Equal(None, refused.Header "strict-transport-security")
         finally
             File.Delete path
     }
@@ -394,6 +395,23 @@ let ``a header with anything but visible ascii in it is no header`` () =
             Assert.Equal(36, (reply.Header "x-request-id").Value.Length)
             let! sane = app.Send((get "/page").With("x-request-id", "cafe-123"))
             Assert.Equal(Some "cafe-123", sane.Header "x-request-id")
+        finally
+            File.Delete path
+    }
+
+
+[<Fact>]
+let ``the deflater's 406 is outside the SSL middleware too`` () =
+    task {
+        let tls = { KitConfig.Default with ForceSsl = true; Proxy = { ProxyConfig.Default with AssumeSsl = true } }
+        let! app, path = startApp true tls
+        use _ = app
+        try
+            let! ok = app.Send(get "/page")
+            Assert.Equal(Some "max-age=63072000; includeSubDomains", ok.Header "strict-transport-security")
+            let! refused = app.Send((get "/page").With("accept-encoding", "identity;q=0, *;q=0"))
+            Assert.Equal(406, refused.Status)
+            Assert.Equal(None, refused.Header "strict-transport-security")
         finally
             File.Delete path
     }

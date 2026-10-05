@@ -22,6 +22,8 @@ let main argv =
     |> ignore
     builder.Logging.ClearProviders() |> ignore
     let app = builder.Build()
+    // config.ru: `use Rack::Deflater` around the whole app.
+    Adapter.useDeflater kit app |> ignore
     Adapter.app kit (HttpApp.routes kit) app
     app.Run()
     0

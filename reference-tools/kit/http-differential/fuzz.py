@@ -11,12 +11,16 @@ ports of their own, with the same secret and a frozen clock, so a cookie one set
 
 What is left out of the comparison, because it is not the kit's:
   - Date, Server, X-Runtime and the connection and framing headers;
+  - the compressed bytes of a gzipped body (each side deflates its own way): what they decode to is compared;
   - the Allow header axum adds to its 404 for a method a route lacks;
   - Content-Length: 0 on a HEAD answered 204 or 304, which hyper sends and Kestrel (RFC 9110) doesn't;
   - the value of an encrypted session cookie and the session ids in bodies (random per server).
+`_method=head` is not sent: a POST answered as a HEAD has no framing of its own to compare (AdapterTests
+checks what the F# kit does with it).
 Exits 1 if anything else differs.
 """
 import collections
+import gzip
 import os
 import random
 import re
@@ -90,10 +94,16 @@ def parse(data):
 
 
 SKIPPED = {"date", "server", "x-runtime", "connection", "keep-alive", "transfer-encoding", "allow"}
+ENCODINGS = ["gzip", "gzip, deflate, br", "identity", "gzip;q=0", "*", "identity;q=0, *;q=0", "br", "gzip;q=0.5, identity;q=0.9", "deflate", ""]
 
 
 def normalize(response, method, path):
     status, headers, body = response
+    if any(k == "content-encoding" and v == "gzip" for k, v in headers):
+        # Each side's deflate is its own: the bytes differ and what they decode to is the body. The
+        # header holds the OS code and the modification time, which are the same.
+        header = body[:10]
+        body = header[3:4] + header[4:8] + header[9:10] + gzip.decompress(body) if body else body
     kept = []
     for name, value in headers:
         if name in SKIPPED:
@@ -139,7 +149,7 @@ def request_body(method):
             ["value=%2Frooms%2F1", "a[b][]=1&a[b][]=2&b=body&id=body", "user[name]=Jo", "x=%", "", "message[body]=hi&message[client_message_id]=1",
              "authenticity_token=abc&x=1"])
     if kind == "override":
-        return "application/x-www-form-urlencoded", "_method=" + rng.choice(["patch", "delete", "put", "bogus", "get", "head", "PATCH"]) + "&user[name]=Jo"
+        return "application/x-www-form-urlencoded", "_method=" + rng.choice(["patch", "delete", "put", "bogus", "get", "PATCH"]) + "&user[name]=Jo"
     if kind == "json":
         return "application/json", rng.choice(['{"a":1}', '{"user":{"name":"Jo"}}', "{nope", "[1,2]", '{"_method":"patch"}', ""])
     if kind == "text":
@@ -163,6 +173,8 @@ def make_request():
         headers.append(("if-none-match", rng.choice((etags.get(path.split("?")[0]) or []) + ETAGS)))
     if rng.random() < 0.15:
         headers.append(("if-modified-since", rng.choice(DATES)))
+    if rng.random() < 0.6:
+        headers.append(("accept-encoding", rng.choice(ENCODINGS)))
     if cookies and rng.random() < 0.5:
         headers.append(("cookie", "; ".join(rng.sample(cookies, min(len(cookies), rng.randint(1, 3))))))
     if rng.random() < 0.5:

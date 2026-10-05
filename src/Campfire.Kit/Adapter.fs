@@ -55,6 +55,10 @@ type RequestState(kit: Kit, http: HttpContext) =
     /// (`Rack::Runtime`, `ActionDispatch::RequestId`): public files, and the deflater's own 406.
     member val SkipRequestHeaders = false with get, set
 
+    /// The response is the deflater's 406, which replaces everything below it, `ActionDispatch::SSL` too:
+    /// no HSTS, no `secure` on cookies.
+    member val Replaced = false with get, set
+
 module Adapter =
     let private stateKey = "campfire.kit.state"
 
@@ -271,12 +275,8 @@ module Adapter =
                 | _ -> ()
                 http.Response.StatusCode <- Status.InternalServerError
             else
-                // A POST that `_method` turned into a HEAD is still a POST on the wire, whose body the host
-                // expects to be as long as the response says: with no body written, it says nothing.
-                if head && not (isNull state.OriginalMethod) then response.Headers.Remove Hdr.ContentLength
                 // The length the host will send: known for a buffer, parts and a file.
                 match response.Body with
-                | _ when head && not (isNull state.OriginalMethod) -> ()
                 | Body.Bytes bytes -> response.Headers.Insert(Hdr.ContentLength, string bytes.Length)
                 | Body.Pooled pooled -> response.Headers.Insert(Hdr.ContentLength, string pooled.Length)
                 | Body.Parts parts -> response.Headers.Insert(Hdr.ContentLength, string parts.BodyLength)
@@ -292,9 +292,13 @@ module Adapter =
                     | NotAcceptable ->
                         // The deflater answers outside the layers below it.
                         state.SkipRequestHeaders <- true
+                        state.Replaced <- true
                         releaseBody response.Body
                         let struct (path, query, _) = splitTarget http
                         response <- Deflater.notAcceptable (match query with null -> path | q -> path + "?" + q)
+                // A POST that `_method` turned into a HEAD is still a POST on the wire, whose body the host
+                // expects to be as long as the response says: with no body written, it says nothing.
+                if head && not (isNull state.OriginalMethod) then response.Headers.Remove Hdr.ContentLength
                 copyHeaders http response
                 try
                     try
@@ -342,7 +346,7 @@ module Adapter =
                         let seconds = Stopwatch.GetElapsedTime(state.Started).TotalSeconds
                         headers[Hdr.XRuntime] <- seconds.ToString("F6", Globalization.CultureInfo.InvariantCulture)
                 let config = state.Kit.Config
-                if config.ForceSsl && state.Ssl then
+                if config.ForceSsl && state.Ssl && not state.Replaced then
                     headers[Hdr.StrictTransportSecurity] <- config.Hsts
                     flagCookiesAsSecure headers
             | _ -> ()
