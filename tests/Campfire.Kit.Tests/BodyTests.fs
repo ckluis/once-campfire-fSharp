@@ -59,12 +59,12 @@ let ``multipart fields and files`` () =
     let body =
         multipartBody
             boundary
-            [ """Content-Disposition: form-data; name="_method" """.TrimEnd(), "patch"
-              """Content-Disposition: form-data; name="user[name]" """.TrimEnd(), "Jo"
+            [ "Content-Disposition: form-data; name=\"_method\"", "patch"
+              "Content-Disposition: form-data; name=\"user[name]\"", "Jo"
               "Content-Disposition: form-data; name=\"user[avatar]\"; filename=\"me.png\"\r\nContent-Type: image/png", "PNGDATA"
-              """Content-Disposition: form-data; name="user[empty]"; filename="" """.TrimEnd(), ""
-              """Content-Disposition: form-data; name="tags[]" """.TrimEnd(), "a"
-              """Content-Disposition: form-data; name="tags[]" """.TrimEnd(), "b" ]
+              "Content-Disposition: form-data; name=\"user[empty]\"; filename=\"\"", ""
+              "Content-Disposition: form-data; name=\"tags[]\"", "a"
+              "Content-Disposition: form-data; name=\"tags[]\"", "b" ]
     let result = parse "POST" (headersOf $"multipart/form-data; boundary={boundary}") body ValueNone
     let files = match result with Ok p -> p.Files | Error e -> failwith $"{e}"
     try
@@ -85,7 +85,7 @@ let ``multipart fields and files`` () =
 
 [<Fact>]
 let ``multipart size limit`` () =
-    let body = multipartBody "B" [ """Content-Disposition: form-data; name="f"; filename="x" """.TrimEnd(), String('x', 1000) ]
+    let body = multipartBody "B" [ "Content-Disposition: form-data; name=\"f\"; filename=\"x\"", String('x', 1000) ]
     match parse "POST" (headersOf "multipart/form-data; boundary=B") body (ValueSome 100) with
     | Error TooLarge -> ()
     | other -> failwith $"{other}"
@@ -94,8 +94,8 @@ let ``multipart size limit`` () =
 let ``multipart text fields are capped together`` () =
     let half = String('x', RequestBody.MultipartTextLimit / 2)
     let headers = headersOf "multipart/form-data; boundary=B"
-    let field = """Content-Disposition: form-data; name="a[]" """.TrimEnd()
-    let file = """Content-Disposition: form-data; name="f"; filename="x" """.TrimEnd()
+    let field = "Content-Disposition: form-data; name=\"a[]\""
+    let file = "Content-Disposition: form-data; name=\"f\"; filename=\"x\""
     let fits = multipartBody "B" [ field, half; field, half; file, half ]
     let parsed = parse "POST" headers fits ValueNone
     match parsed with
@@ -113,7 +113,7 @@ let ``multipart text fields are capped together`` () =
 let ``multipart parts and files are limited`` () =
     let headers = headersOf "multipart/form-data; boundary=B"
     let tooManyParts =
-        multipartBody "B" [ for _ in 0 .. RequestBody.MultipartPartLimit -> """Content-Disposition: form-data; name="a[]" """.TrimEnd(), "x" ]
+        multipartBody "B" [ for _ in 0 .. RequestBody.MultipartPartLimit -> "Content-Disposition: form-data; name=\"a[]\"", "x" ]
     match parse "POST" headers tooManyParts ValueNone with
     | Ok { Params = Error(ParamError.Limit _) } -> ()
     | other -> failwith $"{other}"

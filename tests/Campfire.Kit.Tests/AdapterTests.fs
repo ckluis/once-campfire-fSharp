@@ -282,12 +282,7 @@ let ``request bodies are bounded by the limit whether or not their length is ann
             let! small = app.Send(formPost "/echo" "a=1")
             Assert.Equal(200, small.Status)
             // Chunked, with no length announced: read up to the limit, then refused.
-            let chunked (payload: string) =
-                let bytes = Encoding.UTF8.GetBytes payload
-                let body = $"{bytes.Length:x}\r\n{payload}\r\n0\r\n\r\n"
-                (post "/echo").With("content-type", "application/x-www-form-urlencoded").With("transfer-encoding", "chunked")
-                |> fun r -> { r with Body = ValueSome(Encoding.UTF8.GetBytes body) }
-            // (Send adds content-length for a body, so write the chunked request by hand.)
+            // (`Send` adds a Content-Length to a body, so the chunked request is written by hand.)
             use client = new System.Net.Sockets.TcpClient()
             do! client.ConnectAsync(System.Net.IPAddress.Loopback, app.Port)
             let stream = client.GetStream()
@@ -298,7 +293,6 @@ let ``request bodies are bounded by the limit whether or not their length is ann
             use received = new MemoryStream()
             do! stream.CopyToAsync received
             Assert.StartsWith("HTTP/1.1 413", Encoding.UTF8.GetString(received.ToArray()))
-            ignore chunked
         finally
             File.Delete path
     }
