@@ -120,8 +120,8 @@ module Front =
                     let port = ctx.Connection.LocalPort
                     if upstream && port = config.TargetPort then
                         task {
-                            let! within = FrontRequest.withinLimit ctx maxBody
-                            if within then do! appDelegate.Invoke ctx else FrontRequest.tooLarge ctx
+                            let! within = FrontProxy.withinLimit ctx maxBody
+                            if within then do! appDelegate.Invoke ctx else FrontProxy.tooLarge ctx
                         }
                         :> Task
                     elif tls && port = config.HttpPort then

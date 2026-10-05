@@ -39,6 +39,11 @@ type CachedResponse
         for struct (name, value) in headers do
             if isNull found && name.Equals("etag", StringComparison.OrdinalIgnoreCase) then found <- value
         found
+    let vary =
+        let mutable found = ""
+        for struct (name, value) in headers do
+            if found = "" && name.Equals("vary", StringComparison.OrdinalIgnoreCase) then found <- value
+        found
 
     member _.Status = status
 
@@ -51,6 +56,9 @@ type CachedResponse
 
     /// The first `ETag` value, or null.
     member _.Etag: string | null = etag
+
+    /// The first `Vary` value, or "".
+    member _.Vary: string = vary
 
     /// How much of the cache it takes up stored under `key`: its body, headers, variant, the key and
     /// the entry's overhead.
@@ -237,6 +245,15 @@ type Variant(meth: string, path: string, query: string, host: string, requestHea
             | "" -> (match authority with null -> "" | a -> a)
             | host -> host
         Variant(meth, path, query, host, headers)
+
+    /// The key of a request before its response's `Vary` is known: its method, path, query and host.
+    static member BaseKey(meth: string, rawTarget: string | null, headers: IHeaderDictionary) : string =
+        let struct (path, query, authority) = FrontCache.splitTarget rawTarget
+        let host =
+            match headers.Host.ToString() with
+            | "" -> (match authority with null -> "" | a -> a)
+            | host -> host
+        String.Concat(meth, "\n", path, "\n", query, "\n", host)
 
     /// The request's first value of a header, or "".
     member private _.RequestValue(name: string) : string =

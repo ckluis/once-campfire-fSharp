@@ -132,7 +132,9 @@ type internal AcmeClient(http: HttpClient, directoryUrl: string, key: ECDsa) =
             match urls with
             | ValueSome known -> return known
             | ValueNone ->
-                let! body = http.GetStringAsync directoryUrl
+                use! response = http.GetAsync directoryUrl
+                let! body = response.Content.ReadAsStringAsync()
+                if not response.IsSuccessStatusCode then raise (problem response.StatusCode body)
                 use doc = JsonDocument.Parse body
                 let get (name: string) = doc.RootElement.GetProperty(name).GetString() |> nonNull
                 let known = struct (get "newNonce", get "newAccount", get "newOrder")
@@ -517,7 +519,10 @@ module internal AcmeFiles =
                         chain.ChainPolicy.RevocationMode <- X509RevocationMode.NoCheck
                         use leaf = new X509Certificate2(certificate)
                         chain.Build leaf)
-        new HttpClient(handler, Timeout = TimeSpan.FromSeconds 90.0)
+        let client = new HttpClient(handler, Timeout = TimeSpan.FromSeconds 90.0)
+        // RFC 8555 section 6.1: every request names its client.
+        client.DefaultRequestHeaders.UserAgent.ParseAdd "campfire-fsharp-front (+https://github.com/ckluis/once-campfire-fsharp)"
+        client
 
 module AcmeOptions =
     let fromConfig (logger: ILogger) (config: FrontConfig) : AcmeOptions =
@@ -724,10 +729,14 @@ type CertManager(options: AcmeOptions, logger: ILogger) =
     member private this.RenewForever(name: string, first: DateTimeOffset) : Task =
         task {
             let mutable notAfter = first
+            let mutable renewed = false
             try
                 while not shutdown.IsCancellationRequested do
                     let jitter = TimeSpan.FromTicks(int64 (float AcmeTimings.renewJitter.Ticks * Random.Shared.NextDouble()))
-                    let mutable wait = notAfter - DateTimeOffset.UtcNow - AcmeTimings.renewBefore - jitter
+                    let due = notAfter - DateTimeOffset.UtcNow - AcmeTimings.renewBefore - jitter
+                    // A certificate that lives less than `renewBefore` (a CA's short-lived profile) would be
+                    // renewed over and over; after a renewal the next one waits at least an hour.
+                    let mutable wait = if renewed && due < AcmeTimings.renewJitter then AcmeTimings.renewJitter else due
                     // `Task.Delay` takes at most ~49 days.
                     while wait > TimeSpan.Zero do
                         let step = if wait > TimeSpan.FromDays 7.0 then TimeSpan.FromDays 7.0 else wait
@@ -737,6 +746,7 @@ type CertManager(options: AcmeOptions, logger: ILogger) =
                         let! certificate = this.Issue name
                         lock gate (fun () -> certificates[name] <- certificate)
                         notAfter <- certificate.NotAfter
+                        renewed <- true
                     with e when not (e :? OperationCanceledException) ->
                         logger.LogError("TLS: certificate renewal failed domain={Domain} error={Error}", name, e.Message)
                         let half = AcmeTimings.renewJitter / 2.0

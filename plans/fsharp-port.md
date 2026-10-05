@@ -50,7 +50,9 @@ Library mapping:
 | flate2 / crc32fast (gzip) | `System.IO.Compression.DeflateStream` for the deflate, with the gzip header and trailer written by hand (the modification time and the Unix OS code Rack writes) and a CRC-32 on the ARM instructions or slicing-by-8 tables. Compressed bytes differ from flate2's; what they decode to doesn't |
 | tungstenite-style socket | ASP.NET Core WebSockets (permessage-deflate as Rust does it) |
 | web-push / p256 / hkdf | System.Security.Cryptography ECDH + HKDF + AES-GCM |
-| rustls + instant-acme | Kestrel TLS + an ACME client (choose in Phase 3) |
+| rustls + instant-acme | Kestrel TLS (a handshake callback picks the certificate, after reading the ClientHello's ALPN list off the connection for TLS-ALPN-01) + `Front/Acme.fs`, a small RFC 8555 client on `HttpClient` and `System.Security.Cryptography`: Certes and its forks are unmaintained and LettuceEncrypt keeps PFX files behind its own hosting integration, while the part of ACME this needs is a few hundred lines. Exercised against Pebble and a stub CA |
+| zstd (zstd crate) | ZstdSharp.Port, a managed port (.NET 10 has no zstd; the front server compresses with it for clients that accept zstd but not gzip) |
+| hyper's server, hyper-util `auto` (h1, h2, h2c) | Kestrel, one host for every listener; cleartext HTTP/2 beside HTTP/1.1 by reading a connection's first bytes (`FrontH2c`) |
 | qrcode (pinned to RQRCode) | port Rust's `rqrcode.rs` directly |
 
 ## Phases and gates

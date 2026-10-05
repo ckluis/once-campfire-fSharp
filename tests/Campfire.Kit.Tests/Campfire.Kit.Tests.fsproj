@@ -25,7 +25,9 @@
     <Compile Include="FrontCompressionTests.fs" />
     <Compile Include="FrontTlsTests.fs" />
     <Compile Include="FrontAcmeTests.fs" />
+    <Compile Include="AcmeStub.fs" />
     <Compile Include="FrontTests.fs" />
+    <Compile Include="FrontAcmeIntegrationTests.fs" />
     <Compile Include="HttpApp.fs" />
     <Compile Include="HttpTests.fs" />
     <Compile Include="CtxTests.fs" />

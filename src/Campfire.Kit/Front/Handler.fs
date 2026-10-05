@@ -59,6 +59,13 @@ type FrontServices(config: FrontConfig, logger: ILogger) =
                 if acceptEncodings.Count < 512 then acceptEncodings.TryAdd(accept, encoding) |> ignore
                 encoding
 
+module internal FrontRequest =
+    /// The request target as the client sent it.
+    let rawTarget (ctx: HttpContext) : string | null =
+        match ctx.Features.Get<IHttpRequestFeature>() with
+        | null -> null
+        | feature -> feature.RawTarget
+
 module internal FrontHeaders =
     /// The first value of a header, or "".
     let first (headers: IHeaderDictionary) (name: string) : string =
@@ -115,6 +122,36 @@ type RequestLogEntry(fields: KeyValuePair<string, obj | null>[]) =
             text.Append(' ').Append(field.Key).Append('=').Append(field.Value) |> ignore
         text.ToString()
 
+/// What a response being recorded for the cache needs.
+[<Sealed>]
+type internal RecordState(lifetime: TimeSpan) =
+    member _.Lifetime = lifetime
+    member val Overflowed = false with get, set
+
+    [<DefaultValue>]
+    val mutable Body: ArrayBufferWriter<byte> | null
+
+    [<DefaultValue>]
+    val mutable Headers: struct (string * string)[] | null
+
+    member val Vary = "" with get, set
+
+/// What a response that may be compressed needs: the start of the body, held until it's clear whether
+/// to, and the encoder once it is.
+[<Sealed>]
+type internal CompressState() =
+    [<DefaultValue>]
+    val mutable Held: ArrayBufferWriter<byte> | null
+
+    [<DefaultValue>]
+    val mutable Encoder: FrontEncoder | null
+
+    member val Encoding = Encoding.NoEncoding with get, set
+    member val FinalLength = -1L with get, set
+
+    [<DefaultValue>]
+    val mutable SniffedContentType: string | null
+
 /// The response a handler gives the connection: the `IHttpResponseBodyFeature` the app writes to.
 [<Sealed>]
 type FrontResponse
@@ -125,27 +162,17 @@ type FrontResponse
         merge: HeaderMerge,
         negotiation: Negotiation,
         cacheKey: string | null,
-        variant: Variant,
         now: int64
     ) =
     /// 0: not decided (the app hasn't written yet), 1: pass on, 2: holding the start of the body to
     /// decide whether to compress, 3: compressing.
     let mutable mode = 0
-    let mutable recording = false
-    let mutable recordLifetime = TimeSpan.Zero
-    let mutable recordOverflowed = false
-    let mutable recorded: ArrayBufferWriter<byte> | null = null
-    let mutable recordedHeaders: struct (string * string)[] | null = null
-    let mutable held: ArrayBufferWriter<byte> | null = null
-    let mutable encoder: FrontEncoder | null = null
-    let mutable encoding = Encoding.NoEncoding
-    let mutable finalLength = -1L
-    let mutable sniffedContentType: string | null = null
-    let mutable bytesSent = 0L
-    let mutable logged = false
     let mutable hit = false
+    let mutable logged = false
+    let mutable bytesSent = 0L
+    let mutable record: RecordState | null = null
+    let mutable compress: CompressState | null = null
     let mutable scratch: ArrayBufferWriter<byte> | null = null
-    let mutable lastMemory = Memory<byte>.Empty
     let mutable stream: FrontStream | null = null
     let mutable writer: FrontWriter | null = null
 
@@ -162,16 +189,21 @@ type FrontResponse
         let headers = ctx.Response.Headers
         let status = ctx.Response.StatusCode
         // The cache keeps the response as the app made it, before anything below.
-        if recording then recordedHeaders <- FrontHeaders.snapshot headers
-        FrontHeaders.addVary headers merge
-        if encoding <> Encoding.NoEncoding then
-            headers.ContentEncoding <- (if encoding = Encoding.Gzip then "gzip" else "zstd")
-            headers.Remove "Content-Length" |> ignore
-            headers.Remove "Accept-Ranges" |> ignore
-            if finalLength >= 0L then headers.ContentLength <- finalLength
-        match sniffedContentType with
+        match record with
         | null -> ()
-        | contentType -> if not (headers.ContainsKey "Content-Type") then headers.ContentType <- contentType
+        | state -> state.Headers <- FrontHeaders.snapshot headers
+        FrontHeaders.addVary headers merge
+        match compress with
+        | null -> ()
+        | state ->
+            if state.Encoding <> Encoding.NoEncoding then
+                headers.ContentEncoding <- (if state.Encoding = Encoding.Gzip then "gzip" else "zstd")
+                headers.Remove "Content-Length" |> ignore
+                headers.Remove "Accept-Ranges" |> ignore
+                if state.FinalLength >= 0L then headers.ContentLength <- state.FinalLength
+            match state.SniffedContentType with
+            | null -> ()
+            | contentType -> if not (headers.ContainsKey "Content-Type") then headers.ContentType <- contentType
         headers["X-Cache"] <- StringValues this.XCache
         FrontHeaders.suppressBodilessHeaders status headers
         // An upgraded connection's request never ends, so it's logged as it starts.
@@ -187,42 +219,44 @@ type FrontResponse
                 let vary = FrontHeaders.first headers "Vary"
                 match FrontCache.cacheLifetime status (FrontHeaders.first headers "Cache-Control") vary with
                 | ValueSome lifetime ->
-                    recording <- true
-                    recordLifetime <- lifetime
+                    let state = RecordState(lifetime)
+                    state.Vary <- vary
+                    record <- state
                     headers.Remove "Set-Cookie" |> ignore
-                    match variant with
-                    | null -> ()
-                    | variant -> variant.SetResponseHeaders vary
                 | ValueNone -> ()
             mode <- 1
             if status >= 200 then
                 // `NO_COMPRESSION` is the guard's veto, never sent.
                 let vetoed = headers.ContainsKey FrontCompression.NoCompression
-                headers.Remove FrontCompression.NoCompression |> ignore
+                if vetoed then headers.Remove FrontCompression.NoCompression |> ignore
                 if services.CompressionEnabled && negotiation.Encoding <> Encoding.NoEncoding then
                     let guarded =
                         negotiation.UserSpecificRequest
                         || (services.Config.GzipCompressionDisableOnAuth && FrontCompression.hasUserSpecificResponseHeaders headers)
                     if not (guarded || vetoed) && FrontCompression.mayCompress headers then
+                        compress <- CompressState()
                         mode <- 2
 
-    /// Whether anything needs to see the body as it goes by.
-    member private _.Direct = mode = 1 && not recording
+    /// Whether the body can go straight to the connection: nothing needs to see it.
+    member private _.Direct = mode = 1 && isNull record
 
     member private _.Record(data: ReadOnlySpan<byte>) : unit =
-        if recording && not recordOverflowed then
-            let buffer =
-                match recorded with
-                | null ->
-                    let created = ArrayBufferWriter<byte>(min services.MaxCacheableBody 4096)
-                    recorded <- created
-                    created
-                | buffer -> buffer
-            if buffer.WrittenCount + data.Length > services.MaxCacheableBody then
-                recordOverflowed <- true
-                recorded <- null
-            else
-                buffer.Write data
+        match record with
+        | null -> ()
+        | state ->
+            if not state.Overflowed then
+                let buffer =
+                    match state.Body with
+                    | null ->
+                        let created = ArrayBufferWriter<byte>(min services.MaxCacheableBody 4096)
+                        state.Body <- created
+                        created
+                    | buffer -> buffer
+                if buffer.WrittenCount + data.Length > services.MaxCacheableBody then
+                    state.Overflowed <- true
+                    state.Body <- null
+                else
+                    buffer.Write data
 
     member private this.PassOn(data: ReadOnlyMemory<byte>) : ValueTask =
         if data.Length = 0 then
@@ -234,54 +268,56 @@ type FrontResponse
     /// Takes the next piece of the body, as the app wrote it.
     member this.Write(data: ReadOnlyMemory<byte>) : ValueTask =
         if mode = 0 then this.Decide()
-        if data.Length > 0 then this.Record data.Span
+        if data.Length > 0 && not (isNull record) then this.Record data.Span
         match mode with
         | 1 -> this.PassOn data
         | 2 ->
+            let state = nonNull compress
             let buffer =
-                match held with
+                match state.Held with
                 | null ->
                     let created = ArrayBufferWriter<byte>(4096)
-                    held <- created
+                    state.Held <- created
                     created
                 | buffer -> buffer
             buffer.Write data.Span
             let want = if services.Padding = "" then FrontCompression.MinSize else max FrontCompression.JitterBuffer FrontCompression.MinSize
             if buffer.WrittenCount >= want then this.StartCompressing false else ValueTask.CompletedTask
         | _ ->
-            match encoder with
+            match (nonNull compress).Encoder with
             | null -> this.PassOn data
             | encoder -> this.PassOn(ReadOnlyMemory<byte>(encoder.Write data.Span))
 
     /// Decides, with the start of the body in hand (all of it if `ended`), whether it's long enough
     /// and of a type worth compressing, and goes on with it either way.
     member private this.StartCompressing(ended: bool) : ValueTask =
-        let buffered = nonNull held
+        let state = nonNull compress
+        let buffered = nonNull state.Held
         let headers = ctx.Response.Headers
         let status = ctx.Response.StatusCode
         let bytes = buffered.WrittenMemory
         let mutable contentType = FrontHeaders.first headers "Content-Type"
         if contentType = "" && status <> 204 && status <> 304 && bytes.Length > 0 then
             contentType <- FrontCompression.detectContentType bytes.Span
-            if not (headers.ContainsKey "Content-Type") then sniffedContentType <- contentType
-        held <- null
+            if not (headers.ContainsKey "Content-Type") then state.SniffedContentType <- contentType
+        state.Held <- null
         if not (bytes.Length >= FrontCompression.MinSize && FrontCompression.contentTypeFilter contentType) then
             mode <- 1
             this.PassOn bytes
         else
-            encoding <- negotiation.Encoding
+            state.Encoding <- negotiation.Encoding
             let jitter = FrontCompression.jitterFor services.Padding bytes.Span
-            let created = new FrontEncoder(encoding, jitter)
-            encoder <- created
+            let created = new FrontEncoder(state.Encoding, jitter)
+            state.Encoder <- created
             mode <- 3
             if ended then
                 let head = created.Write bytes.Span
                 let tail = created.Finish()
                 let whole = Array.append head tail
-                encoder <- null
+                state.Encoder <- null
                 // Go's server gives a response a length when the handler returns with all of it still
                 // in its 2 KB chunking buffer, and sends anything longer chunked.
-                if whole.Length <= FrontCompression.GoChunkingBuffer then finalLength <- int64 whole.Length
+                if whole.Length <= FrontCompression.GoChunkingBuffer then state.FinalLength <- int64 whole.Length
                 this.PassOn(ReadOnlyMemory<byte> whole)
             else
                 this.PassOn(ReadOnlyMemory<byte>(created.Write bytes.Span))
@@ -304,48 +340,7 @@ type FrontResponse
                     }
                 )
 
-    /// The app is done: what's held goes out, a compressed body ends, and a recorded one is stored
-    /// (unless the app failed).
-    member this.Finish(completed: bool) : Task =
-        task {
-            this.Decide()
-            do! this.FlushScratch()
-            if mode = 2 then
-                match held with
-                | null -> ()
-                | buffer ->
-                    if completed then
-                        do! this.StartCompressing true
-                    else
-                        // The app failed with the start of the body in hand: it goes out as it is, and the
-                        // response is cut short rather than completed.
-                        held <- null
-                        mode <- 1
-                        do! this.PassOn buffer.WrittenMemory
-            match encoder with
-            | null -> ()
-            | encoder ->
-                if completed then do! this.PassOn(ReadOnlyMemory<byte>(encoder.Finish()))
-                (encoder :> IDisposable).Dispose()
-            if recording && completed && not recordOverflowed then
-                let body =
-                    match recorded with
-                    | null -> ReadOnlyMemory<byte>.Empty
-                    | buffer -> buffer.WrittenMemory
-                let head = String.Equals(ctx.Request.Method, "HEAD", StringComparison.Ordinal)
-                let headers = match recordedHeaders with null -> FrontHeaders.snapshot ctx.Response.Headers | h -> h
-                let response =
-                    CachedResponse(
-                        ctx.Response.StatusCode,
-                        headers,
-                        (if head then ReadOnlyMemory<byte>.Empty else body),
-                        (match variant with null -> Array.empty | v -> v.VariantHeaders())
-                    )
-                services.Cache.Set(nonNull cacheKey, response, now + int64 recordLifetime.TotalMilliseconds, now)
-            this.Log()
-        }
-
-    /// Logs the request (once), as Thruster's logging handler does when the response ends.
+    /// The request is over: logs it (once), as Thruster's logging handler does when the response ends.
     member val LogEntry: (unit -> RequestLogEntry) | null = null with get, set
 
     member private this.Log() : unit =
@@ -355,22 +350,80 @@ type FrontResponse
             | null -> ()
             | entry -> services.Logger.Log(LogLevel.Information, EventId 0, entry (), null, (fun (state: RequestLogEntry) _ -> state.ToString()))
 
+    /// Whether finishing needs to do more than log: nothing was held, compressed or recorded.
+    member private this.Settled(completed: bool) : bool =
+        mode = 1
+        && isNull scratch
+        && (isNull record || not completed)
+
+    member private this.FinishSlowly(completed: bool) : Task =
+        task {
+            do! this.FlushScratch()
+            if mode = 2 then
+                let state = nonNull compress
+                match state.Held with
+                | null -> ()
+                | buffer ->
+                    if completed then
+                        do! this.StartCompressing true
+                    else
+                        // The app failed with the start of the body in hand: it goes out as it is, and the
+                        // response is cut short rather than completed.
+                        state.Held <- null
+                        mode <- 1
+                        do! this.PassOn buffer.WrittenMemory
+            match compress with
+            | null -> ()
+            | state ->
+                match state.Encoder with
+                | null -> ()
+                | encoder ->
+                    if completed then do! this.PassOn(ReadOnlyMemory<byte>(encoder.Finish()))
+                    (encoder :> IDisposable).Dispose()
+            match record with
+            | null -> ()
+            | state ->
+                if completed && not state.Overflowed then
+                    let head = String.Equals(ctx.Request.Method, "HEAD", StringComparison.Ordinal)
+                    let body =
+                        match state.Body with
+                        | null -> ReadOnlyMemory<byte>.Empty
+                        | buffer -> buffer.WrittenMemory
+                    let headers = match state.Headers with null -> FrontHeaders.snapshot ctx.Response.Headers | h -> h
+                    let variant = Variant.OfRequest(ctx.Request.Method, FrontRequest.rawTarget ctx, ctx.Request.Headers)
+                    variant.SetResponseHeaders state.Vary
+                    let response =
+                        CachedResponse(ctx.Response.StatusCode, headers, (if head then ReadOnlyMemory<byte>.Empty else body), variant.VariantHeaders())
+                    services.Cache.Set(nonNull cacheKey, response, now + int64 state.Lifetime.TotalMilliseconds, now)
+            this.Log()
+        }
+
+    /// The app is done: what's held goes out, a compressed body ends, and a recorded one is stored
+    /// (unless the app failed).
+    member this.Finish(completed: bool) : Task =
+        this.Decide()
+        if this.Settled completed then
+            this.Log()
+            Task.CompletedTask
+        else
+            this.FinishSlowly completed
+
     /// Sends a stored response (or the 304 for it) without calling the app. The cache's headers go on
     /// as they were stored, then `Starting` decides on compression as for any other response.
     member this.Hit(cached: CachedResponse, ifNoneMatch: string | null) : Task =
-        task {
-            let notModified = FrontCache.wasNotModified cached ifNoneMatch
-            ctx.Response.StatusCode <- (if notModified then 304 else cached.Status)
-            let headers = ctx.Response.Headers
-            for struct (name, value) in cached.Headers do
-                headers.Append(name, value)
-            this.XCache <- "hit"
-            hit <- true
-            let head = String.Equals(ctx.Request.Method, "HEAD", StringComparison.Ordinal)
-            if not notModified && not head then
-                headers.ContentLength <- int64 cached.Body.Length
-                do! this.Write cached.Body
-        }
+        let notModified = FrontCache.wasNotModified cached ifNoneMatch
+        ctx.Response.StatusCode <- (if notModified then 304 else cached.Status)
+        let headers = ctx.Response.Headers
+        for struct (name, value) in cached.Headers do
+            headers.Append(name, value)
+        this.XCache <- "hit"
+        hit <- true
+        let head = String.Equals(ctx.Request.Method, "HEAD", StringComparison.Ordinal)
+        if not notModified && not head then
+            headers.ContentLength <- int64 cached.Body.Length
+            this.Write(cached.Body).AsTask()
+        else
+            Task.CompletedTask
 
     // --- the response the app writes to ---------------------------------------------------------
 
@@ -396,9 +449,8 @@ type FrontResponse
     /// ours while something has to see it first.
     member internal this.GetMemory(sizeHint: int) : Memory<byte> =
         if mode = 0 then this.Decide()
-        if this.Direct then
-            lastMemory <- inner.Writer.GetMemory sizeHint
-            lastMemory
+        if this.Direct && isNull scratch then
+            inner.Writer.GetMemory sizeHint
         else
             let buffer =
                 match scratch with
@@ -410,14 +462,14 @@ type FrontResponse
             buffer.GetMemory sizeHint
 
     member internal this.Advance(count: int) : unit =
-        if this.Direct && isNull scratch then
+        if isNull scratch then
             bytesSent <- bytesSent + int64 count
             inner.Writer.Advance count
         else
             (nonNull scratch).Advance count
 
     member internal this.FlushWriter(ct: CancellationToken) : ValueTask<FlushResult> =
-        if this.Direct && isNull scratch then
+        if isNull scratch then
             inner.Writer.FlushAsync ct
         else
             let flushed = this.FlushScratch()
@@ -510,7 +562,7 @@ and [<Sealed>] internal FrontWriter(response: FrontResponse) =
     override _.CancelPendingFlush() = response.Inner.Writer.CancelPendingFlush()
 
 /// `FrontHandler`'s pieces that other front code (the upstream listener) uses too.
-module FrontRequest =
+module internal FrontProxy =
     let private bodyDetection (ctx: HttpContext) : bool =
         match ctx.Features.Get<IHttpRequestBodyDetectionFeature>() with
         | null ->
@@ -604,11 +656,28 @@ module FrontRequest =
         headers["X-Forwarded-Host"] <- StringValues(if forwardHeaders && incomingHost <> "" then incomingHost else host)
         headers["X-Forwarded-Proto"] <- StringValues(if forwardHeaders && incomingProto <> "" then incomingProto elif ctx.Request.IsHttps then "https" else "http")
 
+    /// The `X-Request-Start` value for the last millisecond asked about: most requests at load share one.
+    [<Sealed; AllowNullLiteral>]
+    type private RequestStart(millis: int64) =
+        member _.Millis = millis
+        member val Value = "t=" + string millis
+
+    let mutable private lastRequestStart: RequestStart = null
+
     /// `NewRequestStartHandler`
     let setRequestStart (headers: IHeaderDictionary) : unit =
         let existing = headers["X-Request-Start"]
         if existing.Count = 0 || existing.ToString() = "" then
-            headers["X-Request-Start"] <- StringValues("t=" + string (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+            let millis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            let last = lastRequestStart
+            let current =
+                if not (isNull last) && last.Millis = millis then
+                    last
+                else
+                    let fresh = RequestStart millis
+                    lastRequestStart <- fresh
+                    fresh
+            headers["X-Request-Start"] <- StringValues current.Value
 
 /// The handler chain of the front listeners: request logging, the request size limit, compression,
 /// `X-Request-Start`, the response cache and the proxy headers, in front of the app.
@@ -668,74 +737,95 @@ type FrontHandler(services: FrontServices, app: RequestDelegate) =
 
     member _.Services = services
 
+    /// The app, for a request that got past the size limit: the `X-Forwarded-*` headers
+    /// `httputil.ReverseProxy` sets, then the app itself.
+    member private _.CallApp(ctx: HttpContext) : Task =
+        FrontProxy.asProxiedHttp1 ctx
+        FrontProxy.setForwardedHeaders ctx config.ForwardHeaders
+        try
+            app.Invoke ctx
+        with e ->
+            Task.FromException e
+
     /// The proxy (`internal/proxy_handler.go`): the request size limit Thruster's `http.MaxBytesHandler`
-    /// enforces (an oversized body never reaches the app and gets an empty 413), the `X-Forwarded-*`
-    /// headers `httputil.ReverseProxy` sets, then the app.
-    member private _.Proxy(ctx: HttpContext) : Task =
-        task {
-            let! within = FrontRequest.withinLimit ctx services.MaxRequestBody
-            if not within then
-                FrontRequest.tooLarge ctx
-            else
-                FrontRequest.asProxiedHttp1 ctx
-                FrontRequest.setForwardedHeaders ctx config.ForwardHeaders
-                do! app.Invoke ctx
-        }
+    /// enforces (an oversized body never reaches the app and gets an empty 413), then the app.
+    member private this.Proxy(ctx: HttpContext) : Task =
+        if services.MaxRequestBody = 0UL then
+            this.CallApp ctx
+        else
+            task {
+                let! within = FrontProxy.withinLimit ctx services.MaxRequestBody
+                if not within then FrontProxy.tooLarge ctx else do! this.CallApp ctx
+            }
+
+    /// Finishes the response once `work` (the app, or a stored response being sent) is done, whether
+    /// it succeeded or not; a failure goes on to the host afterwards.
+    member private _.Complete(response: FrontResponse, work: Task) : Task =
+        if work.IsCompletedSuccessfully then
+            response.Finish true
+        else
+            task {
+                let mutable failure: exn | null = null
+                try
+                    do! work
+                with e ->
+                    failure <- e
+                do! response.Finish(isNull failure)
+                match failure with
+                | null -> ()
+                | e -> Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e).Throw()
+            }
 
     member this.Invoke(ctx: HttpContext) : Task =
-        task {
-            let started = Stopwatch.GetTimestamp()
-            let request = ctx.Request
-            let headers = request.Headers
-            let meth = request.Method
-            let negotiation: Negotiation =
-                if services.CompressionEnabled then
-                    { Encoding = services.SelectEncoding(meth, headers.AcceptEncoding.ToString())
-                      UserSpecificRequest = config.GzipCompressionDisableOnAuth && FrontCompression.hasUserSpecificRequestHeaders headers }
-                else
-                    { Encoding = Encoding.NoEncoding; UserSpecificRequest = false }
-            // Logged as the client sent it, before the headers below.
-            let rawTarget = match ctx.Features.Get<IHttpRequestFeature>() with null -> null | f -> f.RawTarget
-            FrontRequest.setRequestStart headers
-            let eligible =
-                FrontCache.shouldCacheRequest
-                    meth
-                    (FrontHeaders.first headers "Connection")
-                    (FrontHeaders.first headers "Upgrade")
-                    (FrontHeaders.first headers "Range")
-                    (match rawTarget with null -> 0 | t -> t.Length)
-            let now = Environment.TickCount64
-            let mutable variant: Variant = null
-            let mutable key: string | null = null
-            let mutable found: CachedResponse = null
-            if eligible then
-                variant <- Variant.OfRequest(meth, rawTarget, headers)
-                key <- variant.CacheKey()
-                found <- services.Cache.Get(nonNull key, now)
-                match found with
-                | null -> ()
-                | cached ->
-                    variant.SetResponseHeaders(
-                        (cached.Headers |> Array.tryPick (fun (struct (n, v)) -> if n.Equals("vary", StringComparison.OrdinalIgnoreCase) then Some v else None) |> Option.defaultValue "")
-                    )
-                    if not (variant.Matches cached.Variant) then
-                        key <- variant.CacheKey()
-                        found <- services.Cache.Get(nonNull key, now)
-            let negotiation = negotiation
-            let response =
-                FrontResponse(services, ctx, ctx.Features.GetRequiredFeature<IHttpResponseBodyFeature>(), (if eligible then HeaderMerge.Replace else HeaderMerge.Append), negotiation, key, variant, now)
-            if services.LogRequests then response.LogEntry <- logEntry ctx started response
-            ctx.Features.Set<IHttpResponseBodyFeature>(response)
-            ctx.Response.OnStarting(starting, (response :> obj))
-            let mutable failure: exn | null = null
-            try
-                match found with
-                | null -> do! this.Proxy ctx
-                | cached -> do! response.Hit(cached, FrontHeaders.first headers "If-None-Match" |> (function "" -> null | v -> v))
-            with e ->
-                failure <- e
-            do! response.Finish(isNull failure)
-            match failure with
+        let started = Stopwatch.GetTimestamp()
+        let request = ctx.Request
+        let headers = request.Headers
+        let meth = request.Method
+        let negotiation: Negotiation =
+            if services.CompressionEnabled then
+                { Encoding = services.SelectEncoding(meth, headers.AcceptEncoding.ToString())
+                  UserSpecificRequest = config.GzipCompressionDisableOnAuth && FrontCompression.hasUserSpecificRequestHeaders headers }
+            else
+                { Encoding = Encoding.NoEncoding; UserSpecificRequest = false }
+        let rawTarget = FrontRequest.rawTarget ctx
+        FrontProxy.setRequestStart headers
+        let eligible =
+            FrontCache.shouldCacheRequest
+                meth
+                (FrontHeaders.first headers "Connection")
+                (FrontHeaders.first headers "Upgrade")
+                (FrontHeaders.first headers "Range")
+                (match rawTarget with null -> 0 | t -> t.Length)
+        let now = Environment.TickCount64
+        let mutable key: string | null = null
+        let mutable found: CachedResponse = null
+        if eligible then
+            let baseKey = Variant.BaseKey(meth, rawTarget, headers)
+            key <- baseKey
+            found <- services.Cache.Get(baseKey, now)
+            match found with
             | null -> ()
-            | e -> Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e).Throw()
-        }
+            | cached ->
+                let variant = Variant.OfRequest(meth, rawTarget, headers)
+                variant.SetResponseHeaders cached.Vary
+                if not (variant.Matches cached.Variant) then
+                    key <- variant.CacheKey()
+                    found <- services.Cache.Get(nonNull key, now)
+        let response =
+            FrontResponse(
+                services,
+                ctx,
+                ctx.Features.GetRequiredFeature<IHttpResponseBodyFeature>(),
+                (if eligible then HeaderMerge.Replace else HeaderMerge.Append),
+                negotiation,
+                key,
+                now
+            )
+        if services.LogRequests then response.LogEntry <- logEntry ctx started response
+        ctx.Features.Set<IHttpResponseBodyFeature>(response)
+        ctx.Response.OnStarting(starting, (response :> obj))
+        match found with
+        | null -> this.Complete(response, this.Proxy ctx)
+        | cached ->
+            let ifNoneMatch = FrontHeaders.first headers "If-None-Match"
+            this.Complete(response, response.Hit(cached, (if ifNoneMatch = "" then null else ifNoneMatch)))

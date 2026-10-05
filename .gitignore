@@ -14,3 +14,4 @@ target/
 bench/kit/*/bin/
 bench/kit/*/obj/
 bench/kit/rust/Cargo.lock
+bench/front/rust/Cargo.lock
