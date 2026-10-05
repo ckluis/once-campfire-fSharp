@@ -18,6 +18,7 @@
     <Compile Include="BodyTests.fs" />
     <Compile Include="DeflaterTests.fs" />
     <Compile Include="ServerTests.fs" />
+    <Compile Include="HttpApp.fs" />
     <Compile Include="HttpTests.fs" />
     <Compile Include="CtxTests.fs" />
     <Compile Include="AdapterTests.fs" />

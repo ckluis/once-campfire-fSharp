@@ -87,8 +87,10 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
 - `bin/kit-differential` compares `Campfire.Kit` with the Rust kit on generated inputs: Accept headers and format
   negotiation, cookie headers, host/protocol/client address from proxy headers, JSON and form bodies, strong
   parameters, and multipart bodies and content types. `bin/kit-differential golden` refreshes the sample of
-  Rust's answers that `Campfire.Kit.Tests` replays. It needs mise for the Rust toolchain; run it after changing
-  params, cookies, formats, request or the multipart reader.
+  Rust's answers that `Campfire.Kit.Tests` replays. `bin/kit-differential http` serves the app of the Rust kit's
+  `tests/http.rs` from both kits and sends them the same random requests, comparing status, headers and body.
+  It needs mise for the Rust toolchain; run it after changing params, cookies, formats, request, the multipart
+  reader, `Ctx` or the adapter.
 - `Campfire.Storage` needs libvips (`brew install vips` on macOS; `bin/verify` points NetVips at Homebrew's) and,
   for video, ffmpeg and ffprobe. The storage vectors' byte comparisons run only against libvips 8.16.1 and
   ffmpeg 7.1.5 (rust/Dockerfile's builds); otherwise they are skipped with a note on stderr, so say so when

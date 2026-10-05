@@ -7,6 +7,9 @@
 #   bin/kit-differential 2000 7           that many inputs of each kind, from that seed
 #   bin/kit-differential golden           rewrite tests/Campfire.Kit.Tests/differential.jsonl: a sample
 #                                         of inputs with the Rust kit's answers, which the F# tests replay
+#   bin/kit-differential http [N [SEED]]  the app of rust/crates/kit/tests/http.rs, served by the Rust kit and
+#                                         by Campfire.Kit, sent N random requests each (plain, then behind
+#                                         `force_ssl`): status, headers and body must agree
 # Needs mise for the Rust toolchain (the version in rust/Dockerfile) and python3.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -18,9 +21,25 @@ mkdir -p "$out"
 
 mode=compare
 if [ "${1:-}" = golden ]; then mode=golden; shift; fi
+if [ "${1:-}" = http ]; then mode=http; shift; fi
 count="${1:-3000}"
 seed="${2:-1}"
 [ $mode = golden ] && count=400
+
+if [ $mode = http ]; then
+  http=reference-tools/kit/http-differential
+  mkdir -p target/kit-http-differential
+  python3 "$http/gen_main.py" rust/crates/kit/tests/http.rs target/kit-http-differential/main.rs
+  CARGO_TARGET_DIR="$PWD/target/kit-http-differential/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --offline --manifest-path "$http/Cargo.toml"
+  dotnet build "$http/fsharp" -c Release -v quiet -nologo -o target/kit-http-differential/fsharp
+  requests="${1:-1500}"
+  status=0
+  for traffic in plain ssl; do
+    python3 "$http/fuzz.py" "$PWD/target/kit-http-differential/rust/release/kit-http-differential" \
+      "$PWD/target/kit-http-differential/fsharp/HttpApp" "${2:-1}" "$requests" "$traffic" || status=1
+  done
+  exit $status
+fi
 
 CARGO_TARGET_DIR="$PWD/$out/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --offline --manifest-path "$tool/Cargo.toml"
 dotnet build "$tool/fsharp" -c Release -v quiet -nologo -o "$out/fsharp"
