@@ -4,7 +4,12 @@
     <Compile Include="Html5ever/NamedEntities.fs" />
     <Compile Include="Html5ever/Tokenizer.fs" />
     <Compile Include="Html5ever/TreeBuilder.fs" />
+    <Compile Include="Unicode/WordRanges.fs" />
+    <Compile Include="Unicode/Chars.fs" />
     <Compile Include="Dom.fs" />
+    <Compile Include="RubyExt.fs" />
+    <Compile Include="Sanitizer.fs" />
+    <Compile Include="RubyUri.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />

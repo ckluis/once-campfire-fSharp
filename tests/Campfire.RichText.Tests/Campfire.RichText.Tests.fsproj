@@ -7,6 +7,9 @@
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
     <Compile Include="Support.fs" />
     <Compile Include="DomTests.fs" />
+    <Compile Include="SanitizerTests.fs" />
+    <Compile Include="RubyTests.fs" />
+    <Compile Include="UriTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.RichText/Campfire.RichText.fsproj" />
