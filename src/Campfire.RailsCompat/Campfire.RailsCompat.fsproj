@@ -1,5 +1,28 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <Compile Include="Library.fs" />
+    <Compile Include="Timestamp.fs" />
+    <Compile Include="Clock.fs" />
+    <Compile Include="Json.fs" />
+    <Compile Include="Marshal.fs" />
+    <Compile Include="RailsEncoding.fs" />
+    <Compile Include="Error.fs" />
+    <Compile Include="KeyGenerator.fs" />
+    <Compile Include="Metadata.fs" />
+    <Compile Include="MessageVerifier.fs" />
+    <Compile Include="MessageEncryptor.fs" />
+    <Compile Include="Password.fs" />
+    <Compile Include="Secrets.fs" />
+    <Compile Include="Cookies.fs" />
+    <Compile Include="SignedId.fs" />
+    <Compile Include="GlobalId.fs" />
+    <Compile Include="Turbo.fs" />
+    <Compile Include="ContentDispositionApproximations.fs" />
+    <Compile Include="ContentDisposition.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.RailsCompat.Tests" />
   </ItemGroup>
 </Project>
