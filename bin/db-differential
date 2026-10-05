@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Campfire.Db against the reference app, from the host (the reference runs in the colima VM, the tests
+# on the host's .NET SDK): the fixtures and a long scenario loaded through Active Record are compared
+# with what the F# models write, the schemas are compared, and the reference boots on a database the
+# F# models wrote. Needs the reference image (`parity/bin/reference build`). Databases land in
+# target/db-differential.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.dotnet:$PATH" DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+OUT=$PWD/target/db-differential
+vm() { colima ssh -- bash -c "cd '$PWD' && $1"; }
+
+vm "reference-tools/db/differential.sh reference"
+
+echo "== Campfire.Db differential tests"
+rm -f "$OUT"/fsharp_export.sqlite3*
+dotnet build tests/Campfire.Db.Tests -c Release -warnaserror -v quiet -nologo
+CAMPFIRE_RUBY_FIXTURES_DB=$OUT/fixtures_ruby.sqlite3 \
+CAMPFIRE_RUBY_SCENARIO_DB=$OUT/scenario_ruby.sqlite3 \
+CAMPFIRE_EXPORT_DB=$OUT/fsharp_export.sqlite3 \
+  dotnet test --project tests/Campfire.Db.Tests -c Release --no-build \
+    --filter-method '*fixtures match ruby row for row' --filter-method '*scenario matches ruby' --filter-method '*export database for rails'
+
+echo "== schema identity"
+# sqlite_master minus what SQLite derives on its own (see src/Campfire.Db/Schema.fs).
+SCHEMA_QUERY="SELECT sql || ';' FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'message_search_index_%' ORDER BY rowid"
+# Campfire.Db's one addition to the Rails schema (a paging index) isn't Rails'.
+sqlite3 "$OUT/fsharp_export.sqlite3" "$SCHEMA_QUERY" | grep -v index_messages_on_room_id_and_created_at > "$OUT/schema_fsharp.sql"
+diff -u src/Campfire.Db/schema.sql "$OUT/schema_ruby.sql"
+diff -u "$OUT/schema_ruby.sql" "$OUT/schema_fsharp.sql"
+echo "schema.sql, the reference's db:prepare and Campfire.Db's prepare agree"
+
+vm "reference-tools/db/differential.sh rollback"

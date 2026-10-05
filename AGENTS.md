@@ -78,6 +78,9 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
 - `bin/verify` must pass before you report work as done: a Release build with warnings as errors,
   then every test. Say exactly what ran and what didn't.
 - Golden-vector tests read `vectors/*.json` through `tests/Shared/Repo.fs` (`Repo.vector "name"`).
+- `bin/db-differential` compares `Campfire.Db` with the reference app: the fixtures and a long scenario
+  loaded through Active Record against what the F# models write, the schemas, and the reference booting on
+  a database F# wrote. It needs the reference image and colima; run it after changing a model or the schema.
 - Tests that need the parity seed (`parity/.seed/default`) must skip with a message when it isn't
   built; `CAMPFIRE_REQUIRE_SEED=1` turns the skip into a failure.
 - Commit each logical unit on the current branch with a message saying what and why. Don't push.
