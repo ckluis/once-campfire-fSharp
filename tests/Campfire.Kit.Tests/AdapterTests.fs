@@ -458,3 +458,66 @@ let ``a header whose first line is empty is written as a line of its own`` () =
         finally
             File.Delete path
     }
+
+[<Fact>]
+let ``a request head as large as puma and hyper accept is served`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            // Kestrel's own limits are 32 KB of headers and an 8 KB request line; Rails (Puma: 112 KB, 12 KB of
+            // URI) and the Rust port (hyper: 417,792 bytes) serve these, and a browser with many cookies on a
+            // shared domain would otherwise get 431 on every page.
+            let bigCookie = (get "/echo").With("cookie", "a=" + String('x', 40_000) + "; b=seen")
+            let! cookie = app.Send bigCookie
+            Assert.Equal(200, cookie.Status)
+            Assert.Equal(Some(Value.String "seen"), cookie.Json.TryGet "cookie")
+
+            let nineCookies = String.Join("; ", [ for i in 1..9 -> $"c{i}=" + String('y', 4_000) ]) + "; b=seen"
+            let! many = app.Send((get "/echo").With("cookie", nineCookies))
+            Assert.Equal(200, many.Status)
+
+            let! header = app.Send((get "/echo").With("x-big", String('z', 70_000)))
+            Assert.Equal(200, header.Status)
+
+            let! url = app.Send(get ("/echo?q=" + String('q', 10_000)))
+            Assert.Equal(200, url.Status)
+            Assert.Equal(10_000 + "/echo?q=".Length, (url.Json.TryGet "path").Value.AsString.Value.Length)
+
+            // Past hyper's buffer the Rust port answers 431; so does this.
+            let! tooBig = app.Send((get "/echo").With("x-big", String('z', 450_000)))
+            Assert.Equal(431, tooBig.Status)
+        finally
+            File.Delete path
+    }
+
+/// Send `request` as written and return the reply's status line.
+let private statusLineOf (app: TestApp) (request: string) : Task<string> =
+    task {
+        use client = new System.Net.Sockets.TcpClient()
+        do! client.ConnectAsync(System.Net.IPAddress.Loopback, app.Port)
+        let stream = client.GetStream()
+        do! stream.WriteAsync(Encoding.ASCII.GetBytes request)
+        use received = new MemoryStream()
+        do! stream.CopyToAsync received
+        let text = Encoding.Latin1.GetString(received.ToArray())
+        return text.Substring(0, text.IndexOf "\r\n")
+    }
+
+[<Fact>]
+let ``kestrel's request line rules differ from puma's and hyper's in three recorded ways`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            // Each of these is fixed in Kestrel's parser and can't be configured; README "Known differences" lists them
+            // (Rails and the Rust port answer 200, 200 and `HTTP/1.0 200 OK`, and 302 for the null byte on /rooms/%00).
+            let! nul = statusLineOf app "GET /echo%00 HTTP/1.1\r\nHost: chat.example.com\r\nConnection: close\r\n\r\n"
+            Assert.Equal("HTTP/1.1 400 Bad Request", nul)
+            let! authority = statusLineOf app "GET http://evil.example/echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+            Assert.Equal("HTTP/1.1 400 Bad Request", authority)
+            let! old = statusLineOf app "GET /echo HTTP/1.0\r\nHost: chat.example.com\r\n\r\n"
+            Assert.Equal("HTTP/1.1 200 OK", old)
+        finally
+            File.Delete path
+    }

@@ -65,12 +65,22 @@ module Adapter =
     /// `Rack::MethodOverride::HTTP_METHODS`
     let private overridableMethods = [| "GET"; "HEAD"; "PUT"; "POST"; "DELETE"; "OPTIONS"; "PATCH"; "LINK"; "UNLINK" |]
 
+    /// hyper's default `max_buf_size` (8192 + 4096 * 100): the most bytes of request line and headers the
+    /// Rust port reads before it answers 431.
+    let private maxRequestHead = 417_792
+
     /// Settings Campfire's Kestrel needs, whatever else the host configures: no `Server` header,
     /// the kit's own body limits (413) instead of Kestrel's 30 MB, and header values written as UTF-8
     /// the way Puma wrote them.
     let configureKestrel (options: KestrelServerOptions) : unit =
         options.AddServerHeader <- false
         options.Limits.MaxRequestBodySize <- Nullable()
+        // Kestrel's 32 KB of headers and 8 KB request line refuse requests Puma (112 KB of headers, 12 KB
+        // of URI) and hyper (a 417,792-byte read buffer) serve: a browser with many cookies on a shared
+        // domain would be locked out of every page. The ceiling is hyper's, the larger of the two
+        // (`MaxRequestBufferSize` stays at its 1 MB, above both).
+        options.Limits.MaxRequestHeadersTotalSize <- maxRequestHead
+        options.Limits.MaxRequestLineSize <- maxRequestHead
         options.ResponseHeaderEncodingSelector <- (fun _ -> Encoding.UTF8)
 
     /// The state for this request, made on first use.

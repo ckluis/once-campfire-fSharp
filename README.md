@@ -94,6 +94,15 @@ specific to this port are listed below, each citing the reference file it depart
     ("closes idle and slow connections").
   - Kestrel always sends `Date`, so the app's own listener on `TARGET_PORT` sends one, where Puma (and the
     Rust port) send none.
+  - Request head limits are hyper's, not Puma's: up to 417,792 bytes of request line and, separately, of headers
+    (Kestrel's own 8 KB and 32 KB refused cookies and URLs Rails serves); past that the answer is 431. Puma stops at
+    112 KB of headers and answers 400 above 12 KB of URI (10 KB of query), where this port and the Rust port serve
+    them. Tested by `AdapterTests` ("a request head as large as puma and hyper accept is served").
+  - Three request-line rules are fixed in Kestrel's parser and can't be configured, so they differ from Puma's and
+    hyper's: a `%00` in the path is 400 (Rails and Rust redirect or route it as any path); an absolute-form target
+    whose authority differs from `Host` is 400 (both serve it); an HTTP/1.0 request is answered with an
+    `HTTP/1.1` status line (both answer `HTTP/1.0`). Tested by `AdapterTests` ("kestrel's request line rules differ
+    from puma's and hyper's in three recorded ways").
   - Cleartext HTTP/2 (`H2C_ENABLED`) on a port that also serves HTTP/1.1 reads each connection's first
     bytes for HTTP/2's preface and tells Kestrel which protocol to speak through an internal Kestrel
     feature (`Campfire.Kit/Front/Conn.fs`, `FrontH2c`); if a Kestrel release changes it, the port serves
