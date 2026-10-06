@@ -29,7 +29,7 @@ open Microsoft.Extensions.Primitives
 
 /// The settings of a front handler that don't change, and the cache it fills.
 [<Sealed>]
-type FrontServices(config: FrontConfig, logger: ILogger) =
+type FrontServices(config: FrontConfig, logger: ILogger, lines: RequestLines | null) =
     let acceptEncodings = ConcurrentDictionary<string, Encoding>(StringComparer.Ordinal)
 
     member val Cache = MemoryCache(config.CacheSize, config.MaxCacheItemSize)
@@ -42,6 +42,11 @@ type FrontServices(config: FrontConfig, logger: ILogger) =
     /// `strings.Repeat("Padding-", ...)`, or empty without jitter.
     member val Padding = FrontCompression.jitterPadding config.GzipCompressionJitter
     member val LogRequests = config.LogRequests && logger.IsEnabled LogLevel.Information
+
+    /// Where request lines go as bytes when the host asked for it (`RequestLog.stdout`); null leaves them to `Logger`.
+    member _.Lines = lines
+
+    new(config: FrontConfig, logger: ILogger) = FrontServices(config, logger, null)
 
     /// What `gzhttp` would pick for a request with this method and `Accept-Encoding`: clients send a
     /// handful of distinct values, so each is worked out once (up to a bound, so that a client
@@ -344,12 +349,32 @@ type FrontResponse
     /// The request is over: logs it (once), as Thruster's logging handler does when the response ends.
     member val LogEntry: (unit -> RequestLogEntry) | null = null with get, set
 
+    /// The same request as `LogEntry`, for a host that writes the lines itself (`FrontServices.Lines`).
+    member val LogCapture: RequestLogCapture | null = null with get, set
+
     member private this.Log() : unit =
         if not logged then
             logged <- true
-            match this.LogEntry with
-            | null -> ()
-            | entry -> services.Logger.Log(LogLevel.Information, EventId 0, entry (), null, (fun (state: RequestLogEntry) _ -> state.ToString()))
+            match this.LogCapture with
+            | null ->
+                match this.LogEntry with
+                | null -> ()
+                | entry -> services.Logger.Log(LogLevel.Information, EventId 0, entry (), null, (fun (state: RequestLogEntry) _ -> state.ToString()))
+            | capture ->
+                match services.Lines with
+                | null -> ()
+                | lines ->
+                    let headers = ctx.Response.Headers
+                    let writer = LineWriter.Current
+                    RequestLog.writeLine
+                        writer
+                        capture
+                        ctx.Response.StatusCode
+                        (int64 (Stopwatch.GetElapsedTime(capture.Started).TotalMilliseconds))
+                        bytesSent
+                        (FrontHeaders.first headers "Content-Type")
+                        (FrontHeaders.first headers "X-Cache")
+                    lines.Append writer.Span
 
     /// Whether finishing needs to do more than log: nothing was held, compressed or recorded.
     member private this.Settled(completed: bool) : bool =
@@ -694,11 +719,10 @@ type FrontHandler(services: FrontServices, app: RequestDelegate) =
 
     let config = services.Config
 
-    let logEntry (ctx: HttpContext) (started: int64) (cache: FrontResponse) : unit -> RequestLogEntry =
+    /// What the log line needs of the request as it starts: the `X-Forwarded-*` headers the proxy sets next change what it can read.
+    let captureRequest (ctx: HttpContext) (started: int64) (path: string) (query: string | null) : RequestLogCapture =
         let request = ctx.Request
         let headers = request.Headers
-        let struct (path, query, _) = FrontCache.splitTarget (match ctx.Features.Get<IHttpRequestFeature>() with null -> null | f -> f.RawTarget)
-        let meth = request.Method
         let proto =
             match request.Protocol with
             | "HTTP/2" -> "HTTP/2.0"
@@ -708,33 +732,46 @@ type FrontHandler(services: FrontServices, app: RequestDelegate) =
             match Int64.TryParse(FrontHeaders.first headers "Content-Length") with
             | true, n -> n
             | _ -> if request.ContentLength.HasValue || not (headers.ContainsKey "Transfer-Encoding") && request.Protocol <> "HTTP/2" then 0L else -1L
-        let contentType = FrontHeaders.first headers "Content-Type"
-        let forwardedFor = FrontHeaders.first headers "X-Forwarded-For"
+        RequestLogCapture(
+            started,
+            path,
+            query,
+            request.Method,
+            proto,
+            contentLength,
+            FrontHeaders.first headers "Content-Type",
+            FrontHeaders.first headers "X-Forwarded-For",
+            ctx.Connection.RemoteIpAddress,
+            ctx.Connection.RemotePort,
+            FrontHeaders.first headers "User-Agent"
+        )
+
+    /// The structured entry the `ILogger` is given (tests and tools; the server writes bytes, see `RequestLog`).
+    let logEntry (ctx: HttpContext) (capture: RequestLogCapture) (cache: FrontResponse) : unit -> RequestLogEntry =
         let remote =
-            if forwardedFor <> "" then forwardedFor
+            if capture.ForwardedFor <> "" then capture.ForwardedFor
             else
-                match ctx.Connection.RemoteIpAddress with
+                match capture.RemoteIp with
                 | null -> ""
-                | ip -> $"{(if ip.IsIPv4MappedToIPv6 then ip.MapToIPv4() else ip)}:{ctx.Connection.RemotePort}"
-        let userAgent = FrontHeaders.first headers "User-Agent"
+                | ip -> $"{(if ip.IsIPv4MappedToIPv6 then ip.MapToIPv4() else ip)}:{capture.RemotePort}"
         fun () ->
             let response = ctx.Response
             let status = response.StatusCode
             let field (name: string) (value: obj | null) = KeyValuePair<string, obj | null>(name, value)
             RequestLogEntry(
-                [| field "path" path
+                [| field "path" capture.Path
                    field "status" (box status)
-                   field "dur" (box (int64 (Stopwatch.GetElapsedTime(started).TotalMilliseconds)))
-                   field "method" meth
-                   field "req_content_length" (box contentLength)
-                   field "req_content_type" contentType
+                   field "dur" (box (int64 (Stopwatch.GetElapsedTime(capture.Started).TotalMilliseconds)))
+                   field "method" capture.Method
+                   field "req_content_length" (box capture.ContentLength)
+                   field "req_content_type" capture.ContentType
                    field "resp_content_length" (box cache.BytesSent)
                    field "resp_content_type" (FrontHeaders.first response.Headers "Content-Type")
                    field "remote_addr" remote
-                   field "user_agent" userAgent
+                   field "user_agent" capture.UserAgent
                    field "cache" (FrontHeaders.first response.Headers "X-Cache")
-                   field "query" query
-                   field "proto" proto |]
+                   field "query" capture.Query
+                   field "proto" capture.Proto |]
             )
 
     member _.Services = services
@@ -790,6 +827,8 @@ type FrontHandler(services: FrontServices, app: RequestDelegate) =
             else
                 { Encoding = Encoding.NoEncoding; UserSpecificRequest = false }
         let rawTarget = FrontRequest.rawTarget ctx
+        // Once, for the cache key and the log line.
+        let struct (path, query, authority) = FrontCache.splitTarget rawTarget
         FrontProxy.setRequestStart headers
         let eligible =
             FrontCache.shouldCacheRequest
@@ -802,7 +841,7 @@ type FrontHandler(services: FrontServices, app: RequestDelegate) =
         let mutable key: string | null = null
         let mutable found: CachedResponse = null
         if eligible then
-            let baseKey = Variant.BaseKey(meth, rawTarget, headers)
+            let baseKey = Variant.BaseKeyOf(meth, path, query, authority, headers)
             key <- baseKey
             found <- services.Cache.Get(baseKey, now)
             match found with
@@ -823,7 +862,11 @@ type FrontHandler(services: FrontServices, app: RequestDelegate) =
                 key,
                 now
             )
-        if services.LogRequests then response.LogEntry <- logEntry ctx started response
+        if services.LogRequests then
+            let capture = captureRequest ctx started path query
+            match services.Lines with
+            | null -> response.LogEntry <- logEntry ctx capture response
+            | _ -> response.LogCapture <- capture
         ctx.Features.Set<IHttpResponseBodyFeature>(response)
         ctx.Response.OnStarting(starting, (response :> obj))
         match found with

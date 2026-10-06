@@ -50,17 +50,19 @@ module Front =
     /// Serves `app` (the pipeline of the kit, `Adapter.app` and what comes before it, built onto the
     /// builder it's given) the way Thruster served the reference until `shutdown` completes.
     /// `acme` replaces the configuration's ACME options (tests use a local CA), and `loggerFactory`
-    /// is where the server and Kestrel log (the requests, as `thruster`).
-    let serveWith
+    /// is where the server and Kestrel log (the requests, as `thruster`, unless `lines` is given: the host then
+    /// writes them itself, as bytes, see `RequestLog`).
+    let serveWithLines
         (config: FrontConfig)
         (app: IApplicationBuilder -> unit)
         (acme: AcmeOptions voption)
         (loggerFactory: ILoggerFactory)
+        (lines: RequestLines | null)
         (shutdown: Task)
         : Task =
         task {
             let logger = loggerFactory.CreateLogger "thruster"
-            let services = FrontServices(config, logger)
+            let services = FrontServices(config, logger, lines)
             let timeouts =
                 { Idle = config.HttpIdleTimeout
                   Read = config.HttpReadTimeout
@@ -147,6 +149,16 @@ module Front =
             | _ -> ()
             logger.LogInformation "Server stopped"
         }
+
+    /// `serveWithLines` with the requests logged through `loggerFactory`.
+    let serveWith
+        (config: FrontConfig)
+        (app: IApplicationBuilder -> unit)
+        (acme: AcmeOptions voption)
+        (loggerFactory: ILoggerFactory)
+        (shutdown: Task)
+        : Task =
+        serveWithLines config app acme loggerFactory null shutdown
 
     /// `serveWith`, with the configuration's ACME options and no logging but the requests'.
     let serve (config: FrontConfig) (app: IApplicationBuilder -> unit) (shutdown: Task) : Task =

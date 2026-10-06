@@ -38,11 +38,12 @@ type FrontServer(http: int, target: int, stop: TaskCompletionSource, running: Ta
         member this.DisposeAsync() = ValueTask(this.Stop())
 
 /// `None` when the server stops before it's listening (a port was taken).
-let tryStart
+let tryStartLines
     (vars: (string * string) list)
     (app: IApplicationBuilder -> unit)
     (acme: AcmeOptions voption)
     (loggerFactory: ILoggerFactory)
+    (lines: RequestLines | null)
     (http: int)
     (https: int)
     : Task<FrontServer option> =
@@ -61,7 +62,7 @@ let tryStart
                 | true, v -> v
                 | _ -> null)
         let stop = TaskCompletionSource()
-        let running = Front.serveWith config app acme loggerFactory stop.Task
+        let running = Front.serveWithLines config app acme loggerFactory lines stop.Task
         let mutable listening = false
         let mutable attempts = 0
         while not listening && not running.IsCompleted && attempts < 200 do
@@ -82,6 +83,16 @@ let tryStart
         else
             return Some(FrontServer(http, target, stop, running))
     }
+
+let tryStart
+    (vars: (string * string) list)
+    (app: IApplicationBuilder -> unit)
+    (acme: AcmeOptions voption)
+    (loggerFactory: ILoggerFactory)
+    (http: int)
+    (https: int)
+    : Task<FrontServer option> =
+    tryStartLines vars app acme loggerFactory null http https
 
 /// On fresh ports, picking new ones when something took one between `freePort` and the bind.
 let startWith (vars: (string * string) list) (app: IApplicationBuilder -> unit) : Task<FrontServer> =
@@ -150,3 +161,26 @@ let exchange (port: int) (request: string) : Task<Reply> =
 
 let getRequest (path: string) (extra: string) : string =
     $"GET {path} HTTP/1.1\r\nHost: chat.test\r\nConnection: close\r\n{extra}\r\n"
+
+/// A stream that keeps every write, as the sizes it was written in.
+type CollectingStream() =
+    inherit IO.Stream()
+    let gate = obj ()
+    let bytes = new IO.MemoryStream()
+    let writes = ResizeArray<int>()
+    member _.Text = lock gate (fun () -> Encoding.UTF8.GetString(bytes.ToArray()))
+    member _.Sizes = lock gate (fun () -> writes.ToArray())
+    override _.CanRead = false
+    override _.CanSeek = false
+    override _.CanWrite = true
+    override _.Length = raise (NotSupportedException())
+    override _.Position with get () = raise (NotSupportedException()) and set _ = raise (NotSupportedException())
+    override _.Flush() = ()
+    override _.Read(_: byte[], _: int, _: int) = raise (NotSupportedException())
+    override _.Seek(_: int64, _: IO.SeekOrigin) = raise (NotSupportedException())
+    override _.SetLength(_: int64) = raise (NotSupportedException())
+    override _.Write(buffer: byte[], offset: int, count: int) =
+        lock gate (fun () ->
+            bytes.Write(buffer, offset, count)
+            writes.Add count)
+

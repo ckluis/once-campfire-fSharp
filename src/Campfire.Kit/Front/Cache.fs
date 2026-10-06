@@ -249,6 +249,10 @@ type Variant(meth: string, path: string, query: string, host: string, requestHea
     /// The key of a request before its response's `Vary` is known: its method, path, query and host.
     static member BaseKey(meth: string, rawTarget: string | null, headers: IHeaderDictionary) : string =
         let struct (path, query, authority) = FrontCache.splitTarget rawTarget
+        Variant.BaseKeyOf(meth, path, query, authority, headers)
+
+    /// `BaseKey` for a target already split by `FrontCache.splitTarget`.
+    static member BaseKeyOf(meth: string, path: string, query: string, authority: string | null, headers: IHeaderDictionary) : string =
         let host =
             match headers.Host.ToString() with
             | "" -> (match authority with null -> "" | a -> a)

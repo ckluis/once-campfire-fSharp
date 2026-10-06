@@ -546,6 +546,42 @@ let ``logs each request as thruster does`` () =
     }
 
 [<Fact>]
+let ``writes each request as one line of bytes when given a line sink`` () =
+    task {
+        let output = new CollectingStream()
+        let lines = RequestLines(output, TimeSpan.FromMilliseconds 5.0)
+        let renders = Counter()
+        // The logger's level still decides whether requests are logged; its own sink gets nothing when there are lines.
+        let logs = LoggingTests.CapturingLogger()
+        let factory =
+            { new Microsoft.Extensions.Logging.ILoggerFactory with
+                member _.CreateLogger(_: string) = logs :> Microsoft.Extensions.Logging.ILogger
+                member _.AddProvider(_: Microsoft.Extensions.Logging.ILoggerProvider) = ()
+                member _.Dispose() = () }
+        let! started = tryStartLines [ "LOG_REQUESTS", "true" ] (testApp renders) ValueNone factory lines (freePort ()) (freePort ())
+        let server = started.Value
+        let! first = exchange server.Http (getRequest "/public?x=1" "User-Agent: probe/1\r\nAccept-Encoding: identity\r\n")
+        let! second = exchange server.Http (getRequest "/public?x=1" "User-Agent: probe/1\r\nAccept-Encoding: identity\r\nX-Forwarded-For: 203.0.113.9\r\n")
+        Assert.Equal(some "hit", second.Get "x-cache")
+        Assert.Equal(200, first.Status)
+        do! Task.Delay 300
+        do! server.Stop()
+        lines.Stop()
+        Assert.DoesNotContain("Request path=", (logs.Text: string))
+        let text: string = output.Text
+        let all = text.Split('\n') |> Array.filter (fun l -> l <> "")
+        Assert.Equal(2, all.Length)
+        let shape = Text.RegularExpressions.Regex(@"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z info: thruster\[0\] Request path=")
+        for line in all do
+            Assert.Matches(shape, line)
+        let miss = all |> Array.find (fun l -> l.Contains "cache=miss")
+        for expected in [ "path=/public"; "status=200"; "method=GET"; "req_content_length=0"; "resp_content_length=8"; "resp_content_type=text/css"; "user_agent=probe/1"; "query=x=1"; "proto=HTTP/1.1"; "remote_addr=127.0.0.1:" ] do
+            Assert.Contains(expected, miss)
+        let hit = all |> Array.find (fun l -> l.Contains "cache=hit")
+        Assert.Contains("remote_addr=203.0.113.9", hit)
+    }
+
+[<Fact>]
 let ``a request body that stalls past the read timeout fails the request`` () =
     task {
         let! server, _ = startApp [ "HTTP_READ_TIMEOUT", "1" ]

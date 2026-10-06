@@ -213,7 +213,9 @@ module Boot =
                     app.Cable.Restart()
                     stopping.TrySetResult() |> ignore
                 }
-            let server = Front.serveWith front booted.Pipeline ValueNone loggers signal
+            // The request log goes to stdout as batched bytes (the `thruster` lines the console logger would write), not through `ILogger`.
+            let requestLines = RequestLog.stdout ()
+            let server = Front.serveWithLines front booted.Pipeline ValueNone loggers requestLines signal
             let deadline =
                 task {
                     do! stopping.Task
@@ -229,6 +231,7 @@ module Boot =
             match app.WebPush with
             | Some pool -> do! pool.Shutdown()
             | None -> ()
+            requestLines.Stop()
             // The database goes last: its writer checkpoints and closes the file (Rust drops it with the app).
             (app.Db :> IDisposable).Dispose()
         }

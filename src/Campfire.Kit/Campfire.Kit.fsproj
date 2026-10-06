@@ -23,6 +23,7 @@
     <Compile Include="Front/Cache.fs" />
     <Compile Include="Front/Compression.fs" />
     <Compile Include="Front/Acme.fs" />
+    <Compile Include="Front/RequestLog.fs" />
     <Compile Include="Front/Handler.fs" />
     <Compile Include="Front/Tls.fs" />
     <Compile Include="Front/Conn.fs" />
