@@ -225,10 +225,6 @@ def page():
             svg.append('<line x1="%d" x2="%d" y1="%.1f" y2="%.1f" class="grid"/><text x="10" y="%.1f" class="axis">%.1f×</text>'
                        % (L, W - R, Y(g), Y(g), Y(g) + 4, g))
         g = round(g + 0.1, 2)
-    rr = [rails[w]["c16"]["rps"] / stored[w]["c16"]["rps"] for w, _ in WORKLOADS if rails.get(w, {}).get("c16") and stored.get(w, {}).get("c16")]
-    if rr:
-        svg.append('<text x="%d" y="%d" class="rails">Rails is %.0f-%.0f%% of Rust&#39;s throughput, far below this axis ↓</text>'
-                   % (L + 6, H - B - 8, min(rr) * 100, max(rr) * 100))
     svg.append('<line x1="%d" x2="%d" y1="%.1f" y2="%.1f" class="rust"/><text x="%d" y="%.1f" class="rustlabel">Rust</text>'
                % (L, W - R, Y(1), Y(1), W - R + 10, Y(1) + 5))
     if kept:
