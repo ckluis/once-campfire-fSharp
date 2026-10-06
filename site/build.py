@@ -244,7 +244,8 @@ def hero(d, cl, f):
             (counter(latest, 2, '×'), 'of Rust, latest run'),
             (counter(cl['gain'], 1, '%', '+' if cl['gain'] >= 0 else ''), 'since tuning began'),
             (counter(cl['rate'], 1, '%/h', '+' if cl['rate'] >= 0 else ''), 'average climb per hour'),
-            (counter(abs(cl['to_go']), 0, '%'), 'to go to match Rust' if cl['to_go'] > 0 else 'ahead of Rust'),
+            (counter(abs(cl['to_go']), 0, '%'), 'to go to match Rust' if cl['to_go'] > 0 else 'ahead of Rust')
+            if abs(cl['to_go']) >= 0.5 else ('<span class="num-big"><b>Level</b></span>', 'with Rust, latest run'),
         ])
     return ('<section class="hero" id="top" aria-labelledby="hero-h"><div class="glow" aria-hidden="true"></div><div class="wrap">'
             '<p class="kicker hero-in">Basecamp&#39;s ONCE Campfire &middot; ported to F# &middot; Phase 7, live</p>'
@@ -254,6 +255,7 @@ def hero(d, cl, f):
             '<figcaption id="climb-cap"><span><b>The climb.</b> F#&#39;s throughput as a share of Rust&#39;s, one dot per measured run '
             '(geometric mean of the five workloads, 16 connections). Hover, tap or tab to a dot for that run&#39;s numbers and what changed. '
             'Hollow grey dots were tried and reverted. Latest: %s.</span>%s</figcaption></figure>'
+            '<p class="btw" id="btw"><a href="#p-muse">(btw, Muse sucks)</a> <span>How this started, and why none of its numbers are on the chart.</span></p>'
             '</div></section>' % (head, live, tiles, cl['chart'], e(last_t), details('p-climb', 'How to read it')))
 
 
@@ -274,65 +276,12 @@ def numbers(d, f):
     ]
     tiles = ''.join('<a class="nt reveal" href="#%s" style="--i:%d">%s<span class="nt-l">%s</span><span class="tip" role="tooltip">%s</span></a>'
                     % (pid, i, big, e(label), t) for i, (pid, big, label, t) in enumerate(items))
-    return ('<section class="numbers" id="numbers" aria-labelledby="numbers-h"><div class="wrap">'
-            '<div class="sec-head reveal"><p class="kicker">By the numbers</p><h2 id="numbers-h">Counted, not estimated.</h2>'
-            '<p class="line">Every figure comes from the transcripts, git and the benchmark logs. Tap one for where it comes from.</p></div>'
-            '<div class="ntiles">%s</div><p class="links reveal">%s</p></div></section>' % (tiles, details('p-tokens', 'The token ledger')))
+    return ('<section class="numbers" id="numbers" aria-label="By the numbers"><div class="wrap">'
+            '<p class="kicker reveal">By the numbers &middot; counted from the transcripts, git and the logs, not estimated</p>'
+            '<div class="ntiles">%s</div></div></section>' % tiles)
 
 
-def beat_muse(d, cl):
-    c = d['chapters']['muse']
-    pre = (cl['hist'].get('prelude') or [{}])[0]
-    rows = c['claimed_table']['rows']
-    chips = []
-    for i, (k, v) in enumerate((pre.get('ratios') or {}).items()):
-        r = rows[i] if i < len(rows) else None
-        t = ('Ren: F# %s req/s vs official Rust %s, on the Linux box. Not like for like.' % (r[1], r[2])) if r else k
-        chips.append('<li style="--i:%d">%s<small>%s</small></li>' % (i, tip('<s class="strike">%s</s>' % e(v), t, 'ratio'), e(k)))
-    visual = ('<div class="claim"><p class="claim-tag"><s class="strike">%s</s></p><ul class="struck">%s</ul>'
-              '<p class="cap">Ren&#39;s overnight scoreboard, F# over Rust</p></div>' % ('F# wins 5/5', ''.join(chips)))
-    return beat('muse', '1 &middot; Overnight in Muse', visual, 'None of them measured the same pages.',
-                ['Ren, the agent in Muse, raced the Rust port with a %s and called all five workloads for F#.'
-                 % tip('713-line F# app', 'campfire-fs/Program.fs: one file, Falco handlers, a SQLite pool, page caches.'),
-                 'Its pages were 30 to 60%% lighter than Rust&#39;s, and the official app&#39;s messages benchmark %s.'
-                 % tip('answered 404', 'The harness asked for messages before id 9250, which belongs to another room; with one shared timestamp the page was also empty (204).')],
-                details('p-muse'))
-
-
-def beat_handover(d):
-    c = d['chapters']['handover']
-    st = next((f['stat'] for f in c['findings'] if f.get('stat')), None)
-    bad = lead_int(st['bad']) if st else 0
-    good_rows = re.search(r'([\d,]+) rows', st['good_note']).group(1) if st else ''
-    visual = ('<div class="vs"><div class="vs-bad">%s<span>req/s, with %s</span></div>'
-              '<div class="vs-good"><span class="num-big"><b>%s</b></span><span>%s</span></div></div>'
-              % ('<span class="num-big"><s class="strike">%s</s></span>' % n(bad), e(st['bad_note']) if st else '',
-                 e(st['good'].replace(' req/s', '')) if st else '', 'req/s once fixed, %s rows saved' % e(good_rows)))
-    tags = ''.join('<li>%s</li>' % tip(e(f['tag']), f['title'] + '. ' + f['evidence']) for f in c['findings'])
-    return beat('handover', '2 &middot; Handed over &middot; 5 Oct 10:47', visual, 'The fastest number on the board saved nothing.',
-                ['Rerun on an M4 Mac, the post benchmark dropped its session cookie: %s requests a second, zero messages written. '
-                 'Fixed, it ran at %s and wrote every row.' % (n(bad), e(st['good']) if st else ''),
-                 'Four things were off.', '<div class="tags"><ul>%s</ul></div>' % tags],
-                details('p-handover'), 'flip')
-
-
-def beat_decision(d):
-    c = d['chapters']['handover']['decision']
-    m = re.search(r'about ([\d,]+) lines', c['after'])
-    rust_lines = m.group(1) if m else ''
-    visual = ('<div class="grow"><div><span class="num-big small"><b>713</b></span><span>lines of F# from Muse</span></div>'
-              '<div class="arrow" aria-hidden="true">&rarr;</div>'
-              '<div><span class="num-big"><i>~</i><b class="count" data-to="%s" data-dec="0">%s</b></span><span>lines in the Rust port it would be translated from</span></div></div>'
-              % (rust_lines.replace(',', ''), e(rust_lines)))
-    return beat('decision', '3 &middot; The call &middot; 5 Oct %s' % e(c['time']), visual, 'So we ported the whole thing.',
-                ['<q>identical in use to the original and the rust version AND hopefully spanks them on everything.</q> '
-                 '<span class="who">Chris, %s</span>' % e(c['time']),
-                 '%s, Action Cable, Web Push, bots and attachments, translated from the Rust port module by module, tests included.'
-                 % tip('177 routes', 'Every row of config/routes.rb, routed to an F# controller.')],
-                details('p-decision', 'The six decisions'))
-
-
-def beat_build(d, f):
+def beat_port(d, f):
     b = d['chapters']['build']
     wfs = {w['key']: w for w in d['tokens']['workflows']}
     commits = d['commits']['by_phase_window']
@@ -353,100 +302,39 @@ def beat_build(d, f):
         tiles.append('<li class="ph" style="--i:%d;--h:%.3f"><a href="#p-%s"><span class="ph-n">%s</span><span class="ph-t">%s</span>'
                      '<span class="ph-bar" aria-hidden="true"><span></span></span><span class="ph-big">%s</span><span class="ph-m">%s</span></a></li>'
                      % (i, max(t / top, 0.04), e(p['key']), e(p['n']), e(p['title']), big, meta))
-    steps = ''.join('<li>%s</li>' % tip(e(s['step']), '%s (%s): %s' % (s['who'], s['count'], s['what'])) for s in b['routine'])
-    fd = f['findings']
-    visual = '<ol class="phases-strip">%s</ol>' % ''.join(tiles)
-    return beat('build', '4 &middot; Built for real &middot; 5 Oct 11:59 to 6 Oct 02:58',
-                visual, 'Six phases, gated. %s tests, none failing.' % n(f['tests'] or 0),
-                ['Every phase ran one loop:', '<div class="loop"><ol>%s</ol></div>' % steps,
-                 'Opus verifiers attacked each phase and raised %s: %d critical, %d major, %d minor.'
-                 % (tip('%d findings' % sum(fd.values()), 'Summed over the five verifier agents, Phases 1 to 5. Each was fixed with a test or shown not to be real, then re-verified.'),
-                    fd['critical'], fd['major'], fd['minor'])],
-                details('p-routine', 'The routine') + details('p-phase5', 'Phase by phase'), 'wide')
+    m = re.search(r'about ([\d,]+) lines', d['chapters']['handover']['decision']['after'])
+    rust_lines = m.group(1) if m else ''
+    return beat('port', 'The call &middot; 5 Oct %s' % e(d['chapters']['handover']['decision']['time']),
+                '<ol class="phases-strip">%s</ol>' % ''.join(tiles), 'So we ported the whole thing.',
+                ['All %s lines of the Rust port, translated module by module in six gated phases: %s tests at the last gate, none failing.'
+                 % (tip('~' + e(rust_lines), '177 routes, Action Cable, Web Push, bots and attachments; the Muse app was 713 lines.'), n(f['tests'] or 0))],
+                details('p-decision', 'The call') + details('p-routine', 'The routine'), 'wide')
 
 
 def beat_proof(d, f):
-    diffs = d['chapters']['build']['differentials']
-    chips = ''.join('<li><b>%s</b> %s</li>' % (e(x['value']), e(x['label'])) for x in diffs[1:])
-    visual = ('<div class="proof"><span class="num-big">%s</span><span class="of">of %s</span><span class="cap">view renders identical to the Rust port, byte for byte</span></div>'
+    visual = ('<div class="proof"><span class="num-big">%s</span><span class="of">of %s</span></div>'
               % ('<b class="count" data-to="%d" data-dec="0">%s</b>' % (f['renders'], n(f['renders'])), n(f['renders'])))
     return beat('proof', 'Checked against the originals', visual, 'Byte for byte.',
-                ['Every ported template was rendered by both ports on generated cases and compared. Then the rest had to match too:',
-                 '<div class="chips"><ul>%s</ul></div>' % chips],
+                ['Every view render identical to the Rust port&#39;s. Rich text, cookies, the HTTP kit and thumbnails matched too.'],
                 details('p-proof'), 'flip')
-
-
-def beat_baseline(d, cl, f):
-    b = d['chapters']['tuning']['baseline']
-    base = cl.get('baseline')
-    visual = ('<div class="dual"><div>%s<span>of Rust</span></div><div>%s<span>times Rails, by workload</span></div></div>'
-              % (counter(base, 2, '×') if base else '<span class="num-big"><b>?</b></span>',
-                 '<span class="num-big small"><b>%d&ndash;%d</b><i>&times;</i></span>' % (round(f['rails_lo']), round(f['rails_hi'])) if f['rails_lo'] else ''))
-    return beat('baseline', '5 &middot; First honest number &middot; %s' % e(b['when']), visual,
-                'The first honest number.',
-                ['Phase 5b, before any tuning: %s, every response 2xx, every post saved its row.'
-                 % tip('the same bytes as Rust on every route', "Decoded response bytes identical to the Rust port's; room page 416,122 bytes each."),
-                 'F# ran at about three quarters of Rust and %s on posting a message.'
-                 % tip('tied it', 'Post a message at 16 connections: F# 6,186 req/s, Rust 6,082. A reviewer put the tie down to the database writer, not to F#.')],
-                details('p-baseline'))
 
 
 def beat_process(d):
     pc = d['chapters']['tuning']['process_change']
     q = pc['quotes'][0]
-    tiers = ''.join('<li style="--i:%d"><b>%s</b><span>%s</span><small>%s</small></li>' % (i, e(t[1]), e(t[3]), e(t[2]))
+    tiers = ''.join('<li style="--i:%d">%s</li>' % (i, tip('<b>%s</b>' % e(t[1]), 'Tier %s: %s. Decides: %s.' % (t[0], t[2], t[3].lower())))
                     for i, t in enumerate(pc['tiers']))
-    visual = '<ol class="tiers">%s</ol>' % tiers
-    first = q['text'].split('.')[0] + '.'
-    return beat('process', '6 &middot; A change of process &middot; %s' % e(q.get('time', pc['when'])), visual,
+    return beat('process', 'A change of process &middot; %s' % e(q.get('time', pc['when'])), '<ol class="tiers">%s</ol>' % tiers,
                 'Rust became a fixed target.',
-                ['<q>%s</q> <span class="who">Chris, %s</span>' % (e(first), e(q.get('time', '')).replace('6 Oct ', '')),
-                 'F# is measured alone against stored Rust numbers, in three loops each as short as what it decides. '
-                 'Rust and Rails come back only to close an area. %s joined the fastest loop.'
-                 % tip('SageFs', 'The F# live REPL the original challenge named: hot reload and live tests, an aid for trying variants, never a source of reported numbers.')],
-                details('p-process'), 'flip')
+                ['F# measured alone against stored Rust numbers, in loops of seconds, minutes and an hour. That&#39;s why the dots come fast.'],
+                details('p-process'))
 
 
-def beat_climb(cl):
-    if cl.get('latest') is None:
-        return ''
-    bj = cl.get('best_jump')
-    head = 'Then it caught Rust.' if cl['latest'] >= 0.995 else 'Then it climbed.'
-    start_t = next((p['time'] for p in cl['points'] if p['unit'] == 'phase 7 start'), None)
-    runs = [p for p in cl['points'] if start_t and p['time'] > start_t]
-    kept = len([p for p in runs if p['kept']])
-    visual = ('<div class="climbstat">%s<span>since tuning began</span><ul>'
-              '<li><b>%d</b> runs logged</li><li><b>%d</b> kept</li><li><b>%d</b> tried and reverted</li></ul></div>'
-              % (counter(cl['gain'], 1, '%', '+' if cl['gain'] >= 0 else ''), len(runs), kept, len(runs) - kept))
-    lines = ['From %.2f&times; at the Phase 7 start to %.2f&times; Rust at the latest run, %+.1f%% an hour on average.'
-             % (cl['start'], cl['latest'], cl['rate'])]
-    if bj:
-        lines.append('Biggest single step: %s, from %s.' % (tip('<b>%+.1f%%</b>' % bj['gain'], 'The dot it lands on: %.2f× Rust.' % bj['ratio']),
-                                                            '&ldquo;%s&rdquo;' % e(bj['change'])))
-    return beat('climb', '7 &middot; The climb &middot; Phase 7', visual, head, lines,
-                '<a class="more" href="#climb">See the chart <span aria-hidden="true">&uarr;</span></a>' + details('p-climb', 'Every run'))
-
-
-def beat_delivered(d):
-    t = d['chapters']['tuning']['pending']
-    dl = d['chapters']['delivered']['steps']
-    track = [(p['n'], p['title'], p['status'], p['target']) for p in t] + [('', s['title'], s['status'], s['detail']) for s in dl]
-    items = ''.join('<li class="st-%s">%s<span class="tk-dot" aria-hidden="true"></span>%s</li>'
-                    % (e(s), ('<span class="tk-n">Phase %s</span>' % e(nn)) if nn else '<span class="tk-n">Ship</span>', tip(e(title), what))
-                    for nn, title, s, what in track)
-    return beat('delivered', '8 &middot; Delivered &middot; not yet', '<ol class="track">%s</ol>' % items, 'Next stop: Basecamp&#39;s README.',
-                ['Parity loop and tuning first. Then its own repository, and a row in Campfire&#39;s %s, for the maintainers to review, re-measure and host.'
-                 % tip('&ldquo;Other implementations&rdquo; table', 'Where every other Campfire port is linked from the Rails README.')],
-                details('p-delivered'))
-
-
-def beat_prompts(d, f):
-    visual = ('<div class="dual"><div>%s<span>words typed by Chris, start to now</span></div><div>%s<span>tokens written back by the models</span></div></div>'
-              % (counter(f['words']), counter(f['output'] / 1e3, 0, 'K')))
-    return beat('prompts', 'The prompts', visual, '%s words in. %s tokens out.' % (n(f['words']), mega(f['output'], 2).replace(' ', '')),
-                ['%d messages from Chris drove the whole thing, %d of them one-word status checks. Every one is in here, verbatim, '
-                 'with the routine each agent was given and the workflow scripts that ran it.' % (f['messages'], d['prompts']['status_pings']['count'])],
-                details('p-prompts', 'Read every prompt') + details('p-tokens', 'The token ledger'), 'flip')
+def more_row():
+    links = [('p-climb', 'Every run'), ('p-baseline', 'The 5b baseline'), ('p-delivered', 'What&#39;s left'),
+             ('p-prompts', 'Every prompt'), ('p-tokens', 'The token ledger'), ('p-muse', 'How it started')]
+    return ('<section class="more-row" id="more" aria-label="Everything else"><div class="wrap reveal"><p class="kicker">Everything else</p>'
+            '<p class="links">%s</p></div></section>' % ''.join('<a class="more" href="#%s">%s <span aria-hidden="true">&rarr;</span></a>' % (p, l) for p, l in links))
 
 
 # ---------------------------------------------------------------- panels
@@ -482,39 +370,27 @@ def p_climb(cl):
         'the 5b baseline is <code>bench/run</code> with Rust in the same run, before the longer warm-up the Phase 7 harness added.</li>'
         '<li><b>Rails is in the cards only.</b> Its numbers are the 5b baseline; at 1 to 2%% of Rust&#39;s throughput it would sit flat on the floor of the chart.</li>'
         '</ul>',
-        '<h3>Before the port</h3><p>The Muse-era ratios are off the chart on purpose: those pages were not the same as Rust&#39;s.</p>',
-        cl['prelude'],
+        '<p>The Muse-era ratios are off the chart on purpose: those pages were not the same as Rust&#39;s. <a href="#p-muse">(btw, Muse sucks) &rarr;</a></p>',
         tbl,
         '<p class="src">Source: <code>bench/results/phase7-log.jsonl</code>, <code>bench/progress/history.json</code>, drawn by <code>bench/progress/climb.py</code>.</p>',
     ])
     return panel('p-climb', 'The climb', 'How to read the chart', body, 'climb')
 
 
-def p_muse(d):
+def p_muse(d, cl):
+    """The whole Muse and hand-over story, in one panel: what was claimed, what we found, the M4 rebaseline."""
     c = d['chapters']['muse']
-    fs = ''.join('<div class="fact"><b>%s</b><span>%s</span><p>%s</p></div>' % (e(x['value']), e(x['label']), e(x['detail'])) for x in c['facts'])
-    instr = ''.join('<li><time>%s</time><span>%s</span></li>' % (e(i['time']), inline(i['text'])) for i in c['instructions'])
-    log = ''.join('<li><time>%s</time><span>%s</span></li>' % (e(i['time']), inline(i['text'])) for i in c['ren_log'])
-    ct = c['claimed_table']
-    h = c['handoff']
-    body = ''.join([
-        '<p class="lead">%s</p>' % e(c['standfirst']),
-        '<div class="facts">%s</div>' % fs,
-        '<div class="row"><span class="lbl">Ren&#39;s stack</span>%s</div>' % pills(c['stack']),
-        '<h3>What Chris asked for</h3><p class="muted">%s</p><ol class="log">%s</ol>' % (e(c['instructions_intro']), instr),
-        '<h3>What Ren reported</h3><p class="muted">%s</p><ol class="log">%s</ol>' % (e(c['ren_log_intro']), log),
-        table(ct['columns'], ct['rows'], ct['caption']),
-        '<h3>The hand-off</h3><figure class="handoff"><figcaption>%s</figcaption><div class="bubble"><div class="bubble-head"><span class="avatar" aria-hidden="true">CK</span>'
-        '<b>chris kluis</b><time>10:45 AM</time></div><div class="bubble-body">%s</div></div></figure>' % (e(h['intro']), para(h['text'])),
-        '<div class="unknown"><span aria-hidden="true">?</span><p><b>Tokens in Muse:</b> %s</p></div>' % e(c['tokens_note']),
-    ])
-    return panel('p-muse', 'Chapter 1 &middot; Overnight in Muse', e(c['title']), body, 'b-muse')
-
-
-def p_handover(d):
-    c = d['chapters']['handover']
+    ho = d['chapters']['handover']
+    pre = (cl['hist'].get('prelude') or [{}])[0]
+    rows = c['claimed_table']['rows']
+    chips = []
+    for i, (k, v) in enumerate((pre.get('ratios') or {}).items()):
+        r = rows[i] if i < len(rows) else None
+        t = ('Ren: F# %s req/s vs official Rust %s, on the Linux box.' % (r[1], r[2])) if r else k
+        chips.append('<li>%s<small>%s</small></li>' % (tip('<s class="strike">%s</s>' % e(v), t, 'ratio'), e(k)))
+    st = next((f['stat'] for f in ho['findings'] if f.get('stat')), None)
     cards = []
-    for f in c['findings']:
+    for f in ho['findings']:
         stat = ''
         if f.get('stat'):
             s = f['stat']
@@ -522,10 +398,34 @@ def p_handover(d):
                     % (e(s['bad']), e(s['bad_note']), e(s['good']), e(s['good_note'])))
         cards.append('<article class="finding"><p class="tag">%s</p><h3>%s</h3><p>%s</p>%s<p class="evidence">%s</p></article>'
                      % (e(f['tag']), e(f['title']), e(f['body']), stat, inline(f['evidence'])))
-    rb = c['rebaseline']
-    body = ''.join(['<p class="lead">%s</p>' % e(c['standfirst']), ''.join(cards),
-                    table(rb['columns'], rb['rows'], rb['caption']), '<p class="src">Source: %s</p>' % e(rb['source'])])
-    return panel('p-handover', 'Chapter 2 &middot; Handed over', e(c['title']), body, 'b-handover')
+    fs = ''.join('<div class="fact"><b>%s</b><span>%s</span><p>%s</p></div>' % (e(x['value']), e(x['label']), e(x['detail'])) for x in c['facts'])
+    instr = ''.join('<li><time>%s</time><span>%s</span></li>' % (e(i['time']), inline(i['text'])) for i in c['instructions'])
+    log = ''.join('<li><time>%s</time><span>%s</span></li>' % (e(i['time']), inline(i['text'])) for i in c['ren_log'])
+    ct = c['claimed_table']
+    rb = ho['rebaseline']
+    h = c['handoff']
+    body = ''.join([
+        '<p class="lead">%s</p>' % e(c['standfirst']),
+        '<div class="claim"><p class="claim-tag"><s class="strike">F# wins 5/5</s></p><ul class="struck">%s</ul>'
+        '<p class="cap">Ren&#39;s final scoreboard, F# over Rust. None of it measured the same pages.</p></div>' % ''.join(chips),
+        ('<div class="vs"><div class="vs-bad"><span class="num-big small"><s class="strike">%s</s></span><span>req/s for posting a message, with %s</span></div>'
+         '<div class="vs-good"><span class="num-big small"><b>%s</b></span><span>once the post script kept its session cookie: %s</span></div></div>'
+         % (e(st['bad'].replace(' req/s', '')), e(st['bad_note']), e(st['good'].replace(' req/s', '')), e(st['good_note']))) if st else '',
+        '<h3>What we found on the M4</h3><p>%s</p>' % e(ho['standfirst']),
+        ''.join(cards),
+        table(rb['columns'], rb['rows'], rb['caption']), '<p class="src">Source: %s</p>' % e(rb['source']),
+        '<h3>Why it is off the chart</h3>', cl['prelude'],
+        '<h3>The overnight run</h3><div class="facts">%s</div>' % fs,
+        '<div class="row"><span class="lbl">Ren&#39;s stack</span>%s</div>' % pills(c['stack']),
+        '<h4>What Chris asked Ren for</h4><p class="muted">%s</p><ol class="log">%s</ol>' % (e(c['instructions_intro']), instr),
+        '<h4>What Ren reported</h4><p class="muted">%s</p><ol class="log">%s</ol>' % (e(c['ren_log_intro']), log),
+        table(ct['columns'], ct['rows'], ct['caption']),
+        '<h3>The hand-off</h3><figure class="handoff"><figcaption>%s</figcaption><div class="bubble"><div class="bubble-head"><span class="avatar" aria-hidden="true">CK</span>'
+        '<b>chris kluis</b><time>10:45 AM</time></div><div class="bubble-body">%s</div></div></figure>' % (e(h['intro']), para(h['text'])),
+        '<p>Then Chris made the call: an identical-in-use port of the whole app. <a href="#p-decision">The call and the six decisions &rarr;</a></p>',
+        '<div class="unknown"><span aria-hidden="true">?</span><p><b>Tokens in Muse:</b> %s</p></div>' % e(c['tokens_note']),
+    ])
+    return panel('p-muse', '(btw, Muse sucks)', 'How it started', body, 'btw')
 
 
 def p_decision(d):
@@ -538,7 +438,7 @@ def p_decision(d):
         '<div class="decisions">%s</div>' % ds,
         '<h3>Chris&#39;s reply, 11:37</h3><pre class="reply">%s</pre>' % e(c['decision_reply']),
     ])
-    return panel('p-decision', 'The call', 'Identical in use, then faster', body, 'b-decision')
+    return panel('p-decision', 'The call', 'Identical in use, then faster', body, 'b-port')
 
 
 def findings_line(agents):
@@ -582,7 +482,7 @@ def p_phase(d, i, p):
     body = ''.join(['<dl class="pmeta">%s</dl>' % dl, findings_line(wf['agents']) if wf else '', gate,
                     '<h3>Units</h3><ul class="units">%s</ul>' % units, '<h3>What happened</h3><ul class="hl">%s</ul>' % hl,
                     pills(p['pills']), script, '<p class="pnav">%s</p>' % ' '.join(nav)])
-    return panel('p-' + p['key'], 'Phase %s' % e(p['n']), e(p['title']), body, 'b-build')
+    return panel('p-' + p['key'], 'Phase %s' % e(p['n']), e(p['title']), body, 'b-port')
 
 
 def p_routine(d, f):
@@ -600,7 +500,7 @@ def p_routine(d, f):
         '<p class="pnav">%s</p>' % ' '.join('<a href="#p-%s">Phase %s</a>' % (e(p['key']), e(p['n'])) for p in b['phases']),
         table(['Phase window', 'Commits'], crow, 'Commits on the port branch, by the phase running when they were made (site/ excluded; %d in all)' % f['commits']),
     ])
-    return panel('p-routine', 'Chapter 3 &middot; Built for real', 'The routine, every phase', body, 'b-build')
+    return panel('p-routine', 'Built for real', 'The routine, every phase', body, 'b-port')
 
 
 def p_proof(d):
@@ -629,7 +529,7 @@ def p_baseline(d):
         other,
         '<div class="note"><b>The skeptical review.</b> %s</div>' % e(b['note']) if b.get('note') else '',
     ])
-    return panel('p-baseline', 'Chapter 4 &middot; Phase 5b', 'The whole-app baseline', body, 'b-baseline')
+    return panel('p-baseline', 'Phase 5b', 'The whole-app baseline', body, 'more')
 
 
 def p_process(d):
@@ -659,7 +559,7 @@ def p_delivered(d):
                     % (status_badge(s['status']), e(s['title']), e(s['detail']), '<a href="%s">%s</a>' % (e(s['link']), e(s['link'])) if s.get('link') else '')
                     for s in dl['steps'])
     body = '<p class="lead">%s</p><h3>Still running</h3><div class="pgrid">%s</div><h3>Then</h3><div class="pgrid">%s</div>' % (e(dl['standfirst']), pend, steps)
-    return panel('p-delivered', 'Chapter 5', 'What&#39;s left', body, 'b-delivered')
+    return panel('p-delivered', 'Delivered, not yet', 'What&#39;s left', body, 'more')
 
 
 def p_prompts(d, f):
@@ -683,7 +583,7 @@ def p_prompts(d, f):
         roles,
         '<h3>The workflow scripts</h3><ul class="scripts">%s</ul>' % ''.join('<li><a href="site/workflows/%s">%s</a></li>' % (e(s), e(s)) for s in scripts),
     ])
-    return panel('p-prompts', 'The prompts', 'What was actually said', body, 'b-prompts')
+    return panel('p-prompts', 'The prompts', 'What was actually said', body, 'more')
 
 
 def p_tokens(d):
@@ -820,10 +720,11 @@ s.strike::after{content:"";position:absolute;left:-4%;right:-4%;top:47%;height:.
 .nt>.tip{bottom:auto;top:calc(100% + 8px)}
 @media (max-width:640px),(hover:none){.tip{position:fixed;left:12px;right:12px;bottom:12px;top:auto!important;width:auto;max-width:none;transform:none!important;font-size:14px;padding:12px 14px}}
 /* beats */
-.beat{padding:clamp(72px,12vw,150px) 0;border-top:1px solid var(--line-2);scroll-margin-top:52px;position:relative}
+.beat{padding:clamp(56px,8vw,104px) 0;border-top:1px solid var(--line-2);scroll-margin-top:52px;position:relative}
 .beat-grid{display:grid;gap:clamp(28px,5vw,72px);align-items:center;grid-template-columns:minmax(0,1fr)}
 @media (min-width:900px){.beat-grid{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}.beat.flip .beat-visual{order:2}.beat.wide .beat-grid{grid-template-columns:minmax(0,1fr)}}
 .beat-visual,.beat-copy{min-width:0}
+.beat.wide .beat-visual{order:2}
 .beat q{font:400 clamp(22px,2.6vw,30px)/1.25 var(--display);color:var(--ink);quotes:"\201C" "\201D"}
 .who{display:block;margin-top:6px;font-size:14px;color:var(--muted)}
 .links{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 0}
@@ -832,7 +733,7 @@ s.strike::after{content:"";position:absolute;left:-4%;right:-4%;top:47%;height:.
 .more:hover,.more:focus-visible{transform:translateY(-2px);border-color:var(--accent)}
 .more span{color:var(--accent);transition:transform .2s}.more:hover span{transform:translateX(3px)}
 .cap{display:block;color:var(--muted);font-size:14px;margin-top:10px}
-/* beat 1: the struck claim */
+/* the struck claims (Muse panel) */
 .claim-tag{font:400 clamp(30px,4vw,48px)/1 var(--display);margin:0 0 18px;color:var(--ink-2)}
 .struck{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 26px}
 .struck li{display:flex;flex-direction:column}
@@ -840,7 +741,7 @@ s.strike::after{content:"";position:absolute;left:-4%;right:-4%;top:47%;height:.
 .struck s{font:400 clamp(48px,8vw,104px)/1 var(--display);color:var(--ink);letter-spacing:-.02em}
 .struck small{font-size:12.5px;color:var(--muted);margin-top:4px}
 .struck li:nth-child(2) s::after{transition-delay:.45s}.struck li:nth-child(3) s::after{transition-delay:.55s}.struck li:nth-child(4) s::after{transition-delay:.65s}.struck li:nth-child(5) s::after{transition-delay:.75s}
-/* beat 2 */
+/* before and after (Muse panel) */
 .vs{display:grid;gap:18px}
 .vs>div>span:last-child{display:block;color:var(--muted);font-size:14px;margin-top:6px}
 .vs-bad .num-big{color:var(--muted)}
@@ -850,15 +751,10 @@ s.strike::after{content:"";position:absolute;left:-4%;right:-4%;top:47%;height:.
 .tags li .has-tip{border-color:color-mix(in srgb,var(--crit) 45%,var(--line));color:var(--crit)}
 .tags,.loop,.chips{margin:0 0 16px}.loop ol{counter-reset:l}.loop li{display:flex;align-items:center;gap:8px}.loop li:not(:last-child)::after{content:"\2192";color:var(--accent);font-weight:700}
 .chips b{font-variant-numeric:tabular-nums}
-/* beat 3 */
-.grow{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 22px}
-.grow>div>span:last-child{display:block;color:var(--muted);font-size:14px;max-width:240px;margin-top:6px}
-.grow .small{color:var(--muted)}
-.arrow{font:400 clamp(40px,6vw,72px)/1 var(--display);color:var(--accent);padding-bottom:22px}
-/* beat 4: the phases strip */
+/* the phases strip */
 .phases-strip{list-style:none;margin:0;padding:0;display:grid;gap:10px;grid-template-columns:repeat(6,minmax(0,1fr))}
 @media (max-width:899px){.phases-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media (max-width:520px){.phases-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.phases-strip{gap:8px}.ph a{padding:12px;border-radius:16px}.ph-n{font-size:34px}.ph-t{font-size:13px}.ph-m{display:none!important}.ph-big b{font-size:26px}}
 .ph a{display:flex;flex-direction:column;gap:6px;height:100%;padding:16px;border-radius:20px;background:var(--surface);border:1px solid var(--line);color:var(--ink);text-decoration:none;box-shadow:var(--shadow);transition:transform .25s,border-color .25s}
 .ph a:hover,.ph a:focus-visible{transform:translateY(-4px);border-color:var(--accent)}
 .ph-n{font:400 44px/.85 var(--display);background:linear-gradient(160deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -867,36 +763,24 @@ s.strike::after{content:"";position:absolute;left:-4%;right:-4%;top:47%;height:.
 .ph-bar span{position:absolute;left:0;right:0;bottom:0;height:calc(var(--h)*100%);background:linear-gradient(0deg,var(--accent),var(--accent-2));border-radius:10px;transform-origin:bottom;transition:transform 1.1s cubic-bezier(.2,.7,.2,1) calc(var(--i)*90ms)}
 .ph-big b{display:block;font:400 clamp(30px,3.2vw,40px)/1 var(--display);font-variant-numeric:tabular-nums}.ph-big span,.ph-m{display:block;font-size:12.5px;color:var(--muted)}
 .beat-build .beat-copy{max-width:820px}
-/* beat 5 */
+/* byte for byte */
 .proof .of{display:block;font:400 clamp(24px,3vw,36px)/1 var(--display);color:var(--muted);margin-top:6px}
 .proof .num-big b{background:linear-gradient(160deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
-/* beat 6, prompts */
-.dual{display:grid;gap:24px}
-.dual>div>span:last-child{display:block;color:var(--muted);font-size:14px;margin-top:6px}
-/* beat 7: tiers */
-.tiers{list-style:none;margin:0;padding:0;display:grid;gap:10px}
-.tiers li{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:2px 18px;align-items:baseline;padding:18px 20px;border-radius:18px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
-.tiers li:nth-child(1){margin-right:30%}.tiers li:nth-child(2){margin-right:15%}
-.tiers b{font:400 clamp(30px,3.6vw,44px)/1 var(--display);grid-row:span 2;color:var(--accent)}
-.tiers span{font-weight:650}.tiers small{color:var(--muted);font-size:13px;line-height:1.4}
-@media (max-width:520px){.tiers li{grid-template-columns:1fr;margin-right:0!important}.tiers b{grid-row:auto}}
-/* beat 8: climb stats */
-.climbstat>span:not(.num-big){display:block;color:var(--muted);font-size:14px;margin-top:6px}
-.climbstat ul{list-style:none;margin:22px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px 22px;font-size:14px;color:var(--muted)}
-.climbstat li b{font:400 30px/1 var(--display);color:var(--ink);margin-right:6px}
-/* beat 9: track */
-.track{list-style:none;margin:0;padding:0;display:grid;gap:0;position:relative}
-.track li{position:relative;display:grid;grid-template-columns:76px 26px minmax(0,1fr);align-items:center;gap:10px;padding:12px 0;font-size:18px;font-weight:600}
-.track li::before{content:"";position:absolute;left:94px;top:0;bottom:0;width:2px;background:var(--line)}
-.track li:first-child::before{top:50%}.track li:last-child::before{bottom:50%}
-.track .has-tip{justify-self:start}
-.tk-n{font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:650;text-align:right}
-.tk-dot{position:relative;z-index:1;width:16px;height:16px;border-radius:50%;border:2px dashed var(--muted);background:var(--bg);justify-self:center}
-.st-in-progress .tk-dot{border:2px solid var(--accent-2);background:var(--accent-2);box-shadow:0 0 0 6px color-mix(in srgb,var(--accent-2) 22%,transparent);animation:pulse 2s infinite}
-.st-done .tk-dot{border:2px solid var(--good);background:var(--good)}
-@keyframes pulse{50%{box-shadow:0 0 0 11px color-mix(in srgb,var(--accent-2) 6%,transparent)}}
-@media (max-width:720px){.bar nav ol{justify-content:flex-start}.nt{min-height:112px}.ph-bar{height:48px}.ph-t{min-height:0}
-  .grow{flex-direction:column;align-items:flex-start}.arrow{padding:0;transform:rotate(90deg);line-height:.6}}
+/* tiers: three big words, details on hover */
+.tiers{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 0;align-items:baseline}
+.tiers li{display:flex;align-items:baseline}
+.tiers li:not(:last-child)::after{content:"\2192";font:400 clamp(28px,4vw,48px)/1 var(--display);color:var(--muted);margin:0 .35em}
+.tiers .has-tip{border:0}
+.tiers b{font:400 clamp(44px,7vw,96px)/1 var(--display);letter-spacing:-.02em;color:var(--ink)}
+.tiers li:last-child b{background:linear-gradient(160deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+@media (max-width:720px){.bar nav ol{justify-content:flex-start}.nt{min-height:112px}.ph-bar{height:48px}.ph-t{min-height:0}}
+.btw{margin:18px 0 0;font-size:15px;color:var(--muted)}
+.btw a{font-weight:650;text-decoration-thickness:1px}
+.btw span{margin-left:4px}
+.numbers{padding:48px 0 8px}.numbers .ntiles{margin-top:14px}
+.more-row{padding:40px 0 56px;border-top:1px solid var(--line-2)}.more-row .links{margin-top:0}
+.sheet-body h4{margin:22px 0 8px;font-size:16px}
+.sheet .vs{margin:22px 0}
 /* footer */
 footer.site{border-top:1px solid var(--line-2);padding:40px 0 64px;color:var(--muted);font-size:14px}
 footer.site p{max-width:860px}
@@ -1101,10 +985,9 @@ def build():
     f = facts(d, cl)
     phases = d['chapters']['build']['phases']
     nav = ''.join('<li><a href="%s">%s</a></li>' % h for h in
-                  [('#climb', 'Climb'), ('#numbers', 'Numbers'), ('#b-muse', 'Story'), ('#p-prompts', 'Prompts'), ('#p-tokens', 'Tokens')])
-    beats = [beat_muse(d, cl), beat_handover(d), beat_decision(d), beat_build(d, f), beat_proof(d, f), beat_baseline(d, cl, f),
-             beat_process(d), beat_climb(cl), beat_delivered(d), beat_prompts(d, f)]
-    panels = [p_climb(cl), p_tokens(d), p_muse(d), p_handover(d), p_decision(d), p_routine(d, f)] + \
+                  [('#climb', 'Climb'), ('#numbers', 'Numbers'), ('#b-port', 'Story'), ('#p-prompts', 'Prompts'), ('#p-tokens', 'Tokens')])
+    beats = [beat_port(d, f), beat_proof(d, f), beat_process(d), more_row()]
+    panels = [p_climb(cl), p_tokens(d), p_muse(d, cl), p_decision(d), p_routine(d, f)] + \
              [p_phase(d, i, p) for i, p in enumerate(phases)] + \
              [p_proof(d), p_baseline(d), p_process(d), p_delivered(d), p_prompts(d, f)]
     body = ''.join([
