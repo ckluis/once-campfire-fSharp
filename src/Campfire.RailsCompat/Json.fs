@@ -5,6 +5,7 @@
 namespace Campfire.RailsCompat
 
 open System
+open System.Collections.Generic
 open System.Globalization
 open System.Numerics
 open System.Text
@@ -246,6 +247,8 @@ module Json =
             if Double.IsInfinity f then raise JsonNumberOutOfRange
             Value.Float f
 
+    let private scanLimit = 8
+
     let rec private convert (element: JsonElement) : Value =
         match element.ValueKind with
         | JsonValueKind.Null -> Value.Null
@@ -256,12 +259,34 @@ module Json =
         | JsonValueKind.Array -> Value.Array [ for item in element.EnumerateArray() -> convert item ]
         | JsonValueKind.Object ->
             // A repeated key keeps its first position and its last value, as serde_json's map does.
+            // Small objects scan; past `scanLimit` entries a dictionary finds the key, so an object
+            // of n keys costs O(n) rather than O(n^2) (a Cable message can hold 100k of them).
             let entries = ResizeArray<string * Value>()
+            let mutable positions: Dictionary<string, int> | null = null
             for property in element.EnumerateObject() do
                 let value = convert property.Value
-                match entries.FindIndex(fun (k, _) -> k = property.Name) with
-                | -1 -> entries.Add((property.Name, value))
-                | i -> entries[i] <- (property.Name, value)
+                let name = property.Name
+                match positions with
+                | null ->
+                    let mutable found = -1
+                    let mutable i = 0
+                    while found < 0 && i < entries.Count do
+                        if String.Equals(fst entries[i], name, StringComparison.Ordinal) then found <- i
+                        i <- i + 1
+                    if found >= 0 then entries[found] <- (name, value)
+                    else
+                        entries.Add((name, value))
+                        if entries.Count > scanLimit then
+                            let index = Dictionary<string, int>(StringComparer.Ordinal)
+                            for j in 0 .. entries.Count - 1 do
+                                index[fst entries[j]] <- j
+                            positions <- index
+                | positions ->
+                    match positions.TryGetValue name with
+                    | true, i -> entries[i] <- (name, value)
+                    | _ ->
+                        positions[name] <- entries.Count
+                        entries.Add((name, value))
             Value.Object(List.ofSeq entries)
         | kind -> failwith $"unexpected {kind}"
 

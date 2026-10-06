@@ -69,3 +69,34 @@ let ``timestamps parse rfc 3339 with an offset`` () =
     Assert.Equal(DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero).AddTicks 1239999L, utc "2026-01-01T12:00:00.123999999Z")
     for bad in [ ""; "2026-01-01"; "2026-01-01T12:00:00"; "2026-13-01T12:00:00Z"; "2026-02-30T12:00:00Z"; "x2026-01-01T12:00:00Z"; "2026-01-01T12:00:00Z "; "2026-01-01T12:00:00Z\n" ] do
         Assert.Equal(None, Timestamps.tryParse bad)
+
+[<Fact>]
+let ``json parse keeps first position and last value past the scan limit`` () =
+    // More than a handful of keys switches the repeated-key lookup from a scan to a dictionary;
+    // the rule must not change when it does.
+    let keys = [ for n in 0..19 -> $"k{n}" ]
+    let text = "{" + String.Join(",", [ for k in keys -> $"\"{k}\":1" ] @ [ "\"k3\":2"; "\"k15\":3"; "\"extra\":4"; "\"extra\":5" ]) + "}"
+    match (parse text).Value with
+    | Value.Object entries ->
+        Assert.Equal(21, entries.Length)
+        Assert.Equal<string list>(keys @ [ "extra" ], entries |> List.map fst)
+        Assert.Equal(Some(Value.Int 2L), (parse text).Value.TryGet "k3")
+        Assert.Equal(Some(Value.Int 3L), (parse text).Value.TryGet "k15")
+        Assert.Equal(Some(Value.Int 5L), (parse text).Value.TryGet "extra")
+    | _ -> failwith "an object"
+
+/// A Cable client can send a message of up to Socket.MaxMessage (1 MiB), which Json.parse reads.
+[<Fact>]
+let ``json parse reads an object of many keys in linear time`` () =
+    let text = "{" + String.Join(",", [ for n in 0..99_999 -> $"\"k{n}\":{n}" ]) + "}"
+    Assert.True(text.Length > 1_000_000 - 200_000)
+    let started = Diagnostics.Stopwatch.GetTimestamp()
+    match parse text with
+    | Some(Value.Object entries) -> Assert.Equal(100_000, entries.Length)
+    | _ -> failwith "an object"
+    // The same keys again: every one is a repeat.
+    match parse ("{" + String.Join(",", [ for n in 0..49_999 -> $"\"k{n % 100}\":{n}" ]) + "}") with
+    | Some(Value.Object entries) -> Assert.Equal(100, entries.Length)
+    | _ -> failwith "an object"
+    let elapsed = Diagnostics.Stopwatch.GetElapsedTime started
+    Assert.True(elapsed < TimeSpan.FromSeconds 2.0, $"{elapsed}")

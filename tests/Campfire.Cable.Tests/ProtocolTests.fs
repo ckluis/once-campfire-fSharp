@@ -666,3 +666,30 @@ let ``turbo streams channel verifies names signed with the app's secret`` () =
             (server :> IDisposable).Dispose()
             app.DisposeAsync().AsTask().Wait()
     }
+
+/// Not in Rust: serde_json reads an object in linear time, so a message of the largest size the socket
+/// allows (1 MiB) must not hold a thread for long. Json.parse once looked up each key by scanning.
+[<Fact>]
+let ``a message of many keys is read in linear time`` () =
+    withServer testConfig (fun app ->
+        task {
+            let! client = connect app 1UL
+            do! expectText Welcome client
+            let keys (count: int) = String.Join(",", [ for n in 0 .. count - 1 -> $"\"k{n}\":{n}" ])
+            let big = $"{{\"command\":\"subscribe\",\"identifier\":{Json.generate (str (room 1))},{keys 60_000}}}"
+            Assert.InRange(big.Length, 600_000, Socket.MaxMessage)
+            let started = Stopwatch.GetTimestamp()
+            do! client.SendText big
+            do! expectText (confirm (room 1)) client
+            // Perform's `data` is itself JSON in a string.
+            let data = "{" + keys 40_000 + ",\"action\":\"start\"}"
+            let perform =
+                Json.generate (object' [ "command", str "message"; "identifier", str (room 1); "data", str data ])
+            Assert.InRange(perform.Length, 400_000, Socket.MaxMessage)
+            do! client.SendText perform
+            do! expectText (message (room 1) """{"action":"start","user":{"id":1}}""") client
+            do! client.Subscribe heartbeatId
+            do! expectText (confirm heartbeatId) client
+            let elapsed = Stopwatch.GetElapsedTime started
+            Assert.True(elapsed < TimeSpan.FromSeconds 5.0, $"{elapsed}")
+        })
