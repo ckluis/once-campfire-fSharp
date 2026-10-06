@@ -286,6 +286,17 @@ def ch_build(d, tok):
         '</section>'])
 
 
+def process_change(pc):
+    """The process change Chris made once tuning began: his words, then the three iteration tiers."""
+    if not pc:
+        return ''
+    quotes = ''.join('<blockquote class="pull reveal"><p class="pull-q">%s</p><footer>Chris, %s</footer></blockquote>'
+                     % (e(q['text']), e(pc['when'])) for q in pc['quotes'])
+    tiers = table(['Tier', 'Loop time', 'What runs', 'What it decides'], pc['tiers'], 'Iteration tiers from here on')
+    return ''.join(['<div class="baseline-head reveal"><h3>%s</h3><span class="muted">%s</span></div>' % (e(pc['title']), e(pc['when'])),
+                    quotes, '<p class="prose reveal">%s</p>' % e(pc['summary']), '<div class="reveal">%s</div>' % tiers])
+
+
 def ch_tuning(d, tok):
     c = d['chapters']['tuning']
     c['id'] = 'tuning'
@@ -314,6 +325,7 @@ def ch_tuning(d, tok):
                   ratio_col=b.get('ratio_col'), cls='baseline'), e(b['method']), e(b['source'])),
         '<div class="reveal">%s</div>' % other,
         wfline,
+        process_change(c.get('process_change')),
         '<div class="pending-grid">%s</div>' % pend,
         window_tokens(tok, 'tuning'),
         '</section>'])
