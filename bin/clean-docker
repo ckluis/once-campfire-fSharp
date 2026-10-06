@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Reclaim the colima VM's disk after image rebuilds. Every rebuild of campfire-fsharp:app leaves its
+# old layers and build cache behind (Phase 5 grew the VM disk from 15 GB to 33 GB). This drops
+# dangling images and build cache unused for UNUSED_FOR (default 2h), so the layers the latest build
+# reused (the libvips and ffmpeg stages) stay, then trims the filesystem so macOS gets the space back.
+# Run from macOS (it calls colima ssh) at each phase gate.
+set -euo pipefail
+unused_for=${UNUSED_FOR:-2h}
+colima ssh -- bash -c "
+  set -e
+  [ -z \"\$(docker ps -q)\" ] || { echo 'containers are running; stop them first' >&2; exit 1; }
+  docker image prune -f | tail -1
+  docker buildx prune -f --filter until=$unused_for | tail -1
+  sudo fstrim /var/lib/docker
+  docker system df | sed -n 1,5p
+"
+du -sh ~/.colima/_lima/_disks/colima/datadisk 2>/dev/null | sed 's/^/VM disk on macOS: /'
