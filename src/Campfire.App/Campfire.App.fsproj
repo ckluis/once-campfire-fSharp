@@ -27,6 +27,8 @@
     <Compile Include="Presenters/Accounts.fs" />
     <Compile Include="Presenters/ViewContext.fs" />
     <Compile Include="Presenters/Page.fs" />
+    <Compile Include="Presenters/EmojiRanges.fs" />
+    <Compile Include="Presenters/Presenter.fs" />
     <Compile Include="Concerns.fs" />
     <Compile Include="ActiveStorage.fs" />
     <Compile Include="Presenters/AttachmentWrites.fs" />
@@ -36,6 +38,8 @@
     <Compile Include="Integrations/Guard.fs" />
     <Compile Include="Integrations/Opengraph.fs" />
     <Compile Include="Integrations/WebPush.fs" />
+    <Compile Include="Integrations/SearchWordRanges.fs" />
+    <Compile Include="Integrations/Search.fs" />
     <Compile Include="Controllers/Sessions.fs" />
     <Compile Include="Controllers/Welcome.fs" />
     <Compile Include="Controllers/Sessions/Transfers.fs" />
