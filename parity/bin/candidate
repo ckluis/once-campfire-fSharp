@@ -8,6 +8,7 @@
 #
 #   parity/bin/candidate build                      build campfire-fsharp:app (/Dockerfile) and the
 #                                                   campfire-candidate parity image on top of it
+#                                                   (campfire-candidate-rust on campfire-rust:app)
 #   parity/bin/candidate up   [--seed NAME] [--port N] [--time ISO8601 [--freeze]] [-e K=V]
 #   parity/bin/candidate down [--port N | --all [--everyone]]
 #   parity/bin/candidate logs [--port N] [-f]
@@ -49,14 +50,14 @@ PARITY=$ROOT/parity
 SEEDS=${PARITY_SEED_DIR:-$PARITY/.seed}
 INSTANCES=$SEEDS/.candidates
 case ${PARITY_CANDIDATE_APP:-fsharp} in
-  fsharp) DEFAULT_APP_IMAGE=campfire-fsharp:app DEFAULT_DOCKERFILE=$ROOT/Dockerfile DEFAULT_CONTEXT=$ROOT ;;
-  rust)   DEFAULT_APP_IMAGE=campfire-rust:app DEFAULT_DOCKERFILE=$ROOT/rust/Dockerfile DEFAULT_CONTEXT=$ROOT/rust ;;
+  fsharp) DEFAULT_APP_IMAGE=campfire-fsharp:app DEFAULT_DOCKERFILE=$ROOT/Dockerfile DEFAULT_CONTEXT=$ROOT DEFAULT_IMAGE=campfire-candidate ;;
+  rust)   DEFAULT_APP_IMAGE=campfire-rust:app DEFAULT_DOCKERFILE=$ROOT/rust/Dockerfile DEFAULT_CONTEXT=staged-rust DEFAULT_IMAGE=campfire-candidate-rust ;;
   *)      echo "candidate: PARITY_CANDIDATE_APP is fsharp or rust, not ${PARITY_CANDIDATE_APP}" >&2; exit 1 ;;
 esac
 APP_IMAGE=${PARITY_CANDIDATE_APP_IMAGE:-$DEFAULT_APP_IMAGE}
 APP_DOCKERFILE=${PARITY_CANDIDATE_DOCKERFILE:-$DEFAULT_DOCKERFILE}
 APP_CONTEXT=${PARITY_CANDIDATE_CONTEXT:-$DEFAULT_CONTEXT}
-IMAGE=${PARITY_CANDIDATE_IMAGE:-campfire-candidate}
+IMAGE=${PARITY_CANDIDATE_IMAGE:-$DEFAULT_IMAGE}
 ENV_FILE=$PARITY/.env.reference
 DEFAULT_PORT=3200
 OWNER=${PARITY_OWNER:-${CLAUDE_CODE_SESSION_ID:-$(id -un)}}
@@ -160,7 +161,19 @@ reference_revision() {
   git -C "$ROOT/reference" rev-parse HEAD 2>/dev/null || head -n 1 "$ROOT/.git/modules/reference/HEAD" 2>/dev/null || echo parity
 }
 
+# The Rust image's context: its Cargo workspace and the reference app, laid out as in the Rust repository,
+# where `reference/` sits beside `crates/` (here it is the repository's own, and rust/reference is empty).
+stage_rust_context() {
+  local ctx=$ROOT/target/rust-image-context
+  rm -rf "$ctx"; mkdir -p "$ctx"
+  cp -R "$ROOT/rust/Cargo.toml" "$ROOT/rust/Cargo.lock" "$ROOT/rust/crates" "$ROOT/rust/.dockerignore" "$ctx/"
+  cp -R "$ROOT/reference" "$ctx/reference"
+  rm -rf "$ctx/reference/.git"
+  echo "$ctx"
+}
+
 build() {
+  [ "$APP_CONTEXT" = staged-rust ] && APP_CONTEXT=$(stage_rust_context)
   log "building $APP_IMAGE from ${APP_DOCKERFILE#"$ROOT"/}"
   docker build -t "$APP_IMAGE" -f "$APP_DOCKERFILE" \
     --build-arg APP_VERSION=parity --build-arg GIT_REVISION="$(reference_revision)" \

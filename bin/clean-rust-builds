@@ -17,6 +17,9 @@ else
     rm -rf "$prof"/deps "$prof"/build "$prof"/incremental "$prof"/.fingerprint "$prof"/examples
   done
 fi
+# The staged build context of the Rust parity candidate image (parity/bin/candidate, PARITY_CANDIDATE_APP=rust), and
+# the boot-time script the app's numbers used.
+rm -rf target/rust-image-context target/boot-time.sh
 # Differential outputs left by a failed or interrupted run (both sides' full answers, often gigabytes).
 find target -path 'target/*-differential/*' -maxdepth 2 -type f \
   \( -name '*.input' -o -name '*.rust' -o -name '*.fsharp' -o -name '*.jsonl' -o -name '*.output' -o -name input \) -delete 2>/dev/null || true

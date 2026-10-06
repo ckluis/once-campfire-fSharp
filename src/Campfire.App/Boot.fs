@@ -226,6 +226,8 @@ module Boot =
             match app.WebPush with
             | Some pool -> do! pool.Shutdown()
             | None -> ()
+            // The database goes last: its writer checkpoints and closes the file (Rust drops it with the app).
+            (app.Db :> IDisposable).Dispose()
         }
 
     /// SQLite's online backup of the live database at `source` into a new file at `target`.

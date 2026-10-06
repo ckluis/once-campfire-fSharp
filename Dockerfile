@@ -20,10 +20,10 @@
 #   * the runtime that ships is the one the SDK in global.json built and tested the app with, not whichever
 #     one a moving `aspnet` image tag happens to hold, and its version is in the image's own layers;
 #   * the runtime stage stays `debian:trixie-slim` as in the reference and Rust images, so the libvips and
-#     ffmpeg libraries are installed on the same base, and nothing but ca-certificates is added for .NET
-#     (globalization is invariant, so no ICU);
+#     ffmpeg libraries are installed on the same base, and what .NET adds to it is small (libstdc++, zlib and
+#     libssl, which ca-certificates brings; globalization is invariant, so no ICU);
 #   * it costs about 70 MB of image over framework-dependent, which the media libraries dwarf anyway.
-# ReadyToRun-compiles the app's assemblies (FSharp.Core and the ASP.NET Core framework included), which takes
+# ReadyToRun-compiles the app's assemblies (FSharp.Core included), which takes
 # 5 MiB off the idle process and tens of milliseconds off the time to the first request (the JIT otherwise
 # compiles the route table, the templates and SQLite's bindings on it; bench/results/campfire-app-boot.md has
 # the numbers), and costs nothing once tiering has recompiled what is hot. Not trimmed: ASP.NET Core and
