@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Inputs.fs" />
+    <Compile Include="Operations.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Campfire.Views/Campfire.Views.fsproj" />
+    <ProjectReference Include="../../../../src/Campfire.Routes/Campfire.Routes.fsproj" />
+    <ProjectReference Include="../../../../src/Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
+    <ProjectReference Include="../../../../src/Campfire.Ruby/Campfire.Ruby.fsproj" />
+  </ItemGroup>
+</Project>

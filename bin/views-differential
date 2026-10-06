@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Compares Campfire.Views with the Rust views crate on generated cases, byte for byte: every template
+# ported so far (the layouts, the shared partials, ...), every view helper, the fragment cache's keys and
+# eviction, and the view-model helpers. The cases come from the parity seeds (parity/.seed/*, the accounts,
+# users, rooms and messages the parity harness runs against) and the views crate's golden facts, and from
+# generated variations (hostile text, every combination of platform flags, attribute kinds, sizes).
+# Any difference fails; the first few are printed.
+#   bin/views-differential                 the default amount (~7,000 cases)
+#   bin/views-differential 3 7             3 times as many variations, from seed 7
+#   bin/views-differential bench [rounds]  render every case that many times (default 20) with each side
+#                                          and print the time per render of each operation
+#   bin/views-differential golden          rewrite tests/Campfire.Views.Tests/differential.jsonl: a sample of the
+#                                          cases with the Rust crate's answers, which the F# tests replay
+#   bin/views-differential --unicode       regenerate src/Campfire.Views/Helpers/UnicodeTables.fs from
+#                                          the Rust standard library's Unicode data
+# Adding a template or helper: a branch in reference-tools/views/differential/src/ops.rs (what Rust
+# renders), one in fsharp/Operations.fs (what F# does), and cases for it in generate.py.
+# Needs mise for the Rust toolchain (the version in rust/Dockerfile) and python3; needs the parity seeds
+# (parity/bin/seed build), or falls back to a few built-in rows.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.dotnet:$PATH" DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+tool=reference-tools/views/differential
+out=target/views-differential
+mkdir -p "$out"
+
+cargo() { CARGO_TARGET_DIR="$PWD/target/rust" mise exec rust@1.98.1 -- cargo "$@" --manifest-path "$tool/Cargo.toml"; }
+
+if [ "${1:-}" = --unicode ]; then
+  cargo run --release --quiet --bin unicode > src/Campfire.Views/Helpers/UnicodeTables.fs
+  echo "wrote src/Campfire.Views/Helpers/UnicodeTables.fs"
+  exit 0
+fi
+
+cargo build --release --quiet --bin views-differential
+dotnet build "$tool/fsharp" -c Release -v quiet -nologo -o "$out/fsharp"
+
+if [ "${1:-}" = bench ]; then
+  rounds="${2:-20}"
+  python3 "$tool/generate.py" 1 1 > "$out/cases.jsonl"
+  echo "--- rust (ns per render)"
+  target/rust/release/views-differential bench "$rounds" < "$out/cases.jsonl"
+  echo "--- fsharp (ns per render)"
+  dotnet "$out/fsharp/Differential.dll" bench "$rounds" < "$out/cases.jsonl"
+  exit 0
+fi
+
+mode=compare
+if [ "${1:-}" = golden ]; then mode=golden; shift; fi
+count="${1:-1}"
+seed="${2:-1}"
+python3 "$tool/generate.py" "$count" "$seed" > "$out/cases.jsonl"
+target/rust/release/views-differential < "$out/cases.jsonl" > "$out/rust.jsonl"
+if [ $mode = golden ]; then
+  python3 "$tool/golden.py" "$out/cases.jsonl" "$out/rust.jsonl" > tests/Campfire.Views.Tests/differential.jsonl
+  echo "tests/Campfire.Views.Tests/differential.jsonl: $(wc -l < tests/Campfire.Views.Tests/differential.jsonl) lines, $(du -k tests/Campfire.Views.Tests/differential.jsonl | cut -f1) KB"
+  exit 0
+fi
+dotnet "$out/fsharp/Differential.dll" < "$out/cases.jsonl" > "$out/fsharp.jsonl"
+python3 "$tool/compare.py" "$out/cases.jsonl" "$out/rust.jsonl" "$out/fsharp.jsonl"
