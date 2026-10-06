@@ -20,6 +20,20 @@ let ``erb escapes like erb util`` () =
     Erb.writeHtmlEscaped writer "x<y>&\"z'"
     Assert.Equal("x&lt;y&gt;&amp;&quot;z&#39;", writer.ToString())
 
+[<Fact>]
+let ``erb escapes straight into a utf-8 buffer`` () =
+    let escaped (s: string) =
+        let buffer = Buffers.ArrayBufferWriter<byte>()
+        Erb.writeHtmlEscapedUtf8 buffer (s.AsSpan())
+        Encoding.UTF8.GetString(buffer.WrittenSpan)
+    for s in [ ""; "plain"; "<&>\"'x é"; "😀<😀>"; "&&&"; "'" ; String('x', 5000) + "<" + String('é', 3000) ] do
+        Assert.Equal(Erb.htmlEscape s, escaped s)
+    // Appended after what the buffer already holds, as bytes.
+    let buffer = Buffers.ArrayBufferWriter<byte>()
+    Buffers.BuffersExtensions.Write(buffer, ReadOnlySpan<byte> "a"B)
+    Erb.writeHtmlEscapedUtf8 buffer ("<é>".AsSpan())
+    Assert.Equal<byte[]>(Array.append "a&lt;"B (Array.append (Encoding.UTF8.GetBytes "é") "&gt;"B), buffer.WrittenSpan.ToArray())
+
 // string.rs
 
 [<Fact>]
