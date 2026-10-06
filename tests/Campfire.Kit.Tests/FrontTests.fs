@@ -359,7 +359,9 @@ let ``closes idle and slow connections`` () =
             }
         Assert.Equal(0, n) // closed
         let idle = started.Elapsed
-        Assert.True(idle >= TimeSpan.FromMilliseconds 1500.0 && idle < TimeSpan.FromMilliseconds 3500.0, $"closed after {idle}")
+        // The upper bound only has to tell the idle timeout (2s) from none (the client gives up at 6s); Kestrel's
+        // timer runs on its heartbeat, which a loaded machine (the whole solution's tests at once) delays by seconds.
+        Assert.True(idle >= TimeSpan.FromMilliseconds 1500.0 && idle < TimeSpan.FromMilliseconds 5000.0, $"closed after {idle}")
 
         // A request that never finishes its headers.
         use slow = new TcpClient()

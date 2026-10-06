@@ -1,6 +1,6 @@
 # Porting Campfire to F#
 
-Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, 5.2, the account-side controllers, and 5.3, the hot path, done 2026-10-06)
+Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, 5.2, the account-side controllers, 5.3, the hot path, and 5.4, channels and integrations, done 2026-10-06)
 
 ## Goal
 
@@ -121,6 +121,26 @@ findings are fixed.
   stored` stands in for by reading the hub, and the integrations (Web Push delivery, webhooks, opengraph fetch). Checked
   against the Rust image on a frozen-clock seed: the room page, messages page, sidebar, search, refresh, bot JSON, room forms
   and a posted message are byte for byte the same. Numbers (no tuning): `bench/results/campfire-app-hot-path-controllers.md`.
+
+- *Unit 5.4 (channels and integrations), 2026-10-06:* `Campfire.Cable` is mounted at `/cable` with every channel of the
+  Rust crate: `PresenceChannel` (the membership connected while subscribed, the reads stream told on `present`),
+  `RoomChannel`, `TypingNotificationsChannel`, `RoomMessagesChannel` and the stock `Turbo::StreamsChannel` with its
+  `RoomStreamsAreAuthorized` guard, beside the read, unread and heartbeat channels of unit 5.1; no room stream is served to
+  anyone but a current member. The three HTTP client policies are ported, never sharing a client: `Integrations/Http.fs` is
+  `net/http.rs` (a `Net::HTTP` exchange over a pinned or resolved socket: the header order and spelling the tests compare, open
+  and read timeouts, chunked and until-close bodies, a size-capped inflater), with the guard of unit 5.2, `Opengraph*.fs`
+  (the guard and pinned addresses, every redirect re-checked, 5 MB and 10 responses, a 10 second deadline and 16 at once, the
+  libxml2 `<meta>` scanner and its entity table), `WebPush*.fs` and `Vapid.fs` (endpoint restrictions and pinning, VAPID,
+  RFC 8291 encryption, the pool of 50 with its invalidation worker) and `Webhook.fs` (unrestricted, 7 seconds, 100 MB,
+  60 seconds in all). `IntegrationJobs.fs` registers `Room::PushMessageJob` and `Bot::WebhookJob` with the runner and builds
+  the pool at boot (off without a valid VAPID pair, as in Rust). `AppState` holds the `WebPushPool` itself now, and the
+  integrations' files that don't need the app come before it in the project. Tests: all of `channels/tests` (channels_test,
+  broadcasts_test, revocation_test and the golden frames recorded from the reference, replayed over a `ClientWebSocket`) and
+  every `#[test]` of `integrations/` (the opengraph and webhook cases recorded from the reference, the gem's ciphertext and
+  headers, the gzip bombs, the pool's limits); Rust's `record_reference` (an `#[ignore]`d re-recorder that needs a running
+  reference app) is the one test not ported. Checked in the image: a Cable connection to `/cable` gets the welcome frame and
+  subscribes to a room its user belongs to, and the room page and sidebar are byte for byte Rust's with the VAPID tag in place.
+  Numbers (no tuning): `bench/results/campfire-app-channels-integrations.md`.
 
 ### Requirements carried forward
 

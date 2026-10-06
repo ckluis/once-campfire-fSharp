@@ -6,6 +6,7 @@ namespace Campfire.App
 
 open System
 open System.Threading.Tasks
+open Microsoft.Extensions.Logging
 open Campfire.App.Channels
 open Campfire.App.Integrations
 open Campfire.Db
@@ -40,7 +41,8 @@ type AppState
         broadcasts: Broadcasts,
         jobs: Jobs,
         webPush: WebPushPool option,
-        fragmentCache: FragmentCache
+        fragmentCache: FragmentCache,
+        loggers: ILoggerFactory
     ) =
     member _.Config = config
     member _.Secrets = secrets
@@ -57,6 +59,9 @@ type AppState
     /// `Rails.cache` for view fragments (`cache message do`), current during every request and every
     /// render outside one.
     member _.FragmentCache = fragmentCache
+
+    /// For what Rust logs with `tracing` from anywhere (integrations, mostly).
+    member _.Loggers = loggers
 
     /// The key pages offer browsers to subscribe with: none while Web Push is off, so that browsers
     /// don't subscribe to notifications that would never be sent.

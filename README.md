@@ -65,6 +65,21 @@ specific to this port are listed below, each citing the reference file it depart
     and every row is newer than the low one. Reference: `app/controllers/rooms/refreshes_controller.rb`.
   - Logs are `Microsoft.Extensions.Logging`'s console lines (`RAILS_LOG_LEVEL` or `CAMPFIRE_LOG` set the level), not
     `tracing`'s; the request lines come from the front server as Thruster's did.
+  - The outbound HTTP clients (opengraph, Web Push, bot webhooks; `Integrations/Http.fs`) write the HTTP/1.1 exchange
+    themselves over a stream, as Rust does over hyper's client connection, and verify TLS peers with .NET's `SslStream`
+    (the operating system's CA store, no revocation checks) where Rust uses rustls with the system's certificates. The
+    request line and headers go out as `Net::HTTP` writes them, in its order and spelling, which `WebhookTests`
+    ("delivers like the reference") and `WebPushTests` ("delivers to the pinned address with the gems headers") compare.
+    A gzip reply is inflated through .NET's `GZipStream` and `ZLibStream` read in 64 KB steps, so a bomb is stopped
+    within 64 KB of the limit (Rust: within the decoder's 32 KB buffer); tested by `HttpTests`.
+  - Web Push's VAPID signature is ECDSA with a random nonce (`ECDsa`), where Rust's p256 signs deterministically
+    (RFC 6979); both verify under the public key, which `WebPushTests` ("signs the vapid header like the gem") checks.
+  - An unfurl, a webhook delivery and a push that run past their deadline have their connection closed under the read
+    in progress (Rust drops the future); the answer is the same ("Failed to respond within N seconds", no content, a
+    read timeout). Tested by `OpengraphTests` ("gives up on a trickling page"), `WebhookTests` ("gives up on a trickling reply").
+  - The opengraph `<meta>` scanner steps through UTF-16 units where Rust's steps through bytes; everything it matches is
+    ASCII, so it splits the same places. `FILES_AND_MEDIA_URL_REGEX` is .NET's regex engine (non-backtracking) where
+    Rust uses the `regex` crate: `\b` and `\S` can differ from Rust's on characters that are only marks or letter numbers.
 
 - **Response headers set before the response exists** (`Ctx.SetHeader`, e.g. `X-Version` in a before-action)
   keep every line of a multi-line value. The Rust port keeps only the first line; Puma writes them all

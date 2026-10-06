@@ -32,6 +32,14 @@ type VapidConfig private (subject: string, signingKey: ECDsa, publicKey: byte[])
     /// `WebPush::Request#expiration`
     static let expirationSeconds = 12L * 60L * 60L
 
+    /// P-256's group order: a private scalar is valid from 1 up to one below it.
+    static let order =
+        [| 0xFFuy; 0xFFuy; 0xFFuy; 0xFFuy; 0x00uy; 0x00uy; 0x00uy; 0x00uy; 0xFFuy; 0xFFuy; 0xFFuy; 0xFFuy; 0xFFuy; 0xFFuy; 0xFFuy; 0xFFuy
+           0xBCuy; 0xE6uy; 0xFAuy; 0xADuy; 0xA7uy; 0x17uy; 0x9Euy; 0x84uy; 0xF3uy; 0xB9uy; 0xCAuy; 0xC2uy; 0xFCuy; 0x63uy; 0x25uy; 0x51uy |]
+
+    static member private ScalarInRange(scalar: byte[]) : bool =
+        scalar |> Array.exists (fun b -> b <> 0uy) && ReadOnlySpan<byte>(scalar).SequenceCompareTo(ReadOnlySpan<byte> order) < 0
+
     /// `VapidKey.from_keys(public_key, private_key)`: the private scalar signs; the public key is sent as given, so
     /// it must be the private key's.
     static member Create(subject: string, publicKey: string, privateKey: string) : Result<VapidConfig, VapidError> =
@@ -46,19 +54,23 @@ type VapidConfig private (subject: string, signingKey: ECDsa, publicKey: byte[])
                 | Ok privateKey when privateKey.Length > 32 -> Error InvalidPrivateKey
                 | Ok privateKey ->
                     let scalar = Array.append (Array.zeroCreate (32 - privateKey.Length)) privateKey
-                    try
-                        let signingKey = ECDsa.Create(ECParameters(Curve = ECCurve.NamedCurves.nistP256, D = scalar, Q = point))
-                        // The point has to be the scalar's: a signature the public key alone can check says so.
-                        use verifying = ECDsa.Create(ECParameters(Curve = ECCurve.NamedCurves.nistP256, Q = point))
-                        let probe = Encoding.ASCII.GetBytes "vapid"
-                        let signature = signingKey.SignData(probe, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
-                        if verifying.VerifyData(probe, signature, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation) then
-                            Ok(VapidConfig(subject, signingKey, publicKey))
-                        else
-                            signingKey.Dispose()
-                            Error Mismatched
-                    with :? CryptographicException ->
+                    if not (VapidConfig.ScalarInRange scalar) then
                         Error InvalidPrivateKey
+                    else
+                        try
+                            let signingKey = ECDsa.Create(ECParameters(Curve = ECCurve.NamedCurves.nistP256, D = scalar, Q = point))
+                            // The point has to be the scalar's: a signature the public key alone can check says so (and
+                            // some platforms refuse the pair when they import it).
+                            use verifying = ECDsa.Create(ECParameters(Curve = ECCurve.NamedCurves.nistP256, Q = point))
+                            let probe = Encoding.ASCII.GetBytes "vapid"
+                            let signature = signingKey.SignData(probe, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
+                            if verifying.VerifyData(probe, signature, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation) then
+                                Ok(VapidConfig(subject, signingKey, publicKey))
+                            else
+                                signingKey.Dispose()
+                                Error Mismatched
+                        with :? CryptographicException ->
+                            Error Mismatched
 
     static member FromConfig(config: AppConfig) : Result<VapidConfig, VapidError> =
         match config.VapidPublicKey, config.VapidPrivateKey with

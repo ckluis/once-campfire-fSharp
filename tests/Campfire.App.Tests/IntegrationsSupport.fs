@@ -218,10 +218,11 @@ let private serve (stream: Stream) (routes: Route list) (log: List<Received>) : 
 
 /// A TLS server certificate that the tests' CA signed (for `fcm.googleapis.com`, `www.example.com`, `example.com` and
 /// `bots.example`).
-let private serverCertificate () : X509Certificate2 =
-    use pem = X509Certificate2.CreateFromPemFile(testdata "tls/server.pem", testdata "tls/server.key")
-    // Platforms' TLS stacks want a certificate whose private key they can use, which a PFX gives them.
-    X509CertificateLoader.LoadPkcs12(pem.Export X509ContentType.Pfx, null)
+let private serverCertificate: Lazy<X509Certificate2> =
+    lazy
+        (use pem = X509Certificate2.CreateFromPemFile(testdata "tls/server.pem", testdata "tls/server.key")
+         // Platforms' TLS stacks want a certificate whose private key they can use, which a PFX gives them.
+         X509CertificateLoader.LoadPkcs12(pem.Export X509ContentType.Pfx, null))
 
 type FakeServer private (listener: TcpListener, received: List<Received>, stop: CancellationTokenSource) =
     member _.Addr: IPEndPoint = listener.LocalEndpoint :?> IPEndPoint
@@ -262,7 +263,7 @@ type FakeServer private (listener: TcpListener, received: List<Received>, stop: 
 
     static member Start(routes: Route list) : FakeServer = FakeServer.StartWith(routes, None)
 
-    static member StartTls(routes: Route list) : FakeServer = FakeServer.StartWith(routes, Some(serverCertificate ()))
+    static member StartTls(routes: Route list) : FakeServer = FakeServer.StartWith(routes, Some serverCertificate.Value)
 
     interface IDisposable with
         member _.Dispose() =

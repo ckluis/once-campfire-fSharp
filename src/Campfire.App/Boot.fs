@@ -176,7 +176,7 @@ module Boot =
             // config/initializers/web_push.rb: off without a valid VAPID key pair.
             let webPush = IntegrationJobs.webPushPool config db (loggers.CreateLogger "campfire.web_push")
             let app =
-                AppState(config, secrets, clock, db, storage, cable, Broadcasts cable, jobs, webPush, fragmentCache)
+                AppState(config, secrets, clock, db, storage, cable, Broadcasts cable, jobs, webPush, fragmentCache, loggers)
 
             let registry = CoreJobs.withCoreJobs ()
             IntegrationJobs.registerJobs registry

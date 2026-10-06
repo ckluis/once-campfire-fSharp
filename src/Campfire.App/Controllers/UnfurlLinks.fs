@@ -18,7 +18,7 @@ module UnfurlLinks =
                 match c.Current<Network>() with
                 | ValueSome net -> net
                 | ValueNone -> Network.system ()
-            match! Opengraph.unfurl net url with
+            match! Opengraph.unfurlLogged net url (c.App.Loggers.CreateLogger "campfire.opengraph") with
             | Error e -> return Error(Internal(exn (UnfurlError.message e)))
             | Ok(Unfurl.Json json) -> return Ok(Some json)
             | Ok Unfurl.NoContent -> return Ok None

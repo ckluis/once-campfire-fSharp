@@ -61,5 +61,7 @@ module Opengraph =
 
     /// The action after `params.require(:url)` (a missing or blank `url` is the controller's 400). One that runs out
     /// of time unfurls nothing.
-    let unfurl (net: Network) (url: string) : Task<Result<Unfurl, UnfurlError>> =
-        unfurlWithin net url UnfurlDeadline NullLogger.Instance
+    let unfurlLogged (net: Network) (url: string) (logger: ILogger) : Task<Result<Unfurl, UnfurlError>> =
+        unfurlWithin net url UnfurlDeadline logger
+
+    let unfurl (net: Network) (url: string) : Task<Result<Unfurl, UnfurlError>> = unfurlLogged net url NullLogger.Instance
