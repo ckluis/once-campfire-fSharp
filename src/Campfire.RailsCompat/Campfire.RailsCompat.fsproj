@@ -7,6 +7,7 @@
     <Compile Include="RailsEncoding.fs" />
     <Compile Include="Error.fs" />
     <Compile Include="KeyGenerator.fs" />
+    <Compile Include="KeyedCrypto.fs" />
     <Compile Include="Metadata.fs" />
     <Compile Include="MessageVerifier.fs" />
     <Compile Include="MessageEncryptor.fs" />

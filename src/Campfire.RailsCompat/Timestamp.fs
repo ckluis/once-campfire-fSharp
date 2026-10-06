@@ -17,9 +17,35 @@ module Timestamps =
             RegexOptions.CultureInvariant
         )
 
-    /// `str::parse::<Timestamp>()`: an RFC 3339 date and time that carries an offset. None when
-    /// it doesn't parse.
-    let tryParse (s: string) : Timestamp option =
+    let inline private digit (s: string) (i: int) : int = int s[i] - int '0'
+
+    let inline private isDigit (s: string) (i: int) : bool = s[i] >= '0' && s[i] <= '9'
+
+    /// The one shape `Metadata.iso8601Millis` writes (`2046-01-01T12:00:00.000Z`), which every cookie and
+    /// token with an expiry carries: parsed without the regex. Anything else, including a date the calendar
+    /// refuses, is left to `parseWithPattern`, so the two agree on every string (a test compares them).
+    let private tryParseMillis (s: string) : Timestamp voption =
+        if s.Length <> 24
+           || s[4] <> '-' || s[7] <> '-' || s[10] <> 'T' || s[13] <> ':' || s[16] <> ':' || s[19] <> '.' || s[23] <> 'Z'
+           || not (isDigit s 0 && isDigit s 1 && isDigit s 2 && isDigit s 3 && isDigit s 5 && isDigit s 6 && isDigit s 8 && isDigit s 9)
+           || not (isDigit s 11 && isDigit s 12 && isDigit s 14 && isDigit s 15 && isDigit s 17 && isDigit s 18)
+           || not (isDigit s 20 && isDigit s 21 && isDigit s 22) then
+            ValueNone
+        else
+            let year = digit s 0 * 1000 + digit s 1 * 100 + digit s 2 * 10 + digit s 3
+            let month = digit s 5 * 10 + digit s 6
+            let day = digit s 8 * 10 + digit s 9
+            let hour = digit s 11 * 10 + digit s 12
+            let minute = digit s 14 * 10 + digit s 15
+            let second = min (digit s 17 * 10 + digit s 18) 59
+            if year < 1 || month < 1 || month > 12 || day < 1 || day > DateTime.DaysInMonth(year, month) || hour > 23 || minute > 59 then
+                ValueNone
+            else
+                let millis = digit s 20 * 100 + digit s 21 * 10 + digit s 22
+                let local = DateTime(year, month, day, hour, minute, second, DateTimeKind.Utc).AddTicks(int64 millis * TimeSpan.TicksPerMillisecond)
+                ValueSome(DateTimeOffset(local, TimeSpan.Zero))
+
+    let internal parseWithPattern (s: string) : Timestamp option =
         let m = pattern.Match s
         if not m.Success then
             None
@@ -46,3 +72,10 @@ module Timestamps =
                 Some(DateTimeOffset(local, offset).ToUniversalTime())
             with :? ArgumentException ->
                 None
+
+    /// `str::parse::<Timestamp>()`: an RFC 3339 date and time that carries an offset. None when
+    /// it doesn't parse.
+    let tryParse (s: string) : Timestamp option =
+        match tryParseMillis s with
+        | ValueSome t -> Some t
+        | ValueNone -> parseWithPattern s

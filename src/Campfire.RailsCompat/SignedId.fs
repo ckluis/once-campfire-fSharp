@@ -41,14 +41,27 @@ let combinePurposes (modelName: string) (purpose: string option) : string =
     |> String.concat "/"
 
 let verifier (secrets: Secrets) : MessageVerifier =
-    let secret = secrets.KeyGenerator.GenerateKey(Salt, 64)
+    let secret = secrets.KeyGenerator.SharedKey(Salt, 64)
     let fallback = MessageVerifier.create secret Digest.Sha1 Encoding.Strict (Serializer.JsonWithFallback true)
     MessageVerifier.create secret Digest.Sha256 Encoding.UrlSafe Serializer.Json
     |> MessageVerifier.fallBackTo fallback
 
 /// `modelName` is the record's *base* class name, e.g. "User" or "Room" (not "Rooms::Open").
-let generate (secrets: Secrets) (modelName: string) (id: int64) (purpose: string option) (expiresAt: Timestamp option) : string =
+let private make (secrets: Secrets) (modelName: string) (id: int64) (purpose: string option) (expiresAt: Timestamp option) : string =
     MessageVerifier.generate (verifier secrets) (Value.Int id) (Some(combinePurposes modelName purpose)) expiresAt
+
+let generate (secrets: Secrets) (modelName: string) (id: int64) (purpose: string option) (expiresAt: Timestamp option) : string =
+    match expiresAt with
+    // Without an expiry the token is a function of its inputs: an avatar token is the same string every time.
+    | None ->
+        let purposeName = defaultArg purpose ""
+        match secrets.Tokens.TryGetSignedId(modelName, purposeName, id) with
+        | null ->
+            let token = make secrets modelName id purpose None
+            secrets.Tokens.AddSignedId(modelName, purposeName, id, token)
+            token
+        | token -> token
+    | Some _ -> make secrets modelName id purpose expiresAt
 
 /// `find_signed`'s verification step: the id to look up, or `None`.
 let verify (secrets: Secrets) (modelName: string) (signedId: string) (purpose: string option) (now: Timestamp) : int64 option =

@@ -73,7 +73,7 @@ module GlobalId =
         |> Option.bind parse
 
     let verifier (secrets: Secrets) : MessageVerifier =
-        let secret = secrets.KeyGenerator.GenerateKey(Salt, 64)
+        let secret = secrets.KeyGenerator.SharedKey(Salt, 64)
         MessageVerifier.create secret Digest.Sha1 Encoding.UrlSafePadded (Serializer.JsonWithFallback true)
 
     /// `record.attachable_sgid`, i.e. `to_sgid(expires_in: nil, for: "attachable")`. GlobalID turns

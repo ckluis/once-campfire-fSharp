@@ -32,12 +32,12 @@ let private purpose (name: string) : string = "cookie." + name
 let signedCookieVerifier (secrets: Secrets) : MessageVerifier =
     // `signed_cookie_digest` is unset, so the jar falls back to "SHA1" even though the key itself
     // is derived with PBKDF2-SHA256.
-    let secret = secrets.KeyGenerator.GenerateKey(SignedCookieSalt, 64)
+    let secret = secrets.KeyGenerator.SharedKey(SignedCookieSalt, 64)
     MessageVerifier.create secret Digest.Sha1 Encoding.Strict Serializer.Null
 
 let encryptedCookieEncryptor (secrets: Secrets) : MessageEncryptor =
-    let secret = secrets.KeyGenerator.GenerateKey(AuthenticatedEncryptedCookieSalt, 32)
-    MessageEncryptor.create secret Serializer.Null
+    let secret = secrets.KeyGenerator.SharedKey(AuthenticatedEncryptedCookieSalt, 32)
+    MessageEncryptor.createShared secret Serializer.Null
 
 /// `SerializerWithFallback[:json].load`: Marshal payloads aren't allowed for cookies.
 let private load (dumped: Value) : Value option =

@@ -26,6 +26,9 @@ type Serializer =
     | JsonWithFallback of allowMarshal: bool
 
 module internal Serializer =
+    /// `String#force_encoding("UTF-8")` of a payload that must be valid: an invalid byte throws.
+    let private strictUtf8 = UTF8Encoding(false, true)
+
     let private orElse (error: Error) (option: 'a option) : Result<'a, Error> =
         match option with
         | Some value -> Ok value
@@ -47,7 +50,7 @@ module internal Serializer =
         match serializer with
         | Serializer.Null ->
             try
-                Ok(Value.String(UTF8Encoding(false, true).GetString bytes))
+                Ok(Value.String(strictUtf8.GetString bytes))
             with :? DecoderFallbackException ->
                 Error InvalidMessage
         // JSON.load("") is nil.
@@ -147,11 +150,88 @@ module internal Metadata =
             |> Result.bind (fun () ->
                 if rubyToS (get "pur") <> defaultArg purpose "" then Error PurposeMismatch else Ok rails)
 
-    let private legacyPrefix = Encoding.UTF8.GetBytes "{\"_rails\":{\"message\":\""
 
-    /// `deserialize_with_metadata`. `decodeLegacyMessage` decodes the base64 inside a legacy
-    /// envelope: the verifier accepts either alphabet, the encryptor only strict Base64.
-    let deserializeWithMetadata
+    let private legacyPrefix = Encoding.UTF8.GetBytes "{\"_rails\":{\"message\":\""
+    let private expLiteral = Encoding.UTF8.GetBytes ",\"exp\":"
+    let private purLiteral = Encoding.UTF8.GetBytes ",\"pur\":"
+    let private nullLiteral = Encoding.UTF8.GetBytes "null"
+    let private closeLiteral = Encoding.UTF8.GetBytes "}}"
+
+    /// What `expiryAndPurpose` needs of an envelope: its `exp` and `pur`, `null` for a JSON null or a missing key.
+    [<Struct>]
+    type private Legacy =
+        { Message: string
+          Exp: string | null
+          Pur: string | null }
+
+    /// A byte of a string `tryLegacy` reads without unescaping: printable ASCII but for the quote and the backslash.
+    let inline private plain (b: byte) : bool = b >= 0x20uy && b < 0x7fuy && b <> byte '"' && b <> byte '\\'
+
+    /// A cursor over the bytes of an envelope; `Ok` turns false at the first thing it doesn't take.
+    [<Sealed; AllowNullLiteral>]
+    type private LegacyReader(bytes: byte[], start: int) =
+        let mutable at = start
+        member val Ok = true with get, set
+        member _.AtEnd = at = bytes.Length
+
+        /// A string up to its closing quote (the opening one already read).
+        member this.String() : string =
+            let first = at
+            while at < bytes.Length && plain bytes[at] do
+                at <- at + 1
+            if at < bytes.Length && bytes[at] = byte '"' then
+                let text = Encoding.ASCII.GetString(bytes, first, at - first)
+                at <- at + 1
+                text
+            else
+                this.Ok <- false
+                ""
+
+        member this.Expect(literal: byte[]) : unit =
+            if this.Ok && bytes.AsSpan(at).StartsWith(ReadOnlySpan literal) then at <- at + literal.Length else this.Ok <- false
+
+        /// `null` or a quoted string.
+        member this.Nullable() : string | null =
+            if this.Ok && at < bytes.Length && bytes[at] = byte 'n' then
+                this.Expect nullLiteral
+                null
+            elif this.Ok && at < bytes.Length && bytes[at] = byte '"' then
+                at <- at + 1
+                this.String()
+            else
+                this.Ok <- false
+                null
+
+    /// Reads the envelope `serializeDumpedWithMetadata` writes for the null serializer (`{"_rails":{"message":"..","exp":..,"pur":..}}`,
+    /// no spaces, each value a plain string or null) without the JSON parser. Anything else, an escape or a byte it doesn't take, a
+    /// different order, is `ValueNone` and goes to `Json.parse`, which reads the same fields from the same bytes
+    /// (`deserializeWithMetadataGeneric`; a test holds the two to the same answer).
+    let private tryLegacy (bytes: byte[]) : Legacy voption =
+        let reader = LegacyReader(bytes, legacyPrefix.Length)
+        let message = reader.String()
+        reader.Expect expLiteral
+        let exp = reader.Nullable()
+        reader.Expect purLiteral
+        let pur = reader.Nullable()
+        reader.Expect closeLiteral
+        if reader.Ok && reader.AtEnd then ValueSome { Message = message; Exp = exp; Pur = pur } else ValueNone
+
+    /// `extract_from_metadata_envelope` for the two fields of a legacy envelope (see `extract`).
+    let private expiryAndPurpose (exp: string | null) (pur: string | null) (purpose: string option) (now: Timestamp) : Result<unit, Error> =
+        let expiry: Result<unit, Error> =
+            match exp with
+            | null -> Ok()
+            | exp ->
+                match Timestamps.tryParse exp with
+                | None -> Error InvalidMessage
+                | Some exp -> if now >= exp then Error Expired else Ok()
+        expiry
+        |> Result.bind (fun () ->
+            let actual = match pur with null -> "" | pur -> pur
+            if actual <> defaultArg purpose "" then Error PurposeMismatch else Ok())
+
+    /// `deserialize_with_metadata`, in full: the envelope goes through `Json.parse`.
+    let deserializeWithMetadataGeneric
         (serializer: Serializer)
         (bytes: byte[])
         (purpose: string option)
@@ -181,3 +261,22 @@ module internal Metadata =
                     Ok value
                 else
                     Error PurposeMismatch)
+
+    /// `deserialize_with_metadata`. `decodeLegacyMessage` decodes the base64 inside a legacy
+    /// envelope: the verifier accepts either alphabet, the encryptor only strict Base64.
+    let deserializeWithMetadata
+        (serializer: Serializer)
+        (bytes: byte[])
+        (purpose: string option)
+        (now: Timestamp)
+        (decodeLegacyMessage: string -> byte[] option)
+        : Result<Value, Error> =
+        match (if bytes.AsSpan().StartsWith(ReadOnlySpan legacyPrefix) then tryLegacy bytes else ValueNone) with
+        | ValueNone -> deserializeWithMetadataGeneric serializer bytes purpose now decodeLegacyMessage
+        | ValueSome legacy ->
+            match expiryAndPurpose legacy.Exp legacy.Pur purpose now with
+            | Error e -> Error e
+            | Ok() ->
+                match decodeLegacyMessage legacy.Message with
+                | None -> Error InvalidSignature
+                | Some dumped -> Serializer.load serializer dumped

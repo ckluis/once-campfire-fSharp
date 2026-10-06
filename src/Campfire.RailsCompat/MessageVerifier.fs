@@ -43,53 +43,99 @@ module MessageVerifier =
     let fallBackTo (rotation: MessageVerifier) (verifier: MessageVerifier) : MessageVerifier =
         { verifier with Rotations = verifier.Rotations @ [ rotation ] }
 
-    /// `ActiveSupport::SecurityUtils.secure_compare`-style comparison (length leaks, contents don't).
-    let internal constantTimeEq (a: byte[]) (b: byte[]) : bool = CryptographicOperations.FixedTimeEquals(ReadOnlySpan a, ReadOnlySpan b)
-
     let private hexLength (verifier: MessageVerifier) : int =
         match verifier.Digest with
         | Digest.Sha1 -> 40
         | Digest.Sha256 -> 64
 
-    let private mac (verifier: MessageVerifier) (data: string) : byte[] =
-        let bytes = System.Text.Encoding.UTF8.GetBytes data
-        match verifier.Digest with
-        | Digest.Sha1 -> HMACSHA1.HashData(verifier.Secret, bytes)
-        | Digest.Sha256 -> HMACSHA256.HashData(verifier.Secret, bytes)
+    /// What a thread signs and verifies in: the UTF-8 of the text being MACed and the MAC. Never held across a call into other code.
+    [<Sealed; AbstractClass>]
+    type private Scratch =
+        [<ThreadStatic; DefaultValue>]
+        static val mutable private text: byte[] | null
 
-    let private hexDigest (verifier: MessageVerifier) (data: string) : string = Convert.ToHexStringLower(mac verifier data)
+        [<ThreadStatic; DefaultValue>]
+        static val mutable private mac: byte[] | null
 
-    let private digestMatches (verifier: MessageVerifier) (data: string) (digest: string) : bool =
-        constantTimeEq (System.Text.Encoding.UTF8.GetBytes digest) (System.Text.Encoding.UTF8.GetBytes(hexDigest verifier data))
+        static member Mac: byte[] =
+            match Scratch.mac with
+            | null ->
+                let made = Array.zeroCreate<byte> 64
+                Scratch.mac <- made
+                made
+            | made -> made
 
-    /// Rust's `str::trim().is_empty()`: only Unicode White_Space.
-    let private isBlank (s: string) : bool =
-        s
-        |> Seq.forall (fun c ->
-            (c >= '\t' && c <= '\r')
-            || c = ' '
-            || c = '\u0085'
-            || c = '\u00a0'
-            || c = '\u1680'
-            || (c >= '\u2000' && c <= '\u200a')
-            || c = '\u2028'
-            || c = '\u2029'
-            || c = '\u202f'
-            || c = '\u205f'
-            || c = '\u3000')
+        /// A buffer of at least `size` bytes; one over 64 KiB is not kept.
+        static member Text(size: int) : byte[] =
+            match Scratch.text with
+            | null ->
+                let made = Array.zeroCreate<byte> (max size 1024)
+                if made.Length <= 65536 then Scratch.text <- made
+                made
+            | kept when kept.Length >= size -> kept
+            | _ ->
+                let made = Array.zeroCreate<byte> (max size 1024)
+                if made.Length <= 65536 then Scratch.text <- made
+                made
 
-    /// `extract_encoded`: the digest is the last `2 * digest_length` characters, preceded by `--`.
-    let private extractEncoded (verifier: MessageVerifier) (signed: string) : string option =
+    /// The HMAC of the UTF-8 of `data` (`OpenSSL::HMAC.hexdigest` before the hex), in `Scratch.Mac`; its length.
+    let private mac (verifier: MessageVerifier) (data: ReadOnlySpan<char>) : int =
+        let buffer = Scratch.Text(System.Text.Encoding.UTF8.GetMaxByteCount data.Length)
+        let length = System.Text.Encoding.UTF8.GetBytes(data, Span buffer)
+        let keyed = KeyedCrypto.keyed verifier.Secret
+        let hmac =
+            match verifier.Digest with
+            | Digest.Sha1 -> keyed.Sha1
+            | Digest.Sha256 -> keyed.Sha256
+        hmac.Compute(ReadOnlySpan(buffer, 0, length), Span Scratch.Mac)
+
+    let private hexDigits = "0123456789abcdef"
+
+    /// `digest` is the lowercase hex of the MAC, compared in constant time (a length difference leaks, the contents don't).
+    let private digestMatches (macLength: int) (digest: ReadOnlySpan<char>) : bool =
+        if digest.Length <> macLength * 2 then
+            false
+        else
+            let mac = Scratch.Mac
+            let mutable diff = 0
+            for i in 0 .. macLength - 1 do
+                let b = int mac[i]
+                diff <- diff ||| (int digest[2 * i] ^^^ int hexDigits[b >>> 4]) ||| (int digest[2 * i + 1] ^^^ int hexDigits[b &&& 15])
+            diff = 0
+
+    let private isBlankSpan (s: ReadOnlySpan<char>) : bool =
+        let mutable blank = true
+        let mutable i = 0
+        while blank && i < s.Length do
+            let c = s[i]
+            blank <-
+                (c >= '\t' && c <= '\r')
+                || c = ' '
+                || c = '\u0085'
+                || c = '\u00a0'
+                || c = '\u1680'
+                || (c >= '\u2000' && c <= '\u200a')
+                || c = '\u2028'
+                || c = '\u2029'
+                || c = '\u202f'
+                || c = '\u205f'
+                || c = '\u3000'
+            i <- i + 1
+        blank
+
+    /// `extract_encoded`: the digest is the last `2 * digest_length` characters, preceded by `--`. The length of the
+    /// encoded part when the digest is there and checks out, otherwise -1.
+    let private extractEncoded (verifier: MessageVerifier) (signed: string) : int =
         let index = signed.Length - (hexLength verifier + 2)
         if index < 0 || signed[index] <> '-' || signed[index + 1] <> '-' then
-            None
+            -1
         else
-            let encoded = signed.Substring(0, index)
-            let digest = signed.Substring(index + 2)
+            let encoded = signed.AsSpan(0, index)
+            let digest = signed.AsSpan(index + 2)
             // `data.present? && digest.present?`
-            if isBlank encoded || isBlank digest then None
-            elif digestMatches verifier encoded digest then Some encoded
-            else None
+            if isBlankSpan encoded || isBlankSpan digest then -1
+            elif digestMatches (mac verifier encoded) digest then index
+            else -1
 
     let private sign (verifier: MessageVerifier) (serialized: byte[]) : string =
         let encoded =
@@ -97,7 +143,8 @@ module MessageVerifier =
             | Encoding.Strict -> RailsEncoding.strictEncode serialized
             | Encoding.UrlSafe -> RailsEncoding.urlsafeEncodeUnpadded serialized
             | Encoding.UrlSafePadded -> RailsEncoding.urlsafeEncodePadded serialized
-        encoded + "--" + hexDigest verifier encoded
+        let length = mac verifier (encoded.AsSpan())
+        String.Concat(encoded, "--", Convert.ToHexStringLower(ReadOnlySpan(Scratch.Mac, 0, length)))
 
     let generate (verifier: MessageVerifier) (value: Value) (purpose: string option) (expiresAt: Timestamp option) : string =
         sign verifier (Metadata.serializeWithMetadata verifier.Serializer value purpose expiresAt)
@@ -109,9 +156,13 @@ module MessageVerifier =
         sign verifier (Metadata.serializeDumpedWithMetadata verifier.Serializer (System.Text.Encoding.UTF8.GetBytes dataJson) purpose expiresAt)
 
     let private readMessage (verifier: MessageVerifier) (message: string) (purpose: string option) (now: Timestamp) : Result<Value, Error> =
-        match extractEncoded verifier message |> Option.bind (fun encoded -> RailsEncoding.urlsafeDecode encoded) with
-        | None -> Error InvalidSignature
-        | Some decoded -> Metadata.deserializeWithMetadata verifier.Serializer decoded purpose now RailsEncoding.urlsafeDecode
+        let length = extractEncoded verifier message
+        if length < 0 then
+            Error InvalidSignature
+        else
+            match RailsEncoding.urlsafeDecodeSpan (message.AsSpan(0, length)) with
+            | ValueNone -> Error InvalidSignature
+            | ValueSome decoded -> Metadata.deserializeWithMetadata verifier.Serializer decoded purpose now RailsEncoding.urlsafeDecode
 
     /// `verified`/`verify`: the value, or why it couldn't be read.
     let verify (verifier: MessageVerifier) (message: string) (purpose: string option) (now: Timestamp) : Result<Value, Error> =

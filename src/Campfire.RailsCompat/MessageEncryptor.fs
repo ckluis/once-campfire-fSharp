@@ -1,6 +1,7 @@
 // Port of rust/crates/rails_compat/src/message_encryptor.rs
 namespace Campfire.RailsCompat
 
+open System
 open System.Security.Cryptography
 
 /// `ActiveSupport::MessageEncryptor` with `aes-256-gcm`, as the encrypted cookie jar builds it:
@@ -32,8 +33,15 @@ module MessageEncryptor =
         { Secret = Array.copy secret
           Serializer = serializer }
 
+    /// `create` for a key nobody else writes to (`KeyGenerator.SharedKey`): no copy, and the expanded key is found by the array.
+    let internal createShared (secret: byte[]) (serializer: Serializer) : MessageEncryptor =
+        if secret.Length <> 32 then
+            invalidArg (nameof secret) "aes-256-gcm needs a 32-byte key"
+        { Secret = secret
+          Serializer = serializer }
+
     let internal encryptWithIv (encryptor: MessageEncryptor) (plaintext: byte[]) (iv: byte[]) : string =
-        use cipher = new AesGcm(encryptor.Secret, AuthTagLength)
+        let cipher = (KeyedCrypto.keyed encryptor.Secret).Aes.Instance
         let ciphertext = Array.zeroCreate<byte> plaintext.Length
         let tag = Array.zeroCreate<byte> AuthTagLength
         cipher.Encrypt(iv, plaintext, ciphertext, tag, System.ReadOnlySpan<byte>.Empty)
@@ -43,32 +51,30 @@ module MessageEncryptor =
         let plaintext = Metadata.serializeWithMetadata encryptor.Serializer value purpose expiresAt
         encryptWithIv encryptor plaintext (RandomNumberGenerator.GetBytes IvLength)
 
-    /// `extract_parts`: fixed-length IV and tag at the end, each preceded by `--`.
-    let private extractParts (message: string) : (string * string * string) option =
+    /// The decrypted bytes, before any envelope handling. `extract_parts`: fixed-length IV and tag at the end, each preceded by `--`.
+    let decrypt (encryptor: MessageEncryptor) (message: string) : byte[] option =
         let tagStart = message.Length - EncodedAuthTagLength
         let ivStart = tagStart - (2 + EncodedIvLength)
         let ciphertextEnd = ivStart - 2
         if tagStart < 0 || ivStart < 0 || ciphertextEnd < 0 then
             None
-        elif message.Substring(tagStart - 2, 2) <> "--" || message.Substring(ciphertextEnd, 2) <> "--" then
+        elif not (message.AsSpan(tagStart - 2, 2).SequenceEqual "--") || not (message.AsSpan(ciphertextEnd, 2).SequenceEqual "--") then
             None
         else
-            Some(message.Substring(0, ciphertextEnd), message.Substring(ivStart, tagStart - 2 - ivStart), message.Substring tagStart)
-
-    /// The decrypted bytes, before any envelope handling.
-    let decrypt (encryptor: MessageEncryptor) (message: string) : byte[] option =
-        extractParts message
-        |> Option.bind (fun (ciphertext, iv, tag) ->
-            match RailsEncoding.strictDecode ciphertext, RailsEncoding.strictDecode iv, RailsEncoding.strictDecode tag with
-            | Some ciphertext, Some iv, Some tag when iv.Length = IvLength && tag.Length = AuthTagLength ->
+            match
+                RailsEncoding.strictDecodeSpan (message.AsSpan(0, ciphertextEnd)),
+                RailsEncoding.strictDecodeSpan (message.AsSpan(ivStart, tagStart - 2 - ivStart)),
+                RailsEncoding.strictDecodeSpan (message.AsSpan tagStart)
+            with
+            | ValueSome ciphertext, ValueSome iv, ValueSome tag when iv.Length = IvLength && tag.Length = AuthTagLength ->
                 try
-                    use cipher = new AesGcm(encryptor.Secret, AuthTagLength)
+                    let cipher = (KeyedCrypto.keyed encryptor.Secret).Aes.Instance
                     let plaintext = Array.zeroCreate<byte> ciphertext.Length
                     cipher.Decrypt(iv, ciphertext, tag, plaintext, System.ReadOnlySpan<byte>.Empty)
                     Some plaintext
                 with :? CryptographicException ->
                     None
-            | _ -> None)
+            | _ -> None
 
     let decryptAndVerify (encryptor: MessageEncryptor) (message: string) (purpose: string option) (now: Timestamp) : Result<Value, Error> =
         match decrypt encryptor message with
