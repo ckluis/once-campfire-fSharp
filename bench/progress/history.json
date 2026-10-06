@@ -215,5 +215,7 @@
    "why": "Still not comparable: 50 vs 40 messages a page, a hardcoded timestamp, reversed search order and 30-60% smaller pages. So the work became a full, identical-in-use port, and every dot below renders the same bytes as Rust."
   }
  ],
+ "start_time": "2026-10-06T14:25:25Z",
+ "start_time_note": "When the third F# rep of the Phase 7 start finished (fsharp-3.json was written); a checkout resets file times, so it is recorded here.",
  "start_description": "Unit 7.0 rebuilt the measuring before anyone optimized: container logs capped, every route warmed for at least 30 s until flat within 3%, the host's pinned CPUs probed before each window, CPU per request from the container's cgroup, and bench/quick for Rust and F# only. Rust was measured here once more, and these Rust medians are the stored reference every later dot compares against."
 }
