@@ -67,6 +67,13 @@
 # free on the host. NETWORK=bridge measures as the preliminary run did instead: the container on
 # Docker's bridge, reached through a published port (docker-proxy), with no DNS resolver.
 #   LOAD_MAX=1.5 LOAD_WAIT_SECS=900 PROCMEM_CPUS=0 SUITES="http cable upload"
+#
+# Host noise: the VM's load average cannot see the Mac. A build or test run on the host takes the cores the VM's vCPUs run on,
+# the pinned server and load generator slow down by tens of percent, and the load average inside the VM stays low (a Rust run
+# measured 17.6k req/s on a page it had just served at 26k in its warm-up, during another program's test run on the Mac).
+# bench/lib/hostprobe.py times a fixed spin on every pinned CPU; wait_for_quiet waits until it is within HOST_MAX_RATIO (1.10)
+# of the fastest it has ever been on this VM ($WORK/.hostprobe-baseline), every measured window is followed by a probe, and
+# the results (host_probe_start, host_probe_after per run) are in the JSON; bench/report flags runs that overlapped noise.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -95,6 +102,7 @@ NETWORK=${NETWORK:-host}
 LOAD_MAX=${LOAD_MAX:-1.5}
 LOAD_WAIT_SECS=${LOAD_WAIT_SECS:-900}
 PROCMEM_CPUS=${PROCMEM_CPUS:-0}
+HOST_MAX_RATIO=${HOST_MAX_RATIO:-1.10}
 SUITES=${SUITES:-http cable upload}
 suite() { [[ " $SUITES " = *" $1 "* ]]; }
 # Extra environment for the Rust container only (space-separated K=V). The preliminary run
@@ -271,6 +279,10 @@ start_app() {
   python3 -c "import sys; print(round((float(sys.argv[2]) - float(sys.argv[1])) * 1000))" "$t0" "$(date +%s.%N)"
 }
 
+# A JSON line: the time of a fixed spin on every pinned CPU against the quietest this VM has shown (bench/lib/hostprobe.py);
+# with an argument, exit status 1 when the ratio is above it.
+host_probe() { python3 "$BENCH/lib/hostprobe.py" "$SERVER_CPUS,$LOADGEN_CPUS" "$WORK/.hostprobe-baseline" "$@"; }
+
 # Waits for the 1-minute load average to drop below LOAD_MAX (the previous run's load decays with
 # a one-minute time constant), for at most LOAD_WAIT_SECS.
 wait_for_quiet() {
@@ -279,6 +291,11 @@ wait_for_quiet() {
     sleep 10; waited=$((waited + 10))
   done
   log "load before run: $(cut -d' ' -f1-3 /proc/loadavg) (waited ${waited}s)"
+  # The host's share of the CPUs: wait for a probe within HOST_MAX_RATIO of the quietest ever seen, up to LOAD_WAIT_SECS in all.
+  while ! HOST_PROBE=$(host_probe "$HOST_MAX_RATIO") && [ "$waited" -lt "$LOAD_WAIT_SECS" ]; do
+    log "host busy: $HOST_PROBE"; sleep 10; waited=$((waited + 10))
+  done
+  log "host probe before run: $HOST_PROBE (waited ${waited}s)"
 }
 
 # Messages in the write room, counted in the running app's SQLite file (WAL mode: a reader sees every commit).
@@ -293,7 +310,7 @@ PY
 run_rep() {
   local app=$1 rep=$2 f=$OUT/$app-$rep.json
   wait_for_quiet
-  local load_start; load_start=$(cat /proc/loadavg)
+  local load_start; load_start=$(cat /proc/loadavg) probe_start=$HOST_PROBE
   log "$app rep $rep: starting (load: $(cut -d' ' -f1-3 /proc/loadavg))"
   local cold_ms; cold_ms=$(start_app "$app")
   local cg; cg=$(cgroup_dir)
@@ -336,7 +353,7 @@ run_rep() {
     args+=("${enc[@]}")
     # Rows written, for the route that writes: the messages of the write room in the app's own SQLite file
     # before and after each warm-up and each run, against the answers below 400 the load generator saw.
-    local before=0 after=0 wres res
+    local before=0 after=0 wres res probe_after
     for c in $HTTP_CONCS; do
       [ "$path" = POST ] && before=$(room_rows "$app")
       wres=$(warm_up "$cookie" "$c" "${args[@]}")
@@ -346,13 +363,14 @@ run_rep() {
         before=$after
       fi
       res=$(lgc "$cg" http --base "$BASE" --cookie "$cookie" "${args[@]}" --conc "$c" --duration "$HTTP_SECS")
+      probe_after=$(host_probe)
       if [ "$path" = POST ]; then
         after=$(room_rows "$app")
         rows_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); w=json.loads(sys.argv[2]); a.append({"phase":"run","conc":w["conc"],"ok":w["ok"],"statuses":w["statuses"],"rows":int(sys.argv[3])-int(sys.argv[4])}); print(json.dumps(a))' "$rows_json" "$res" "$after" "$before")
       fi
-      res=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); r["route"]=sys.argv[2]; r["warmup"]=json.loads(sys.argv[3])["warmup"]; print(json.dumps(r))' "$res" "$name" "$wres")
+      res=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); r["route"]=sys.argv[2]; r["warmup"]=json.loads(sys.argv[3])["warmup"]; r["host_probe_after"]=json.loads(sys.argv[4]); print(json.dumps(r))' "$res" "$name" "$wres" "$probe_after")
       http_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); a.append(json.loads(sys.argv[2])); print(json.dumps(a))' "$http_json" "$res")
-      log "$app rep $rep: $name c=$c $(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); w=r["warmup"]; print(r["rps"], "rps p50", r["latency"].get("p50_ms"), "p99", r["latency"].get("p99_ms"), r["statuses"], "err", r["errors"], "cpu", r["cost"].get("server_cpu_us_per_req"), "us/req; warm-up", w["secs"], "s", w["reason"], "tail", w["tail_rps"])' "$res")"
+      log "$app rep $rep: $name c=$c $(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); w=r["warmup"]; print(r["rps"], "rps p50", r["latency"].get("p50_ms"), "p99", r["latency"].get("p99_ms"), r["statuses"], "err", r["errors"], "cpu", r["cost"].get("server_cpu_us_per_req"), "us/req; warm-up", w["secs"], "s", w["reason"], "tail", w["tail_rps"], "host", r["host_probe_after"]["ratio"])' "$res")"
     done
   done
 
@@ -381,14 +399,14 @@ run_rep() {
   local peak; peak=$(cat "$OUT/.$app-$rep.mem")
   local cg_peak; cg_peak=$(( $(cat "$cg/memory.peak" 2>/dev/null || echo 0) / 1048576 ))
   kill "$SAMPLER" 2>/dev/null || true; SAMPLER=""
-  python3 - "$f" "$app" "$rep" "$cold_ms" "$idle_cur" "$idle_anon" "$peak" "$cg_peak" "$http_json" "$cable_json" "$upload_json" "$load_start" "$(cat /proc/loadavg)" "$rows_json" "$probe_json" <<'PY'
+  python3 - "$f" "$app" "$rep" "$cold_ms" "$idle_cur" "$idle_anon" "$peak" "$cg_peak" "$http_json" "$cable_json" "$upload_json" "$load_start" "$(cat /proc/loadavg)" "$rows_json" "$probe_json" "$probe_start" "$(host_probe)" <<'PY'
 import json, sys
-f, app, rep, cold, idle_cur, idle_anon, peak, cg_peak, http, cable, upload, load0, load, rows, probe = sys.argv[1:]
+f, app, rep, cold, idle_cur, idle_anon, peak, cg_peak, http, cable, upload, load0, load, rows, probe, host0, host1 = sys.argv[1:]
 json.dump({
   "app": app, "rep": int(rep), "cold_start_ms": int(cold),
   "memory": {"idle_current_mb": int(idle_cur), "idle_anon_mb": int(idle_anon), **json.loads(peak), "cgroup_peak_mb": int(cg_peak)},
   "http": json.loads(http), "cable": json.loads(cable), "upload": json.loads(upload), "loadavg_start": load0, "loadavg_end": load,
-  "post_rows": json.loads(rows), "probe": json.loads(probe),
+  "post_rows": json.loads(rows), "probe": json.loads(probe), "host_probe_start": json.loads(host0), "host_probe_end": json.loads(host1),
 }, open(f, "w"), indent=1)
 PY
   docker rm -f "$CONTAINER" >/dev/null

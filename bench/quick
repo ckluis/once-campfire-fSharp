@@ -10,7 +10,8 @@
 # 3 reps with the app order alternating (rust, fsharp, then fsharp, rust, ...), a fresh container and seed copy per app
 # and rep, the same warm-up (WARMUP_SECS at each route and concurrency), the same pinning (SERVER_CPUS=0-3,
 # LOADGEN_CPUS=4-7), and the same validity checks and report as bench/run: the status of every response, rows written
-# against posts, response bytes per route, load average before each run, and the container's CPU per request
+# against posts, response bytes per route, load average before each run, a host-noise probe (bench/lib/hostprobe.py: a run
+# starts only when the pinned CPUs run a fixed spin at their quiet speed, and every window is probed after), and the container's CPU per request
 # (cgroup cpu.stat, unprofiled) next to each throughput. The result directory defaults to bench/results/quick-<stamp>.
 #
 # Time: each (route, c) costs its warm-up (at least WARMUP_SECS = 20 s, until the app is flat, at most WARMUP_MAX_SECS = 60 s:

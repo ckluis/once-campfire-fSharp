@@ -207,6 +207,21 @@ print("|---|---|---|---|")
 for a, r in every:
     print(f"| {NAME[a]} | {r['rep']} | {' '.join(r['loadavg_start'].split()[:3])} | {' '.join(r['loadavg_end'].split()[:3])} |")
 
+if any("host_probe_start" in r for a, r in every):
+    print("\n### Host CPU probe (a fixed spin timed on every pinned CPU, against the quietest this VM has shown; bench/lib/hostprobe.py)\n")
+    print("The VM's load average cannot see another program on the Mac taking the cores its vCPUs run on; this can. A ratio of 1.00 is a quiet host, "
+          "above 1.10 the pinned server and load generator were slowed by something outside the run. `After each window` probes the machine "
+          "right after every measured run of the rep.\n")
+    print("| App | Rep | Before the run | After the run | Windows probed above 1.10 | Highest after a window |")
+    print("|---|---|---|---|---|---|")
+    for a, r in every:
+        if "host_probe_start" not in r:
+            continue
+        after = [h["host_probe_after"]["ratio"] for h in r["http"] if "host_probe_after" in h]
+        bad = sum(1 for x in after if x > 1.10)
+        flag = " **noisy**" if bad or r["host_probe_start"]["ratio"] > 1.10 else ""
+        print(f"| {NAME[a]} | {r['rep']} | {r['host_probe_start']['ratio']:.2f} | {r['host_probe_end']['ratio']:.2f} | {bad}/{len(after)}{flag} | {max(after) if after else float('nan'):.2f} |")
+
 print("\n### Responses by status class, every HTTP run of every rep\n")
 print("| App | Route | 2xx | 3xx | 4xx | 5xx | Errors (no response) |")
 print("|---|---|---|---|---|---|---|")
