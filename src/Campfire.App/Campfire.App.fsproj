@@ -17,7 +17,24 @@
     <Compile Include="Channels/Broadcasts.fs" />
     <Compile Include="Channels/Registry.fs" />
     <Compile Include="Jobs.fs" />
-    <Compile Include="Library.fs" />
+    <Compile Include="AppState.fs" />
+    <Compile Include="Current.fs" />
+    <Compile Include="FragmentGlue.fs" />
+    <Compile Include="Presenters/Common.fs" />
+    <Compile Include="Presenters/RichText.fs" />
+    <Compile Include="Presenters/Attachments.fs" />
+    <Compile Include="Presenters/Accounts.fs" />
+    <Compile Include="Presenters/ViewContext.fs" />
+    <Compile Include="Presenters/Page.fs" />
+    <Compile Include="Concerns.fs" />
+    <Compile Include="ActiveStorage.fs" />
+    <Compile Include="RichText.fs" />
+    <Compile Include="CoreJobs.fs" />
+    <Compile Include="Controllers/Sessions.fs" />
+    <Compile Include="Controllers/Welcome.fs" />
+    <Compile Include="Controllers.fs" />
+    <Compile Include="Boot.fs" />
+    <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />

@@ -6,14 +6,14 @@ open System.IO
 open Xunit
 open Campfire.App
 
-let private config (vars: (string * string) list) : Result<Config, string> =
+let private config (vars: (string * string) list) : Result<AppConfig, string> =
     let vars = Dictionary<string, string>(dict vars)
-    Config.fromLookup (fun name ->
+    AppConfig.fromLookup (fun name ->
         match vars.TryGetValue name with
         | true, value -> value
         | _ -> null)
 
-let private unwrap (result: Result<Config, string>) : Config =
+let private unwrap (result: Result<AppConfig, string>) : AppConfig =
     match result with
     | Ok config -> config
     | Error e -> failwith e

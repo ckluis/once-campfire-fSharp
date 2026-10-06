@@ -73,7 +73,7 @@ module StoragePaths =
             | name -> name
         Path.Combine(paths.Backups, name)
 
-type Config =
+type AppConfig =
     { SecretKeyBase: string
       VapidPublicKey: string option
       VapidPrivateKey: string option
@@ -93,7 +93,7 @@ type Config =
       /// The fragment store's limit in bytes (`CAMPFIRE_FRAGMENT_CACHE_MB`).
       FragmentCacheBytes: int64 }
 
-module Config =
+module AppConfig =
     /// The install's own HTTPS URL when it has a TLS domain; the project's otherwise.
     let private defaultVapidSubject (tlsDomains: string option) : string =
         let domain =
@@ -130,7 +130,7 @@ module Config =
         out.Append('"').ToString()
 
     /// Builds the config from any variable lookup (tests pass a map).
-    let fromLookup (get: string -> string | null) : Result<Config, string> =
+    let fromLookup (get: string -> string | null) : Result<AppConfig, string> =
         let present (name: string) : string option =
             match get name with
             | null -> None
@@ -187,4 +187,4 @@ module Config =
                       LogLevel = defaultArg (present "RAILS_LOG_LEVEL") "info"
                       FragmentCacheBytes = megabytes * (1L <<< 20) }
 
-    let fromEnv () : Result<Config, string> = fromLookup Environment.GetEnvironmentVariable
+    let fromEnv () : Result<AppConfig, string> = fromLookup Environment.GetEnvironmentVariable
