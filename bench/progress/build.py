@@ -11,12 +11,14 @@ import html
 import json
 import os
 import statistics
+import subprocess
 from datetime import datetime, timezone
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 LOG = os.path.join(ROOT, "bench/results/phase7-log.jsonl")
 START = os.path.join(ROOT, "bench/results/phase7-start")
 OUT = os.path.join(ROOT, "target/phase7-dashboard/index.html")
+HISTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history.json")
 WORKLOADS = [("room_show", "Room page"), ("messages_page", "Messages page"), ("sidebar", "Sidebar"),
              ("search", "Search"), ("post_message", "Post a message")]
 CONCS = [("c16", 16), ("c1", 1)]
@@ -45,17 +47,23 @@ def medians(app):
     return out
 
 
-def start_entry():
+def history():
+    with open(HISTORY) as f:
+        return json.load(f)
+
+
+def start_entry(hist):
     t = "2026-10-06T14:00:00Z"
     p = os.path.join(START, "fsharp-3.json")
     if os.path.exists(p):
         t = datetime.fromtimestamp(os.path.getmtime(p), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return {"time": t, "unit": "start", "tier": 3, "change": "Phase 7 starting point, before any tuning (3 reps, image build)",
-            "commit": "5cc5ba4", "build": "image", "kept": True, "workloads": medians("fsharp")}
+    return {"time": t, "unit": "phase 7 start", "tier": 3, "change": "Phase 7 starting point: the trustworthy harness, before any tuning",
+            "description": hist.get("start_description", ""), "commit": "5cc5ba4", "build": "image, 3 reps", "kept": True,
+            "workloads": medians("fsharp")}
 
 
-def entries():
-    rows = [start_entry()]
+def entries(hist):
+    rows = [dict(h) for h in hist["comparable"]] + [start_entry(hist)]
     if os.path.exists(LOG):
         with open(LOG) as f:
             for line in f:
@@ -65,6 +73,28 @@ def entries():
                         rows.append(json.loads(line))
                     except json.JSONDecodeError:
                         pass
+    return rows
+
+
+def commits_between(a, b):
+    """Subjects of the commits after a up to b that change the app itself (not the bench, docs or this page)."""
+    try:
+        out = subprocess.run(["git", "-C", ROOT, "log", "--reverse", "--format=%h %s", f"{a}..{b}", "--",
+                              "src", "Dockerfile", "Directory.Build.props", "Directory.Packages.props"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [l for l in out.splitlines() if l and not l.split(" ", 1)[1].startswith("bench: log")]
+
+
+def describe(rows):
+    """What was done for each dot: its own description, or the commits since the previous dot."""
+    prev = None
+    for r in rows:
+        if not r.get("description") and prev and r.get("commit"):
+            r["commits"] = commits_between(prev, r["commit"])
+        if r.get("commit") and r.get("kept", True):
+            prev = r["commit"]
     return rows
 
 
@@ -113,6 +143,30 @@ def num(v, fmt="{:,.0f}"):
     return fmt.format(v) if isinstance(v, (int, float)) else "–"
 
 
+def done(r):
+    """The card's "What was done" section."""
+    if r.get("description"):
+        return '<div class="done"><h4>What was done</h4><p>%s</p></div>' % e(r["description"])
+    cs = r.get("commits") or []
+    if cs:
+        items = "".join('<li><code>%s</code> %s</li>' % (e(c.split(" ", 1)[0]), e(c.split(" ", 1)[1] if " " in c else "")) for c in cs[:8])
+        more = '<li class="more">and %d more</li>' % (len(cs) - 8) if len(cs) > 8 else ""
+        return '<div class="done"><h4>What was done</h4><ul>%s%s</ul></div>' % (items, more)
+    return '<div class="done"><h4>What was done</h4><p>No code change since the previous dot (a measurement only).</p></div>'
+
+
+def prelude(hist):
+    """Before the port: the Muse-era numbers, shown apart from the line because they weren't like for like."""
+    cards = []
+    for p in hist.get("prelude", []):
+        ratios = "".join("<li><span>%s</span><b>%s</b></li>" % (e(k), e(v)) for k, v in p["ratios"].items())
+        cards.append('<div class="pre"><p class="pre-label">%s</p><p class="pre-claim">%s</p><ul>%s</ul><p class="pre-why">%s</p></div>'
+                     % (e(p["label"]), e(p["claim"]), ratios, e(p["why"])))
+    return ('<section class="prelude"><h2>Before the port</h2><p class="sub">Claimed F#/Rust ratios from the challenge app. '
+            'They are off the chart on purpose: the pages weren&#39;t identical to Rust&#39;s, so they don&#39;t measure the same work.</p>'
+            '<div class="pre-grid">%s</div></section>' % "".join(cards))
+
+
 def card(r, view, measured, rust, ov):
     t = when(r)
     rows = []
@@ -133,16 +187,18 @@ def card(r, view, measured, rust, ov):
             '<p class="meta">commit <code>%s</code> · %s build%s</p>'
             '<table><tr class="grp"><th></th><th colspan="3">16 connections</th><th colspan="3">1 connection</th></tr>'
             '<tr class="sub"><th></th><th>F#</th><th>Rust</th><th>F#/Rust</th><th>F#</th><th>Rust</th><th>F#/Rust</th></tr>%s</table>'
-            '<p class="foot">Requests per second, CPU µs per request beneath. Rust is the stored Phase 7 starting point. Greyed F# values were carried from an earlier run.</p></div>'
+            '%s<p class="foot">Requests per second, CPU µs per request beneath. %s Greyed F# values were carried from an earlier run.</p></div>'
             % (e(t.strftime("%H:%M UTC") if t else "?"), e(str(r.get("unit", ""))), e(str(r.get("tier", ""))),
                "" if kept else " · reverted", e(str(r.get("change", ""))), e(str(r.get("commit", ""))),
-               e(str(r.get("build", ""))[:19]), (" · overall %.2f× of Rust" % ov) if ov else "", "".join(rows)))
+               e(str(r.get("build", ""))[:30]), (" · overall %.2f× of Rust" % ov) if ov else "", "".join(rows), done(r),
+               "Rust was measured in the same run." if r.get("rust") else "Rust is the stored Phase 7 starting point."))
 
 
 def page():
-    rust = medians("rust")
-    rows = carry(entries())
-    pts = [(when(r), overall(v, rust), r, v, m) for r, v, m in rows]
+    stored = medians("rust")
+    hist = history()
+    rows = carry(describe(entries(hist)))
+    pts = [(when(r), overall(v, r.get("rust") or stored), r, v, m) for r, v, m in rows]
     pts = [p for p in pts if p[0] and p[1] is not None]
     kept = [p for p in pts if p[2].get("kept", True)]
     W, H, L, R, T, B = 1000, 420, 56, 80, 28, 56
@@ -181,10 +237,11 @@ def page():
         side = "flip" if left > 58 else ""
         dots.append('<span class="dot %s %s %s" tabindex="0" role="button" style="left:%.2f%%;top:%.2f%%" aria-label="%s, %.2f times Rust">%s</span>'
                     % ("kept" if isk else "dropped", "last" if last else "", side, left, top,
-                       e(r.get("change", "")), v, card(r, view, measured, rust, v)))
+                       e(r.get("change", "")), v, card(r, view, measured, r.get("rust") or stored, v)))
 
     if kept:
-        first, latest = kept[0], kept[-1]
+        start = next((p for p in kept if p[2].get("unit") == "phase 7 start"), kept[0])
+        first, latest = start, kept[-1]
         gain = (latest[1] / first[1] - 1) * 100
         hours = (latest[0] - first[0]).total_seconds() / 3600
         rate = gain / hours if hours > 0.05 else 0.0
@@ -221,10 +278,17 @@ main{{max-width:1100px;margin:0 auto;padding:28px 16px 48px}} h1{{font-size:30px
 .card table{{width:100%;border-collapse:collapse;margin-top:8px;font-variant-numeric:tabular-nums}} .card th,.card td{{padding:5px 4px;border-top:1px solid var(--line);text-align:right;vertical-align:top}}
 .card th:first-child{{text-align:left;font-weight:600}} 
 .card .carried{{opacity:.45}} .card small{{display:block;color:var(--mute);font-size:10.5px}} .card .rs{{color:var(--mute)}} .card .q{{font-weight:700;font-size:13.5px;vertical-align:middle}} .card tr.grp th{{text-align:center;border-top:0;color:var(--ink)}} .card tr.sub th{{font-size:11px;color:var(--mute);font-weight:600;border-top:0}} .card td.fs{{border-left:1px solid var(--line)}} .win{{color:var(--win)}} .close{{color:var(--close)}} .foot{{color:var(--mute);font-size:11px;margin-top:8px}}
-@media (max-width:640px){{.stats{{grid-template-columns:repeat(2,minmax(0,1fr))}} .chart{{aspect-ratio:auto;height:300px}}}}
+.done{{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}} .done h4{{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}}
+.done p{{margin:0}} .done ul{{margin:0;padding-left:16px}} .done li{{margin:2px 0}} .done code{{color:var(--mute);font-size:11px}}
+.prelude{{margin:6px 0 16px}} .prelude h2{{font-size:15px;margin:0;text-transform:uppercase;letter-spacing:.06em;color:var(--mute)}}
+.pre-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}} .pre{{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:12px 14px;opacity:.85}}
+.pre-label{{margin:0;font-weight:650}} .pre-claim{{margin:0 0 6px;color:var(--mute);font-size:13px}} .pre ul{{list-style:none;padding:0;margin:0 0 6px;display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}}
+.pre li span{{color:var(--mute);margin-right:4px}} .pre li b{{text-decoration:line-through;text-decoration-color:var(--mute)}} .pre-why{{margin:0;font-size:12.5px;color:var(--mute)}}
+@media (max-width:640px){{.pre-grid{{grid-template-columns:1fr}} .stats{{grid-template-columns:repeat(2,minmax(0,1fr))}} .chart{{aspect-ratio:auto;height:300px}}}}
 </style></head><body><main>
 <h1>F# climbing toward Rust</h1>
 <p class="sub">Phase 7 tuning. Each dot is a measured run; hover or tap it for everything about that run. The line is the geometric mean of F#/Rust across the five workloads at 16 connections against the stored Rust numbers; hollow grey dots are reverted experiments. Built {now}.</p>
+{prelude(hist)}
 {stats}
 <div class="chart">{"".join(svg)}{"".join(dots)}</div>
 </main></body></html>"""
