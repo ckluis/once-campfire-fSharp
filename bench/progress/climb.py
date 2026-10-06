@@ -96,14 +96,24 @@ def commits_between(a, b):
 
 
 def describe(rows):
-    """What was done for each dot: its own description, or the commits since the previous dot."""
-    prev = None
+    """What was done for each dot, and which runs are dots at all.
+
+    A run is a version (a dot) when it has its own description (earlier versions, the Phase 7 start), is a
+    unit's tier 3 confirmation, or follows an app commit since the previous version. Re-measurements of
+    unchanged code and runtime knobs tried without a commit are measurement-only: they stay in the log and
+    the "Every run" panel but never move the line or the carried values."""
+    prev, out = None, []
     for r in rows:
         if not r.get("description") and prev and r.get("commit"):
             r["commits"] = commits_between(prev, r["commit"])
-        if r.get("commit") and r.get("kept", True):
+        r["version"] = bool(r.get("description")) or str(r.get("tier")) == "3" or bool(r.get("commits"))
+        if r["version"] and r.get("commit") and r.get("kept", True):
             prev = r["commit"]
     return rows
+
+
+def versions(rows):
+    return [r for r in rows if r.get("version")]
 
 
 def when(r):
@@ -253,7 +263,7 @@ def climb():
     stored = medians("rust")
     rails = medians("reference", RAILS)
     hist = history()
-    rows = carry(describe(entries(hist)))
+    rows = carry(versions(describe(entries(hist))))
     pts = [(when(r), overall(v, r.get("rust") or stored), r, v, m) for r, v, m in rows]
     pts = [p for p in pts if p[0] and p[1] is not None]
     kept = [p for p in pts if p[2].get("kept", True)]
