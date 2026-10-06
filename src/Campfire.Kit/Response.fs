@@ -446,6 +446,8 @@ type IPageParts =
     abstract WritePlain: System.Buffers.IBufferWriter<byte> -> unit
     /// The page as one gzip member with this modification time.
     abstract Gzip: mtime: uint32 -> ReadOnlyMemory<byte>
+    /// The same member written into the response's pipe, piece by piece.
+    abstract WriteGzip: writer: System.Buffers.IBufferWriter<byte> * mtime: uint32 -> unit
 
 /// A file (or a byte range of one) to stream from disk.
 type FileBody = { Path: string; Offset: int64; Len: int64 }

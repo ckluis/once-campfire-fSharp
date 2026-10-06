@@ -236,7 +236,10 @@ module Adapter =
             | Body.Empty ->
                 let writer = new Deflater.GzipWriter(output, mtime)
                 do! writer.Finish()
-            | Body.Parts parts -> do! output.WriteAsync(parts.Gzip mtime)
+            | Body.Parts parts ->
+                parts.WriteGzip(http.Response.BodyWriter, mtime)
+                let! _ = http.Response.BodyWriter.FlushAsync()
+                ()
             | Body.Bytes bytes -> do! output.WriteAsync(gzipSingle bytes response.BodyDigest mtime)
             | Body.Pooled pooled -> do! output.WriteAsync(gzipSingle pooled.Memory response.BodyDigest mtime)
             | Body.File file ->

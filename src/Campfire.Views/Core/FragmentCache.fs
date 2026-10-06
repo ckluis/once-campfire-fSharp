@@ -455,9 +455,11 @@ module FragmentCache =
 
     /// `Time#to_fs(:usec)` of a record's `updated_at`: its `cache_version`.
     let cacheVersion (updatedAt: Timestamp) : string =
-        let key = KeyBuf.Of ""
+        let key = KeyBuf.Rent()
         pushCacheVersion key updatedAt
-        key.ToString()
+        let version = key.ToString()
+        KeyBuf.Return key
+        version
 
     /// Appends `record.cache_key_with_version` to `key`.
     let pushCacheKeyWithVersion (key: KeyBuf) (table: string) (id: int64) (updatedAt: Timestamp) : unit =
@@ -469,9 +471,11 @@ module FragmentCache =
 
     /// `record.cache_key_with_version`: `"messages/1-20240601120000000000"`.
     let cacheKeyWithVersion (table: string) (id: int64) (updatedAt: Timestamp) : string =
-        let key = KeyBuf.Of ""
+        let key = KeyBuf.Rent()
         pushCacheKeyWithVersion key table id updatedAt
-        key.ToString()
+        let text = key.ToString()
+        KeyBuf.Return key
+        text
 
     /// Appends a record fragment's key, `views/<template>:<digest>/<record cache_key_with_version>`,
     /// to `key` (`CacheHelper#fragment_name_with_digest`).

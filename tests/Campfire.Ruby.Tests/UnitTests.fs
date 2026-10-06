@@ -280,3 +280,20 @@ let ``float_to_s breaks ties to even like ruby`` () =
           1.0 / 3.0, "0.3333333333333333" ]
     for (f, s) in cases do
         Assert.True((Ruby.floatToS f = s), $"{f:E}: {Ruby.floatToS f} vs {s}")
+
+
+[<Fact>]
+let ``to_i without 128-bit arithmetic gives the answers of the general one`` () =
+    let random = Random 20261006
+    let alphabet = " +-0123456789_dD\tx"
+    let clamp (n: Int128) =
+        if n < Int128.CreateChecked Int64.MinValue then Int64.MinValue
+        elif n > Int128.CreateChecked Int64.MaxValue then Int64.MaxValue
+        else Int64.CreateChecked n
+    for _ in 1..200000 do
+        let length = random.Next(0, 24)
+        let text = String(Array.init length (fun _ -> alphabet[random.Next alphabet.Length]))
+        Assert.True((toI text = clamp (toI128Slowly text)), $"to_i of {text}")
+        Assert.True((toI128 text = toI128Slowly text), $"to_i of {text}")
+    for text in [ "0"; "-0"; "007"; "0d12"; "-0d5"; "1_000"; "999999999999999999"; "1000000000000000000"; " \n12abc"; "+7"; "" ] do
+        Assert.Equal(clamp (toI128Slowly text), toI text)

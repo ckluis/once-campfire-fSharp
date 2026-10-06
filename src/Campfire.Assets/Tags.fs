@@ -46,9 +46,9 @@ let stylesheetLinkTagAll (options: (string * string) list) : StylesheetTags = st
 /// `send_preload_links_header` does: a link that would push the header past 1,000 bytes is
 /// left out (Propshaft renders each stylesheet separately, so later, shorter ones can still fit).
 /// Sizes are bytes, as Rust's `len()`; the links are ASCII unless a path says otherwise.
-let appendPreloadLinks (header: string) (preloadLinks: string seq) : string =
+let private appendPreloadLinksUncached (header: string) (preloadLinks: string seq) : string =
     let utf8 (s: string) = Encoding.UTF8.GetByteCount s
-    let out = StringBuilder header
+    let out = StringBuilder(header, MaxLinkHeaderSize + 16)
     let mutable size = utf8 header
     for link in preloadLinks do
         let linkSize = utf8 link
@@ -59,6 +59,30 @@ let appendPreloadLinks (header: string) (preloadLinks: string seq) : string =
             out.Append link |> ignore
             size <- size + linkSize
     out.ToString()
+
+/// The last answer, for the layout's own list of links (one object for the life of the process) and the header a
+/// request has: the same every time, so a page does not build the string again.
+[<Sealed>]
+type private LastPreload(header: string, links: obj, result: string) =
+    member _.Header = header
+    member _.Links = links
+    member _.Result = result
+
+/// Starts as an answer no real list of links matches.
+let mutable private lastPreload = LastPreload("", obj (), "")
+
+let appendPreloadLinks (header: string) (preloadLinks: string seq) : string =
+    match preloadLinks with
+    | :? (string list) as links ->
+        // An F# list is immutable, so the same object is the same links.
+        let last = lastPreload
+        match last with
+        | last when obj.ReferenceEquals(last.Links, links) && last.Header = header -> last.Result
+        | _ ->
+            let result = appendPreloadLinksUncached header preloadLinks
+            lastPreload <- LastPreload(header, (links :> obj), result)
+            result
+    | _ -> appendPreloadLinksUncached header preloadLinks
 
 /// `javascript_importmap_tags`: the import map, a modulepreload link per pin, and the
 /// `import "application"` module script. Computed at build time from config/importmap.rb.

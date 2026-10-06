@@ -58,6 +58,10 @@ let ``a recorded room page splices into the kits page parts and is the page`` ()
     parts.WritePlain plain
     Assert.Equal<byte[]>(whole, plain.WrittenSpan.ToArray())
     Assert.Equal<byte[]>(whole, gunzip (parts.Gzip 1234u))
+    // Written piece by piece into a pipe, the member is the same bytes.
+    let written = ArrayBufferWriter<byte>()
+    parts.WriteGzip(written, 1234u)
+    Assert.Equal<byte[]>(parts.Gzip 1234u, written.WrittenSpan.ToArray())
     // The next request for the page is the same fragments, so the same ETag and the same stored pieces.
     let again = splice (roomPage cache ids)
     Assert.Equal(parts.Etag(), again.Etag())

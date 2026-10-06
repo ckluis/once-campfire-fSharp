@@ -76,7 +76,17 @@ let private orRaise (result: Result<string, MissingAssetError>) : string =
 /// through; a `?query` or `#fragment` tail is kept.
 let tryAssetPath (source: string) : Result<string, MissingAssetError> = compute source null
 
-let assetPath (source: string) : string = orRaise (tryAssetPath source)
+/// `assetPath` of the sources a page asks for again and again (its image tags): the manifest is fixed at build
+/// time, so an answer is the same every time. Bounded, in case a caller passes sources that vary.
+let private assetPaths = System.Collections.Concurrent.ConcurrentDictionary<string, string>()
+
+let assetPath (source: string) : string =
+    match assetPaths.TryGetValue source with
+    | true, path -> path
+    | _ ->
+        let path = orRaise (tryAssetPath source)
+        if assetPaths.Count < 4096 then assetPaths[source] <- path
+        path
 
 let imagePath (source: string) : string = assetPath source
 

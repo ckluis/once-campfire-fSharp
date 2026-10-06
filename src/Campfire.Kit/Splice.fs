@@ -791,6 +791,31 @@ type PageParts internal (length: int, parts: SplicePart[]) =
         BinaryPrimitives.WriteUInt32LittleEndian(Span<byte>(out, at + 6, 4), uint32 length)
         out
 
+    /// The same gzip member as `Gzip`, written piece by piece into `writer` (the response's pipe), so no
+    /// buffer the size of the compressed page is made only to be copied out again.
+    member this.WriteGzip(writer: IBufferWriter<byte>, mtime: uint32) : unit =
+        let pieces = this.Pieces()
+        let header = writer.GetSpan 10
+        header[0] <- 0x1fuy
+        header[1] <- 0x8buy
+        header[2] <- 8uy
+        header[3] <- 0uy
+        BinaryPrimitives.WriteUInt32LittleEndian(header.Slice(4, 4), mtime)
+        header[8] <- 0uy
+        header[9] <- 3uy
+        writer.Advance 10
+        let mutable crc = 0u
+        for piece in pieces do
+            writer.Write(ReadOnlySpan<byte> piece.Deflated)
+            crc <- Crc32.multiply crc piece.Crc.Shift ^^^ piece.Crc.Value
+        // An empty final block (fixed Huffman), after the sync flushes that ended every piece.
+        let trailer = writer.GetSpan 10
+        trailer[0] <- 0x03uy
+        trailer[1] <- 0x00uy
+        BinaryPrimitives.WriteUInt32LittleEndian(trailer.Slice(2, 4), crc)
+        BinaryPrimitives.WriteUInt32LittleEndian(trailer.Slice(6, 4), uint32 length)
+        writer.Advance 10
+
     /// The body, part after part, never joined into one buffer.
     member _.WritePlain(writer: IBufferWriter<byte>) : unit =
         for i in 0 .. parts.Length - 1 do
@@ -812,3 +837,4 @@ type PageParts internal (length: int, parts: SplicePart[]) =
         member this.Etag() = this.Etag()
         member this.WritePlain writer = this.WritePlain writer
         member this.Gzip mtime = ReadOnlyMemory<byte>(this.Gzip mtime)
+        member this.WriteGzip(writer, mtime) = this.WriteGzip(writer, mtime)
