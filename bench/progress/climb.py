@@ -1,11 +1,11 @@
 """The Phase 7 climb chart: F#'s throughput as a share of Rust's, one dot per logged run.
 
-Shared by the progress dashboard (bench/progress/build.py) and the story page (site/build.py), so the chart has one
-implementation. climb() returns the chart's HTML (SVG, dots and a CSS-only hover/focus/tap card per dot), the stats
-strip, the "before the port" strip, the scoped CSS they need, and the numbers behind them.
+The hero of the project page (site/build.py, rebuilt after each logged run by bench/progress/build.py). climb() returns
+the chart's HTML (SVG, dots and a CSS-only hover/focus/tap card per dot), the "before the port" strip, the scoped CSS
+they need, and the numbers behind them.
 
-Everything the component draws is under one root class (.cc) and every class it uses starts with cc-, so neither page's
-styles can reach into it nor its styles out. Colours are custom properties on .cc (--cc-*) with light and dark values;
+Everything the component draws is under one root class (.cc) and every class it uses starts with cc-, so the page's
+styles can't reach into it nor its styles out. Colours are custom properties on .cc (--cc-*) with light and dark values;
 a host page may override them on .cc to match its palette.
 
 Rust's numbers are the stored medians of bench/results/phase7-start/rust-*.json; the start point is F#'s own medians
@@ -213,9 +213,6 @@ CSS = """
 :root[data-theme="dark"] .cc{--cc-card:#221e19;--cc-ink:#f1ede5;--cc-mute:#a29c90;--cc-line:#36312a;--cc-acc:#fb923c;--cc-win:#4ade80;--cc-close:#fbbf24;--cc-drop:#78716c}
 .cc *{box-sizing:border-box}
 .cc-sub{color:var(--cc-mute);margin:4px 0 18px}
-.cc-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
-.cc-stats>div{background:var(--cc-card);border:1px solid var(--cc-line);border-radius:12px;padding:12px 14px}
-.cc-stats b{display:block;font-size:26px;letter-spacing:-.02em;color:var(--cc-ink)} .cc-stats span{color:var(--cc-mute);font-size:13px}
 .cc-scroll{position:relative}
 .cc-chart{position:relative;background:var(--cc-card);border:1px solid var(--cc-line);border-radius:14px;aspect-ratio:1000/440;color:var(--cc-ink)}
 .cc-chart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
@@ -242,7 +239,7 @@ CSS = """
 .cc-pre-label{margin:0;font-weight:650} .cc-pre-claim{margin:0 0 6px;color:var(--cc-mute);font-size:13px} .cc-pre ul{list-style:none;padding:0;margin:0 0 6px;display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}
 .cc-pre li span{color:var(--cc-mute);margin-right:4px} .cc-pre li b{text-decoration:line-through;text-decoration-color:var(--cc-mute)} .cc-pre-why{margin:0;font-size:12.5px;color:var(--cc-mute)}
 @media (max-width:640px){
-  .cc-pre-grid{grid-template-columns:1fr} .cc-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cc-pre-grid{grid-template-columns:1fr}
   /* On a phone the chart keeps its shape and scrolls sideways inside its box; a dot's card becomes a sheet at the bottom of the screen. */
   .cc-scroll{overflow-x:auto;overscroll-behavior-x:contain;margin:0 -16px;padding:0 16px 6px}
   .cc-chart{min-width:640px}
@@ -322,9 +319,4 @@ def climb():
                    tuning_runs=len([p for p in pts if p[0] > first[0]]),
                    best_jump=({"gain": steps[best], "change": kept[best + 1][2].get("change", ""), "ratio": kept[best + 1][1]}
                               if best is not None else None))
-        out["stats"] = ('<div class="cc cc-stats"><div><b>%.2f×</b><span>of Rust now</span></div><div><b>%+.1f%%</b><span>since tuning began</span></div>'
-                        '<div><b>%+.1f%%/h</b><span>rate</span></div><div><b>%.0f%%</b><span>%s</span></div></div>'
-                        % (latest[1], gain, rate, abs(to_go), "to go to match Rust" if to_go > 0 else "ahead of Rust"))
-    else:
-        out["stats"] = '<p class="cc cc-sub">No runs yet.</p>'
     return out

@@ -186,4 +186,4 @@ Findings of a phase's verifier that a later phase has to meet. Each is a gate of
   affected tests (SageFs optional); (2) minutes, a published build mounted into the container, F# only, on the
   workloads the change touches; (3) once per unit, the rebuilt image, `bench/quick` F#-only on all five workloads,
   `bin/verify` and the differentials. Every tier 2 and 3 run is appended to `bench/results/phase7-log.jsonl`, which
-  `bench/progress/build.py` turns into the progress dashboard.
+  `bench/progress/build.py` turns into the climb chart at the top of `index.html`.

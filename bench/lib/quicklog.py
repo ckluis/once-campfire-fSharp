@@ -5,7 +5,7 @@
                                           the F# starting point), with the validity checks
   quicklog.py log DIR --unit U --tier N --change "..." --kept true|false [--build mounted|DIGEST] [--commit SHA]
                                           append one line to bench/results/phase7-log.jsonl (raw F# numbers per workload), then rebuild
-                                          the dashboard with bench/progress/build.py
+                                          index.html (the climb chart) with bench/progress/build.py
 
 Rust is never measured here: its numbers are the medians of bench/results/phase7-start/rust-*.json (the same warm-up and harness).
 Every ratio this prints is "vs stored Rust baseline".
