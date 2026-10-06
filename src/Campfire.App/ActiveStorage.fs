@@ -621,14 +621,14 @@ module ActiveStorage =
     let private destroyAttachment (conn: Conn) (recordType: string) (recordId: int64) (name: string) : int64 option =
         let attachment =
             conn.QueryOne(
-                "SELECT id, blob_id FROM active_storage_attachments WHERE record_type = ?1 AND record_id = ?2 AND name = ?3 LIMIT 1",
+                "SELECT id, blob_id FROM active_storage_attachments WHERE record_type = ? AND record_id = ? AND name = ? LIMIT 1",
                 [| S recordType; I recordId; S name |],
                 fun r -> r.Int64 0, r.Int64 1
             )
         match attachment with
         | None -> None
         | Some(id, blobId) ->
-            conn.Execute("DELETE FROM active_storage_attachments WHERE id = ?1", [| I id |]) |> ignore
+            conn.Execute("DELETE FROM active_storage_attachments WHERE id = ?", [| I id |]) |> ignore
             Some blobId
 
     let private deleteFiles (storage: Storage) (blob: Campfire.Storage.Blob) : Task<Result<unit, string>> =
@@ -659,13 +659,13 @@ module ActiveStorage =
                             let dependents = ResizeArray<int64>()
                             // before_destroy { variant_records.destroy_all }: each record's image attachment goes too.
                             let variantRecords =
-                                conn.QueryAll("SELECT id FROM active_storage_variant_records WHERE blob_id = ?1", [| I blobId |], fun r -> r.Int64 0)
+                                conn.QueryAll("SELECT id FROM active_storage_variant_records WHERE blob_id = ?", [| I blobId |], fun r -> r.Int64 0)
                             for recordId in variantRecords do
                                 destroyAttachment conn "ActiveStorage::VariantRecord" recordId "image" |> Option.iter dependents.Add
-                                conn.Execute("DELETE FROM active_storage_variant_records WHERE id = ?1", [| I recordId |]) |> ignore
+                                conn.Execute("DELETE FROM active_storage_variant_records WHERE id = ?", [| I recordId |]) |> ignore
                             // has_one_attached :preview_image (dependent: :destroy on the attachment)
                             destroyAttachment conn "ActiveStorage::Blob" blobId "preview_image" |> Option.iter dependents.Add
-                            conn.Execute("DELETE FROM active_storage_blobs WHERE id = ?1", [| I blobId |]) |> ignore
+                            conn.Execute("DELETE FROM active_storage_blobs WHERE id = ?", [| I blobId |]) |> ignore
                             // after_destroy_commit :purge_dependent_blob_later
                             for dependent in dependents do
                                 tx.EmitAfterCommit(Event.PurgeBlob dependent)

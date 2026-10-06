@@ -164,8 +164,20 @@ module Adapter =
         http.Response.StatusCode <- response.Status
         let headers = http.Response.Headers
         let map = response.Headers
+        let mutable empty = false
         for i in 0 .. map.Count - 1 do
-            headers.Append(map.NameAt i, StringValues(map.ValueAt i))
+            if map.ValueAt i = "" then empty <- true
+        if not empty then
+            for i in 0 .. map.Count - 1 do
+                headers.Append(map.NameAt i, StringValues(map.ValueAt i))
+        else
+            // `Append` drops a lone empty value, but a header line with nothing after its colon is one Puma
+            // writes (the first line of a `Content-Disposition` that begins with a line break), so the
+            // values of a name that has one go out together, as a list.
+            let written = Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            for i in 0 .. map.Count - 1 do
+                let name = map.NameAt i
+                if written.Add name then headers.Append(name, StringValues(Array.ofList (map.GetAll name)))
 
     /// Send `file` (or the range of it), through `gzip` when there is one.
     let private writeFile (http: HttpContext) (file: FileBody) (gzip: Deflater.GzipWriter | null) : Task =

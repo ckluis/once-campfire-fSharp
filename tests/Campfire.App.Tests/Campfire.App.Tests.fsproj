@@ -5,9 +5,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
+    <Compile Include="Support.fs" />
     <Compile Include="ConfigTests.fs" />
     <Compile Include="UserAgentTests.fs" />
     <Compile Include="PlatformTests.fs" />
+    <Compile Include="RouteTableTests.fs" />
+    <Compile Include="AppTests.fs" />
+    <Compile Include="JobsTests.fs" />
+    <Compile Include="MiscTests.fs" />
+    <Compile Include="FragmentGlueTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.App/Campfire.App.fsproj" />

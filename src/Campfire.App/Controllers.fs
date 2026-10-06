@@ -431,6 +431,8 @@ module RouteTable =
     let recognize (meth: string) (path: string) : Result<(Route * ParamMap) option, Error> =
         let verb = if meth = "HEAD" then "GET" else meth
         match byVerb.Value.TryGetValue verb with
+        // Every pattern starts with a slash, so a path that doesn't can't match.
+        | _ when path.Length = 0 || path[0] <> '/' -> Ok None
         | false, _ -> Ok None
         | true, candidates ->
             match candidates.ByFirstSegment.TryGetValue(firstSegmentOfPath path) with
