@@ -197,59 +197,21 @@ module Deflater =
         BinaryPrimitives.WriteUInt32LittleEndian(Span<byte>(t, 4, 4), size)
         t
 
-    /// Bodies up to this size are deflated through the shim directly, with a window that fits them (`Zlib`).
-    [<Literal>]
-    let private NativeLimit = 65536
-
-    /// `gzipMember` for a non-empty body of up to `NativeLimit` bytes: the same member `DeflateStream` writes (the same
-    /// zlib-ng, level 6, a sync flush and then the final block), without building a 32 KB window for a body of 2 KB.
-    let private gzipMemberNative (body: ReadOnlySpan<byte>) (mtime: uint32) : byte[] =
-        let windowBits = Zlib.windowFor body.Length
-        let mutable capacity = body.Length + (body.Length >>> 3) + 64
-        let mutable member' : byte[] | null = null
-        while isNull member' do
-            let buffer = ArrayPool<byte>.Shared.Rent capacity
-            try
-                let n = Zlib.deflateInto body ReadOnlySpan<byte>.Empty windowBits true buffer 10
-                if n < 0 then
-                    capacity <- capacity * 2
-                else
-                    let result = GC.AllocateUninitializedArray<byte>(10 + n + 8)
-                    result[0] <- 0x1fuy
-                    result[1] <- 0x8buy
-                    result[2] <- 8uy
-                    result[3] <- 0uy
-                    BinaryPrimitives.WriteUInt32LittleEndian(Span<byte>(result, 4, 4), mtime)
-                    result[8] <- 0uy
-                    result[9] <- 3uy
-                    Buffer.BlockCopy(buffer, 10, result, 10, n)
-                    BinaryPrimitives.WriteUInt32LittleEndian(Span<byte>(result, 10 + n, 4), crc32Update 0u body)
-                    BinaryPrimitives.WriteUInt32LittleEndian(Span<byte>(result, 14 + n, 4), uint32 body.Length)
-                    member' <- result
-            finally
-                ArrayPool<byte>.Shared.Return buffer
-        match member' with
-        | null -> failwith "unreachable"
-        | done' -> done'
-
     /// What `GzipStream` with `sync: true` sends for a single-buffer body, in one piece: a header,
     /// the body deflated and flushed, and the CRC and size.
     let gzipMember (body: ReadOnlySpan<byte>) (mtime: uint32) : byte[] =
-        if body.Length > 0 && body.Length <= NativeLimit then
-            gzipMemberNative body mtime
+        use output = new MemoryStream(body.Length / 3 + 64)
+        output.Write(header mtime)
+        if body.Length = 0 then
+            // .NET's `DeflateStream` writes nothing at all for no input; zlib writes one empty final block.
+            output.Write(emptyDeflate)
         else
-            use output = new MemoryStream(body.Length / 3 + 64)
-            output.Write(header mtime)
-            if body.Length = 0 then
-                // .NET's `DeflateStream` writes nothing at all for no input; zlib writes one empty final block.
-                output.Write(emptyDeflate)
-            else
-                use deflate = new DeflateStream(output, CompressionLevel.Optimal, true)
-                deflate.Write body
-                deflate.Flush()
-                deflate.Dispose()
-            output.Write(trailer (crc32Update 0u body) (uint32 body.Length))
-            output.ToArray()
+            use deflate = new DeflateStream(output, CompressionLevel.Optimal, true)
+            deflate.Write body
+            deflate.Flush()
+            deflate.Dispose()
+        output.Write(trailer (crc32Update 0u body) (uint32 body.Length))
+        output.ToArray()
 
     /// Gzips a body as it arrives, writing each piece to `output` and flushing it (`GzipStream` with
     /// `sync: true`).

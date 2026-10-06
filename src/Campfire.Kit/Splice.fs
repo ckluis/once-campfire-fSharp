@@ -52,13 +52,6 @@ module internal SpliceLimits =
     [<Literal>]
     let Window = 32768
 
-    /// A text part this short or shorter that follows a fragment is compressed without the fragment as its dictionary: it holds
-    /// next to nothing that a match into the fragment would save (the end of a turbo-stream, say), and a piece that depends on
-    /// the fragment can be found again only for that same fragment, which a page that is the one post of a message never sees
-    /// twice. Without the dictionary the piece is found by its text alone, and costs one compress for all of them.
-    [<Literal>]
-    let MaxBareText = 512
-
     /// Pieces kept per fragment, for the predecessors it's seen with: a message follows the same one
     /// in its room and on a page of older messages, and other ones in search results.
     [<Literal>]
@@ -563,38 +556,12 @@ type internal SplicePart =
 module internal Compress =
     open SpliceLimits
 
-    /// Up to this size a piece without a dictionary is deflated through the shim directly (`Zlib`): a window that fits it
-    /// and no stream object, the same bytes as `DeflateStream` writes.
-    [<Literal>]
-    let private NativeLimit = 65536
-
-    let private deflateNative (glue: ReadOnlySpan<byte>) (text: ReadOnlySpan<byte>) : byte[] =
-        let total = glue.Length + text.Length
-        let windowBits = Zlib.windowFor total
-        let mutable capacity = total + (total >>> 3) + 64
-        let mutable piece = Array.empty<byte>
-        let mutable made = false
-        while not made do
-            let buffer = ArrayPool<byte>.Shared.Rent capacity
-            try
-                let n = Zlib.deflateInto glue text windowBits false buffer 0
-                if n < 0 then
-                    capacity <- capacity * 2
-                else
-                    // Stored pieces live on, so they keep exactly what they use.
-                    piece <- Array.zeroCreate<byte> n
-                    Buffer.BlockCopy(buffer, 0, piece, 0, n)
-                    made <- true
-            finally
-                ArrayPool<byte>.Shared.Return buffer
-        piece
-
     /// Raw deflate of `glue` and `text` at level 6 with `dictionary` (its last 32 KB) as what came
     /// before, sync-flushed so it ends on a byte boundary with no final block. .NET's `DeflateStream`
     /// takes no preset dictionary, so the dictionary goes through the stream first (flushed, and its
     /// output dropped): the window then holds it as it would after `deflateSetDictionary`, and the
     /// text's matches reach into it.
-    let private deflateStream (dictionary: ReadOnlySpan<byte>) (glue: ReadOnlySpan<byte>) (text: ReadOnlySpan<byte>) : byte[] =
+    let deflate (dictionary: ReadOnlySpan<byte>) (glue: ReadOnlySpan<byte>) (text: ReadOnlySpan<byte>) : byte[] =
         use output = new MemoryStream(glue.Length / 4 + text.Length / 4 + 64)
         use stream = new DeflateStream(output, CompressionLevel.Optimal, true)
         let mutable skip = 0L
@@ -610,13 +577,6 @@ module internal Compress =
         let piece = Array.zeroCreate<byte> length
         Buffer.BlockCopy(output.GetBuffer(), int skip, piece, 0, length)
         piece
-
-    let deflate (dictionary: ReadOnlySpan<byte>) (glue: ReadOnlySpan<byte>) (text: ReadOnlySpan<byte>) : byte[] =
-        let total = glue.Length + text.Length
-        if dictionary.Length = 0 && total > 0 && total <= NativeLimit then
-            deflateNative glue text
-        else
-            deflateStream dictionary glue text
 
 /// A page's body split at its cached fragments, with each part's identity.
 [<Sealed>]
@@ -701,22 +661,18 @@ type PageParts internal (length: int, parts: SplicePart[]) =
 
     /// What comes right before part `i`, which its piece may refer back into: the SHA-256 of exactly the
     /// bytes it may use (a fragment's own bytes, never its glue, or a text).
-    member private this.BeforeOf(i: int) : Before =
-        if i = 0 || this.IsBare i then
+    member private _.BeforeOf(i: int) : Before =
+        if i = 0 then
             Before.nothing
         else
             let part = &parts[i - 1]
             { Kind = (if isNull (box part.Fragment) then Before.TextKind else Before.FragmentKind)
               Sha = part.Sha }
 
-    /// Whether part `i` is a short text after a fragment, whose piece is made without a dictionary (`SpliceLimits.MaxBareText`).
-    member private _.IsBare(i: int) : bool =
-        i > 0 && isNull (box parts[i].Fragment) && parts[i].Bytes.Length <= SpliceLimits.MaxBareText && not (isNull (box parts[i - 1].Fragment))
-
     /// The bytes part `i`'s piece may use as a dictionary: what comes before it, a fragment's own bytes
     /// (never its glue) or the text.
-    member private this.DictionaryOf(i: int) : ReadOnlyMemory<byte> =
-        if i = 0 || this.IsBare i then
+    member private _.DictionaryOf(i: int) : ReadOnlyMemory<byte> =
+        if i = 0 then
             ReadOnlyMemory<byte>.Empty
         else
             let part = &parts[i - 1]
