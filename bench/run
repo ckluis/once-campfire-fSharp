@@ -110,6 +110,9 @@ suite() { [[ " $SUITES " = *" $1 "* ]]; }
 # 1c22a94 fixed; the app now runs as configured.
 RUST_EXTRA_ENV=${RUST_EXTRA_ENV-}
 FSHARP_EXTRA_ENV=${FSHARP_EXTRA_ENV-}
+# FSHARP_MOUNT=DIR (bench/quick --mounted): a published build of the app (bin/publish-mounted) mounted over /opt/campfire in the F#
+# image, which then supplies only the runtime environment, libvips and ffmpeg; the tier 2 build, no image rebuild.
+FSHARP_MOUNT=${FSHARP_MOUNT-}
 BASE=http://127.0.0.1:$PORT
 LOADGEN_TARGET=aarch64-unknown-linux-gnu
 LOADGEN=$ROOT/target/rust/$LOADGEN_TARGET/release/loadgen
@@ -267,8 +270,10 @@ start_app() {
   # there; run as anyone else (the colima user is 501) they are tmpfs instead. Rust and F# write nothing there.
   local scratch=()
   if [ "$app" = reference ] && [ "$(id -u)" != 1000 ]; then scratch=(--tmpfs /rails/tmp:mode=1777 --tmpfs /rails/log:mode=1777); fi
+  local mount=()
+  if [[ "$app" = fsharp* ]] && [ -n "$FSHARP_MOUNT" ]; then mount=(-v "$FSHARP_MOUNT:/opt/campfire:ro"); fi
   docker run -d --name "$CONTAINER" --cpuset-cpus "$SERVER_CPUS" --user "$(id -u):$(id -g)" \
-    "${DOCKER_LOG_ARGS[@]}" "${net[@]}" "${scratch[@]}" "${args[@]}" "${DOCKER_EXTRA_ARGS[@]}" \
+    "${mount[@]}" "${DOCKER_LOG_ARGS[@]}" "${net[@]}" "${scratch[@]}" "${args[@]}" "${DOCKER_EXTRA_ARGS[@]}" \
     -v "$dir/db:/rails/storage/db" -v "$dir/storage:/rails/storage/files" \
     "$(image_for "$app")" >/dev/null
   for _ in $(seq 1 3000); do
@@ -438,6 +443,7 @@ write_env() {
   echo "fsharp extra env: $FSHARP_EXTRA_ENV"
   echo "user agent: ${USER_AGENT_ARGS[1]:-(none)}"
   for app in ${APPS//,/ }; do echo "$app image: $(image_for "$app") $(docker image inspect -f '{{.Id}} {{.Created}}' "$(image_for "$app")") built from commit: $(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(image_for "$app")")"; done
+  [ -z "$FSHARP_MOUNT" ] || echo "fsharp build: MOUNTED $FSHARP_MOUNT over /opt/campfire ($(cat "$FSHARP_MOUNT/.built-from" 2>/dev/null || echo 'no .built-from'))"
   echo "repo HEAD: $(git -C "$ROOT" rev-parse --short HEAD) (dirty: $(git -C "$ROOT" status --porcelain -- src rust Cargo.toml Cargo.lock | wc -l) files under src/ and rust/)"
   echo "work dir (seed copies): $WORK ($(findmnt -T "$WORK" -n -o FSTYPE))"
   echo "loadgen: $LOADGEN ($(stat -c %y "$LOADGEN" | cut -d. -f1)), built with $RUST_BUILD_IMAGE"

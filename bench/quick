@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 # A fast before/after runner for Rust and F# only (Phase 7's tuning loop). Run inside colima, like bench/run:
 #
-#   bench/quick [--reps 3] [--apps rust,fsharp] [--only APP:REP] [--out DIR] [--secs 8] [--warmup 30] [--warmup-max 90] [--concs "1 16"] [--routes a,b] [--part K/N]
+#   bench/quick [--reps 3] [--apps fsharp] [--remeasure-rust] [--mounted DIR] [--only APP:REP] [--out DIR] [--secs 8] [--warmup 30] [--warmup-max 90] [--concs "1 16"] [--routes a,b] [--part K/N]
+#   bench/quick compare DIR                           # F# in DIR against the stored Rust baseline (bench/results/phase7-start) and the F# start
+#   bench/quick log DIR --unit database --tier 2 --change "..." --kept true|false [--build mounted]   # append to phase7-log.jsonl, rebuild the dashboard
 #   bench/quick report DIR                            # bench/report again, on any bench/run or bench/quick directory
 #   bench/quick cpu [--reps 1] [--secs 6] [--warmup 30] [--out DIR]   # CPU per request only (bench/breakdown cpu on the five workloads)
+#
+# F# ONLY BY DEFAULT (Chris's rule for Phase 7): Rust is a fixed target, so a run measures F# alone and bench/quick compare prints it
+# against the stored Rust medians of bench/results/phase7-start/ ("vs stored Rust baseline"). --remeasure-rust (or --apps rust,fsharp)
+# measures Rust too; do that only at the re-baseline that closes a phase. --mounted DIR is the tier 2 build: DIR, published by
+# bin/publish-mounted, is mounted over /opt/campfire in campfire-fsharp:app, so there is no image rebuild; same env, seed copy, pinning and warm-up.
 #
 # The default is bench/run restricted to what a tuning unit needs: the five workloads (room page, messages page,
 # sidebar, search, post a message) at c=1 and c=16, the HTTP suite only (no Cable, upload or extra concurrencies),
@@ -35,15 +42,19 @@ export SERVER_CPUS=${SERVER_CPUS:-0-3} LOADGEN_CPUS=${LOADGEN_CPUS:-4-7}
 export WORK=${WORK:-/var/tmp/campfire-bench-work}
 
 if [ "${1:-}" = report ]; then shift; exec "$ROOT/bench/report" "$@"; fi
+if [ "${1:-}" = compare ]; then shift; exec python3 "$ROOT/bench/lib/quicklog.py" compare "$@"; fi
+if [ "${1:-}" = log ]; then shift; exec python3 "$ROOT/bench/lib/quicklog.py" log "$@"; fi
 MODE=run
 if [ "${1:-}" = cpu ]; then MODE=cpu; shift; fi
 
-APPS=rust,fsharp REPS=3 OUT="" ONLY="" SECS="" WARMUP="" WARMUP_MAX="" PART="" CONCS="1 16" ROUTES="room_show,messages_page,sidebar,search,post_message"
+APPS=fsharp REPS=3 OUT="" ONLY="" SECS="" WARMUP="" WARMUP_MAX="" PART="" CONCS="1 16" ROUTES="room_show,messages_page,sidebar,search,post_message"
 [ "$MODE" = cpu ] && REPS=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --reps) REPS=$2; shift 2 ;;
     --apps) APPS=$2; shift 2 ;;
+    --remeasure-rust) APPS=rust,fsharp; shift ;;
+    --mounted) export FSHARP_MOUNT=$2; shift 2 ;;
     --only) ONLY=$2; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
     --secs) SECS=$2; shift 2 ;;
@@ -76,7 +87,8 @@ case "$MODE" in
   run)
     export SUITES=http HTTP_CONCS="$CONCS" HTTP_ROUTES="${ROUTES//,/ }" HTTP_SECS=${SECS:-8} IDLE_SECS=${IDLE_SECS:-5}
     only=(); [ -z "$ONLY" ] || only=(--only "$ONLY")
-    exec "$ROOT/bench/run" --apps "$APPS" --reps "$REPS" --out "$OUT" "${only[@]}"
+    "$ROOT/bench/run" --apps "$APPS" --reps "$REPS" --out "$OUT" "${only[@]}"
+    case ",$APPS," in *,rust,*) ;; *) python3 "$ROOT/bench/lib/quicklog.py" compare "$OUT" | tee "$OUT/vs-stored-rust.md" ;; esac
     ;;
   cpu)
     # bench/breakdown cpu runs each route at c=1 and c=16 (warm-up first) and prints the table that bench/breakdown report makes.

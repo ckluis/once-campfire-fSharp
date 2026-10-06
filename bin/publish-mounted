@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Tier 2 build for Phase 7's tuning loop: publish the F# app exactly as the Dockerfile does (Release, self-contained,
+# ReadyToRun, linux-arm64, no symbols) into DIR on the colima VM's own disk, without rebuilding the image. bench/quick
+# --mounted DIR then runs it in a container of campfire-fsharp:app with DIR mounted over /opt/campfire.
+#
+#   colima ssh -- bash -c 'cd /Users/clank/Desktop/projects/once-campfire-fsharp && bin/publish-mounted [DIR]'
+#
+# It builds in the toolchain image (the SDK global.json pins, Linux) from an rsync copy of src/ kept in
+# /var/tmp/campfire-publish-src, so the second build is incremental and neither the virtiofs mount nor the Mac's own
+# obj/ directories are involved (the Mac's `dotnet publish -r linux-arm64` fails restoring Campfire.Assets.Build's osx apphost).
+# DIR defaults to /var/tmp/campfire-mounted. Prints the published directory and the commit it was built from.
+set -euo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+DIR=${1:-/var/tmp/campfire-mounted}
+SRC=${PUBLISH_SRC:-/var/tmp/campfire-publish-src}
+IMAGE=${TOOLCHAIN_IMAGE:-campfire-fsharp-toolchain:latest}
+case "$(uname -m)" in aarch64|arm64) rid=linux-arm64 ;; x86_64) rid=linux-x64 ;; *) echo "unsupported architecture" >&2; exit 1 ;; esac
+
+mkdir -p "$SRC/src" "$DIR"
+rsync -a --delete --exclude bin/ --exclude obj/ "$ROOT/src/" "$SRC/src/"
+cp "$ROOT/global.json" "$ROOT/Directory.Build.props" "$ROOT/Directory.Packages.props" "$SRC/"
+rm -rf "$SRC/out"
+docker run --rm -v "$SRC:/src" -v "$ROOT/reference:/src/reference:ro" -v campfire-fsharp-nuget:/root/.nuget/packages \
+  -e DOTNET_NOLOGO=1 -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -w /src "$IMAGE" bash -c "
+    set -e
+    dotnet build src/Campfire.Assets.Build/Campfire.Assets.Build.fsproj -c Release -v quiet -nologo
+    dotnet publish src/Campfire.App/Campfire.App.fsproj -c Release -r $rid --self-contained true \
+      -p:PublishReadyToRun=true -p:DebugType=None -p:DebugSymbols=false -o /src/out -v quiet -nologo
+    chmod -R a+rX /src/out"
+rsync -a --delete "$SRC/out/" "$DIR/"
+echo "$(git -C "$ROOT" rev-parse --short HEAD) (dirty files under src/: $(git -C "$ROOT" status --porcelain -- src | wc -l)) at $(date -u +%FT%TZ)" > "$DIR/.built-from"
+echo "published $(ls "$DIR" | wc -l) files to $DIR from $(git -C "$ROOT" rev-parse --short HEAD) (dirty files under src/: $(git -C "$ROOT" status --porcelain -- src | wc -l))"
