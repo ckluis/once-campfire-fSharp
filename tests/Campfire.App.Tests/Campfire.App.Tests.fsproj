@@ -21,6 +21,7 @@
     <Compile Include="HttpTests.fs" />
     <Compile Include="WebhookTests.fs" />
     <Compile Include="WebPushTests.fs" />
+    <Compile Include="OpengraphTests.fs" />
     <Compile Include="RqrcodeTests.fs" />
     <Compile Include="ControllerTests.fs" />
     <Compile Include="PresenterAccountsTests.fs" />
