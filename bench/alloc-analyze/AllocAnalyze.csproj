@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Reads a .nettrace of the GC allocation-tick events (dotnet-trace collect, provider Microsoft-Windows-DotNETRuntime:0x1:5)
+       and attributes the bytes allocated to types and to the managed frames that allocated them (bench/breakdown alloc).
+       Not part of the app; built and run in the toolchain image. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.1.21" />
+  </ItemGroup>
+</Project>

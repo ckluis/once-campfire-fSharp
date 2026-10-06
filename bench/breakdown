@@ -38,7 +38,7 @@
 #     bash -c 'export PATH=$PATH:/opt/dotnet; dotnet tool install --tool-path /tools dotnet-trace; dotnet tool install --tool-path /tools dotnet-counters'
 set -euo pipefail
 
-MODE=${1:?usage: bench/breakdown cpu|profile|perf|report ...}; shift
+MODE=${1:?usage: bench/breakdown cpu|profile|perf|alloc|report ...}; shift
 ARGS=("$@")
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 set --
@@ -236,8 +236,36 @@ case "$MODE" in
     for route in ${ROUTES//,/ }; do profile_route "$route"; done
     drop_app_dir fsharp
     ;;
+  alloc)
+    # Allocation by type and by the code that allocates, per request: dotnet-trace collects the runtime's GC allocation-tick events
+    # (about one per 100 KB, with the type and a stack) for SECS under load at CONC after the warm-up; bench/alloc-analyze reads the trace.
+    # Build the analyzer once (see bench/alloc-analyze). The trace costs CPU, so only the bytes are read from this run, never a rate.
+    OUT=${OUT:-$BENCH/results/alloc-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$OUT"
+    mkdir -p "$DIAG_DIR"; find "$DIAG_DIR" -mindepth 1 -delete; chmod 1777 "$DIAG_DIR"
+    ANALYZE_DIR=${ANALYZE_DIR:-/var/tmp/alloc-analyze/out}
+    DOCKER_EXTRA_ARGS=(-v "$DIAG_DIR:/tmp")
+    wait_for_quiet
+    start_app fsharp >/dev/null
+    sleep 5
+    sign_in
+    for route in ${ROUTES//,/ }; do
+      route_args "$route"; a=("${ROUTE_ARGS[@]}")
+      warm_up "$COOKIE" "$CONC" "${a[@]}" >/dev/null
+      rm -f "$DIAG_DIR"/*.nettrace
+      lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration $((SECS + 6)) > "$DIAG_DIR/lg.json" &
+      lgpid=$!
+      sleep 2
+      tool /tools/dotnet-trace collect -p 1 --duration "00:00:$(printf %02d "$SECS")" -o /tmp/alloc.nettrace --clrevents gc --clreventlevel verbose > "$OUT/trace-$route.log" 2>&1 || log "dotnet-trace failed: $(tail -3 "$OUT/trace-$route.log")"
+      wait "$lgpid"
+      reqs=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["rps"] * int(sys.argv[2]))' "$DIAG_DIR/lg.json" "$SECS")
+      docker run --rm --user "$(id -u):$(id -g)" -v "$DIAG_DIR:/tmp" -v "$ANALYZE_DIR:/an:ro" -e HOME=/tmp -e DOTNET_ROOT=/opt/dotnet -e DOTNET_ROLL_FORWARD=Major -e DOTNET_NOLOGO=1 \
+        "$TOOL_IMAGE" /opt/dotnet/dotnet /an/AllocAnalyze.dll /tmp/alloc.nettrace "$reqs" 30 > "$OUT/alloc-$route-c$CONC.txt" 2>&1 || true
+      log "alloc $route c=$CONC: $(head -1 "$OUT/alloc-$route-c$CONC.txt")"
+    done
+    drop_app_dir fsharp
+    ;;
   report)
     python3 "$BENCH/lib/breakdown_report.py" "$@"
     ;;
-  *) echo "usage: bench/breakdown cpu|profile|perf|report ..." >&2; exit 2 ;;
+  *) echo "usage: bench/breakdown cpu|profile|perf|alloc|report ..." >&2; exit 2 ;;
 esac
