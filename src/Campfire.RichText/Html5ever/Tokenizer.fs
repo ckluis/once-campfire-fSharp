@@ -6,7 +6,8 @@
 //    `eat` answers false there, as it does once `end()` has run in Rust.
 //  - Parse errors are bare `ProcessParseError` calls (the tree builder only uses them to forget
 //    that a newline after <pre> is to be skipped); no messages, no line numbers, no profiling.
-//  - Doctype tokens carry nothing (a fragment parse never reads them).
+//  - Doctype tokens carry only their name (a fragment parse never reads them; the views tests' DOM
+//    normalizer prints it, as Rust's does). `ProcessDoctype` gets it, `ValueNone` when the token has none.
 //  - '\n' is not in the character sets `pop_except_from` stops at, as in Rust's SIMD data-state
 //    path: it only existed there to count lines.
 //  - Each `step` is one pass of a state's loop, so `Run` re-enters it where Rust loops.
@@ -100,7 +101,7 @@ type TokenSink() =
     abstract ProcessChars: string -> unit
     abstract ProcessNull: unit -> unit
     abstract ProcessEof: unit -> unit
-    abstract ProcessDoctype: unit -> unit
+    abstract ProcessDoctype: string voption -> unit
     abstract ProcessParseError: unit -> unit
     abstract End: unit -> unit
     /// Used in the markup declaration open state: with it false, CDATA is a bogus comment.
@@ -288,6 +289,8 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
     let currentAttrName = StringBuilder()
     let currentAttrValue = StringBuilder()
     let currentComment = StringBuilder()
+    let doctypeName = StringBuilder()
+    let mutable doctypeHasName = false
     let mutable lastStartTagName: string | null = null
     let tempBuf = StringBuilder()
     let mutable tooManyAttributes = false
@@ -370,6 +373,17 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
         let s = tempBuf.ToString()
         tempBuf.Clear() |> ignore
         this.EmitChars s
+
+    /// The doctype token: its name lowercased as html5ever makes it, or none if no name state began.
+    member private this.EmitDoctype() =
+        let name = if doctypeHasName then ValueSome(doctypeName.ToString()) else ValueNone
+        doctypeName.Clear() |> ignore
+        doctypeHasName <- false
+        sink.ProcessDoctype name
+
+    member private this.PushDoctypeName(c: char) =
+        doctypeHasName <- true
+        doctypeName.Append(if c >= 'A' && c <= 'Z' then char (int c + 32) else c) |> ignore
 
     member private this.EmitCurrentComment() =
         let s = currentComment.ToString()
@@ -1197,12 +1211,15 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                         match c with
                         | '\000' ->
                             this.EmitError()
+                            this.PushDoctypeName '\uFFFD'
                             this.To DoctypeName
                         | '>' ->
                             this.EmitError()
-                            sink.ProcessDoctype()
+                            this.EmitDoctype()
                             this.To Data
-                        | _ -> this.To DoctypeName
+                        | _ ->
+                            this.PushDoctypeName c
+                            this.To DoctypeName
             | DoctypeName ->
                 match this.GetChar input with
                 | -1 -> Proc.Suspend
@@ -1214,12 +1231,15 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                     else
                         match c with
                         | '>' ->
-                            sink.ProcessDoctype()
+                            this.EmitDoctype()
                             this.To Data
                         | '\000' ->
                             this.EmitError()
+                            this.PushDoctypeName '\uFFFD'
                             Proc.Continue
-                        | _ -> Proc.Continue
+                        | _ ->
+                            this.PushDoctypeName c
+                            Proc.Continue
             | AfterDoctypeName ->
                 if this.Eat(input, "public", true) then
                     this.To(AfterDoctypeKeyword PublicId)
@@ -1232,7 +1252,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                         let c = char ci
                         if isSpace c then Proc.Continue
                         elif c = '>' then
-                            sink.ProcessDoctype()
+                            this.EmitDoctype()
                             this.To Data
                         else
                             this.EmitError()
@@ -1253,7 +1273,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                             this.To(DoctypeIdentifierSingleQuoted kind)
                         | '>' ->
                             this.EmitError()
-                            sink.ProcessDoctype()
+                            this.EmitDoctype()
                             this.To Data
                         | _ ->
                             this.EmitError()
@@ -1270,7 +1290,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                         | '\'' -> this.To(DoctypeIdentifierSingleQuoted kind)
                         | '>' ->
                             this.EmitError()
-                            sink.ProcessDoctype()
+                            this.EmitDoctype()
                             this.To Data
                         | _ ->
                             this.EmitError()
@@ -1286,7 +1306,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                         Proc.Continue
                     | '>' ->
                         this.EmitError()
-                        sink.ProcessDoctype()
+                        this.EmitDoctype()
                         this.To Data
                     | _ -> Proc.Continue
             | DoctypeIdentifierSingleQuoted kind ->
@@ -1300,7 +1320,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                         Proc.Continue
                     | '>' ->
                         this.EmitError()
-                        sink.ProcessDoctype()
+                        this.EmitDoctype()
                         this.To Data
                     | _ -> Proc.Continue
             | AfterDoctypeIdentifier PublicId ->
@@ -1312,7 +1332,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                     else
                         match c with
                         | '>' ->
-                            sink.ProcessDoctype()
+                            this.EmitDoctype()
                             this.To Data
                         | '"' ->
                             this.EmitError()
@@ -1330,7 +1350,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                     let c = char ci
                     if isSpace c then Proc.Continue
                     elif c = '>' then
-                        sink.ProcessDoctype()
+                        this.EmitDoctype()
                         this.To Data
                     else
                         this.EmitError()
@@ -1344,7 +1364,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                     else
                         match c with
                         | '>' ->
-                            sink.ProcessDoctype()
+                            this.EmitDoctype()
                             this.To Data
                         | '"' -> this.To(DoctypeIdentifierDoubleQuoted SystemId)
                         | '\'' -> this.To(DoctypeIdentifierSingleQuoted SystemId)
@@ -1357,7 +1377,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                 | ci ->
                     match char ci with
                     | '>' ->
-                        sink.ProcessDoctype()
+                        this.EmitDoctype()
                         this.To Data
                     | '\000' ->
                         this.EmitError()
@@ -1385,6 +1405,8 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
                     currentComment.Clear() |> ignore
                     this.To CommentStart
                 elif this.Eat(input, "doctype", true) then
+                    doctypeName.Clear() |> ignore
+                    doctypeHasName <- false
                     this.To Doctype
                 elif sink.AdjustedCurrentNodePresentButNotInHtmlNamespace() && this.Eat(input, "[CDATA[", false) then
                     tempBuf.Clear() |> ignore
@@ -1498,7 +1520,7 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
         | Doctype
         | BeforeDoctypeName ->
             this.EmitError()
-            sink.ProcessDoctype()
+            this.EmitDoctype()
             this.To Data
         | DoctypeName
         | AfterDoctypeName
@@ -1509,10 +1531,10 @@ type Tokenizer(sink: TokenSink, initialState: State, maxAttributes: int) =
         | AfterDoctypeIdentifier _
         | BetweenDoctypePublicAndSystemIdentifiers ->
             this.EmitError()
-            sink.ProcessDoctype()
+            this.EmitDoctype()
             this.To Data
         | BogusDoctype ->
-            sink.ProcessDoctype()
+            this.EmitDoctype()
             this.To Data
         | BogusComment ->
             this.EmitCurrentComment()

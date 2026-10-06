@@ -1861,7 +1861,7 @@ type DepthLimit(treeBuilder: TreeBuilder, input: Input, maxOpenElements: int) =
     override this.ProcessEof() =
         if not exceeded then treeBuilder.ProcessEof()
 
-    override this.ProcessDoctype() =
+    override this.ProcessDoctype(_) =
         if not exceeded then
             treeBuilder.ProcessIgnored()
             this.Check()

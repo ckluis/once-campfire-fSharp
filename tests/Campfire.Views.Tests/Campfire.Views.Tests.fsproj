@@ -13,6 +13,7 @@
     <Compile Include="Support/Dom.fs" />
     <Compile Include="Support/Facts.fs" />
     <Compile Include="Support/GoldenB.fs" />
+    <Compile Include="DomTests.fs" />
     <Compile Include="OutTests.fs" />
     <Compile Include="TagTests.fs" />
     <Compile Include="FormsTests.fs" />

@@ -73,13 +73,18 @@ type private Sink() =
             | EndTag -> lines.Add $"</{name}>"
             Continue
 
-    override _.ProcessComment(_) = ()
+    override this.ProcessComment(_) = this.FlushText()
     override _.ProcessChars(s) = text.Append s |> ignore
     override _.ProcessNull() = text.Append '\000' |> ignore
     override _.ProcessEof() = ()
-    override this.ProcessDoctype() =
+    override this.ProcessDoctype(name) =
         this.FlushText()
-        lines.Add "<!DOCTYPE>"
+        // Rust's `{:?}` of an `Option<String>`.
+        let shown =
+            match name with
+            | ValueSome name -> $"Some({debugString name})"
+            | ValueNone -> "None"
+        lines.Add $"<!DOCTYPE {shown}>"
     override _.ProcessParseError() = ()
     override _.End() = ()
     override _.AdjustedCurrentNodePresentButNotInHtmlNamespace() = false
