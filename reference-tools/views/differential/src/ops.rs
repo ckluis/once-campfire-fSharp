@@ -219,6 +219,9 @@ pub fn run(case: &Value, shared: &Value) -> Out {
     if let Some(answer) = crate::pages::run(op, args, ctx, shared) {
         return answer;
     }
+    if let Some(answer) = crate::rest::run(op, args, ctx, shared) {
+        return answer;
+    }
     match op {
         // ---- layouts -----------------------------------------------------------------------------
         // args: page_title?, body_class?, head, nav, content, footer, sidebar (html strings)

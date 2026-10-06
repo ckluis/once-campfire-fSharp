@@ -7,6 +7,7 @@
     <Compile Include="Inputs.fs" />
     <Compile Include="Answer.fs" />
     <Compile Include="Pages.fs" />
+    <Compile Include="Rest.fs" />
     <Compile Include="Operations.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

@@ -862,3 +862,156 @@ for _ in range(n(30)):
         "can_create_rooms": RNG.random() < 0.5, "mode": RNG.choice(["view", "mixed"]), "frame": FRAME(),
     }
     case("users/sidebars/show", sidebar, random_ctx())
+
+# ==== unit 4.3: the remaining templates ==================================================================================
+# The account, bot, custom styles, sign-in, join, first-run, profile and push-subscription pages, the PWA manifest, the
+# service worker and the avatar SVG. Page cases take `frame` (also render in the Turbo-Frame layout). Cases come from the
+# seeds' users, rooms and memberships (an administrator and a member looking at each page, the page's own user, bots, banned
+# and deactivated users) and from generated variations (hostile names, bios, URLs and keys; every platform for the profile's
+# install instructions, which the ctx's platform drives).
+
+TOKENS = ["abc123", "x" * 24, "a b", "q&r<s>", "é", ""]
+
+
+def viewer_ctx(user, **overrides):
+    return random_ctx(current_user=user_ctx(user) if user else None, **overrides)
+
+
+def hostile_user(user=None):
+    user = dict(user or RNG.choice(USERS))
+    if RNG.random() < 0.4:
+        user.update(name=hostile(), bio=RNG.choice([None, hostile()]), email_address=RNG.choice([None, hostile(), "a+b@c.d"]), avatar_path=RNG.choice(["/a", "/a?v=1&w=2", hostile()]))
+    if RNG.random() < 0.3:
+        user["status"] = RNG.choice(["active", "banned", "deactivated"])
+    if RNG.random() < 0.2:
+        user["role"] = RNG.choice(["member", "administrator", "bot"])
+    return user
+
+
+def contact_for(user):
+    return None if RNG.random() < 0.2 else {"name": RNG.choice([user["name"], hostile()]), "email_address": RNG.choice([user["email_address"] or "x@y.z", hostile()])}
+
+
+def world_viewers(world):
+    """An administrator, a member, and a bot of the world, when it has them."""
+    users = list(world["users"].values())
+    return [next((u for u in users if u["role"] == role and u["status"] == "active"), None) for role in ("administrator", "member", "bot")]
+
+
+def bot_rooms(world, user):
+    rooms = [world["rooms"][m["room_id"]] for m in world["memberships"] if m["user_id"] == user["id"] and world["rooms"][m["room_id"]]["kind"] != "direct"]
+    return sorted([{"id": r["id"], "name": r["name"] or ""} for r in rooms], key=lambda r: r["name"].lower())
+
+
+def bot_args(world, user):
+    return {"user": user, "bot_key": f"{user['id']}-{RNG.choice(TOKENS)}", "rooms": bot_rooms(world, user)}
+
+
+def profile_args(world, user):
+    shared, direct = [], []
+    for m in world["memberships"]:
+        if m["user_id"] != user["id"]:
+            continue
+        room = world["rooms"][m["room_id"]]
+        item = {"room_id": m["room_id"], "room_param_key": "rooms_" + room["kind"], "room_display_name": room_name_of(world, m["room_id"]), "involvement": m["involvement"], "direct": room["kind"] == "direct"}
+        (direct if item["direct"] else shared).append(item)
+    shared.sort(key=lambda r: r["room_display_name"].lower())
+    return {"user": user, "avatar_attached": RNG.random() < 0.5, "transfer_id": RNG.choice(TOKENS), "shared_memberships": shared, "direct_memberships": direct}
+
+
+def edit_args(world, viewer, next_page=None):
+    visible = [u for u in sorted(world["users"].values(), key=lambda u: u["name"].lower()) if u["role"] != "bot"]
+    admin = viewer and viewer["role"] == "administrator"
+    visible = [u for u in visible if (u["status"] in ("active", "banned") if admin else u["status"] == "active")]
+    account = RNG.choice(ACCOUNTS)
+    return {
+        "account_id": RNG.randrange(1, 10**6), "join_code": account["join_code"], "restrict_room_creation_to_administrators": RNG.random() < 0.5,
+        "administrators": [u for u in visible if u["role"] == "administrator"], "members": [u for u in visible if u["role"] != "administrator"], "next_page": next_page,
+    }
+
+
+FRAMES = [False, False, True]
+for world in WORLDS:
+    admin, member, bot = world_viewers(world)
+    people = list(world["users"].values())
+    for viewer in (admin, member):
+        if viewer is None:
+            continue
+        for next_page in (None, "2"):
+            case("accounts/edit", {"edit": edit_args(world, viewer, next_page), "frame": False}, viewer_ctx(viewer))
+        case("accounts/edit", {"edit": edit_args(world, viewer), "frame": True}, viewer_ctx(viewer, account=dict(name=RNG.choice(ACCOUNTS)["name"], logo_url="/account/logo?v=1", has_logo=True)))
+        for user in people:
+            case("accounts/users/_user", {"user": user}, viewer_ctx(viewer))
+    case("accounts/users/index_turbo_stream", {"users": people[:5], "next_page": None}, viewer_ctx(admin))
+    case("accounts/users/index_turbo_stream", {"users": people[5:12], "next_page": "3"}, viewer_ctx(member))
+    bots = [bot_args(world, u) for u in people if u["role"] == "bot" and u["status"] == "active"]
+    for viewer in (admin, member):
+        case("accounts/bots/index", {"bots": bots, "frame": False}, viewer_ctx(viewer))
+    for b in bots:
+        case("accounts/bots/_bot", {"bot": b}, viewer_ctx(admin))
+        user = b["user"]
+        form = {"name": user["name"], "webhook_url": RNG.choice([None, "https://hooks.example.com/x?a=1&b=2"]), "avatar_attachment_url": RNG.choice([None, "/rails/active_storage/blobs/redirect/sgid-1/a.png"])}
+        case("accounts/bots/edit", {"bot_id": user["id"], "bot": form, "frame": False}, viewer_ctx(admin))
+        case("accounts/bots/edit", {"bot_id": user["id"], "bot": form, "frame": True}, viewer_ctx(admin))
+    case("accounts/bots/new", {"bot": {}, "frame": False}, viewer_ctx(admin))
+    for shown in people:
+        for viewer in (admin, member, shown, None):
+            case("users/show", {"user": shown, "transfer_id": RNG.choice(TOKENS), "frame": False}, viewer_ctx(viewer))
+        case("users/show", {"user": shown, "transfer_id": "t", "frame": True}, viewer_ctx(admin))
+        case("users/_ban_button", {"user": shown}, viewer_ctx(admin))
+        case("users/profiles/_transfer", {"user": shown, "transfer_id": RNG.choice(TOKENS)}, viewer_ctx(RNG.choice([admin, shown])))
+        case("users/avatars/show", {"user_id": shown["id"], "initials": "".join(part[:1].upper() for part in shown["name"].split()[:3] if part[:1].isalnum())})
+        if shown["status"] == "active":
+            profile = profile_args(world, shown)
+            case("users/profiles/show", {"profile": profile, "frame": False}, viewer_ctx(shown))
+            for item in profile["shared_memberships"] + profile["direct_memberships"]:
+                case("users/profiles/_membership", {"membership": item}, viewer_ctx(shown))
+    for label in sorted(PLATFORMS):
+        shown = admin or member
+        if shown:
+            case("users/profiles/show", {"profile": profile_args(world, shown), "frame": False}, viewer_ctx(shown, platform=PLATFORMS[label]))
+for label in sorted(PLATFORMS):
+    case("sessions/incompatible_browser", {"frame": False}, random_ctx(platform=PLATFORMS[label]))
+    case("first_runs/show", {"frame": False}, random_ctx(platform=PLATFORMS[label]))
+
+for account in ACCOUNTS:
+    for _ in range(2):
+        user = RNG.choice(USERS)
+        case("users/new", {"join_code": account["join_code"], "help_contact": contact_for(user), "frame": False}, random_ctx(current_user=None))
+        case("sessions/new", {"email_address": RNG.choice([None, user["email_address"]]), "help_contact": contact_for(user), "frame": False}, random_ctx(current_user=None))
+        case("accounts/custom_styles/edit", {"custom_styles": account["custom_styles"], "frame": False}, viewer_ctx(next((u for u in USERS if u["role"] == "administrator"), user)))
+
+for _ in range(n(40)):
+    case("accounts/edit", {"edit": {"account_id": RNG.randrange(1, 10**6), "join_code": RNG.choice([JOIN, hostile()]), "restrict_room_creation_to_administrators": RNG.random() < 0.5, "administrators": [hostile_user() for _ in range(RNG.randrange(0, 4))], "members": [hostile_user() for _ in range(RNG.randrange(0, 5))], "next_page": RNG.choice([None, "2", hostile()])}, "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("accounts/users/_user", {"user": hostile_user()}, random_ctx())
+    case("accounts/users/_next_page_container", {"page": RNG.choice(["2", "a b&c", hostile()])})
+    case("accounts/users/index_turbo_stream", {"users": [hostile_user() for _ in range(RNG.randrange(0, 5))], "next_page": RNG.choice([None, "2", hostile()])}, random_ctx())
+    bot_user = hostile_user(dict(RNG.choice(USERS), role="bot", status="active"))
+    bot_value = {"user": bot_user, "bot_key": RNG.choice([f"{bot_user['id']}-{RNG.choice(TOKENS)}", hostile()]), "rooms": [{"id": RNG.randrange(1, 10**9), "name": RNG.choice(["HQ", hostile()])} for _ in range(RNG.randrange(0, 4))]}
+    case("accounts/bots/_bot", {"bot": bot_value}, random_ctx())
+    case("accounts/bots/index", {"bots": [bot_value] * RNG.randrange(0, 3), "frame": RNG.choice(FRAMES)}, random_ctx())
+    bot_form = {"name": RNG.choice([None, hostile()]), "webhook_url": RNG.choice([None, hostile(), "https://x.test/?a=1&b=2"]), "avatar_attachment_url": RNG.choice([None, hostile(), "/a?x=1&y=2"])}
+    case("accounts/bots/_form", {"form": {"url": RNG.choice(["/account/bots", hostile()]), "model": RNG.choice([None, "user"]), "class": RNG.choice([None, "flex"])}, "bot": bot_form}, random_ctx())
+    case("accounts/bots/new", {"bot": bot_form, "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("accounts/bots/edit", {"bot_id": RNG.randrange(1, 10**9), "bot": bot_form, "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("accounts/custom_styles/edit", {"custom_styles": RNG.choice([None, "", hostile(), "a { color: red }\n</textarea><b>"]), "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("first_runs/show", {"frame": RNG.choice(FRAMES)}, random_ctx())
+    case("sessions/new", {"email_address": RNG.choice([None, hostile()]), "help_contact": contact_for(hostile_user()), "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("sessions/incompatible_browser", {"frame": RNG.choice(FRAMES)}, random_ctx())
+    case("sessions/transfers/show", {"action": RNG.choice(["/session/transfers/abc", hostile()]), "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("users/new", {"join_code": RNG.choice([JOIN, hostile()]), "help_contact": contact_for(hostile_user()), "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("users/show", {"user": hostile_user(), "transfer_id": RNG.choice(TOKENS + [hostile()]), "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("users/_ban_button", {"user": hostile_user()}, random_ctx())
+    case("users/profiles/_transfer", {"user": hostile_user(), "transfer_id": RNG.choice(TOKENS + [hostile()])}, random_ctx())
+    items = [{"room_id": RNG.randrange(1, 10**9), "room_param_key": RNG.choice(["rooms_open", "rooms_closed", "rooms_direct"]), "room_display_name": RNG.choice(["HQ", hostile()]), "involvement": RNG.choice(["mentions", "everything", "nothing", "invisible"]), "direct": RNG.random() < 0.4} for _ in range(RNG.randrange(0, 6))]
+    case("users/profiles/_membership", {"membership": RNG.choice(items) if items else {"room_id": 1, "room_param_key": "rooms_open", "room_display_name": "x", "involvement": "mentions", "direct": False}}, random_ctx())
+    case("users/profiles/show", {"profile": {"user": hostile_user(), "avatar_attached": RNG.random() < 0.5, "transfer_id": RNG.choice(TOKENS + [hostile()]), "shared_memberships": [i for i in items if not i["direct"]], "direct_memberships": [i for i in items if i["direct"]]}, "frame": RNG.choice(FRAMES)}, random_ctx())
+    subscriptions = [{"id": RNG.randrange(1, 10**6), "endpoint": RNG.choice(["https://fcm.googleapis.com/fcm/send/abc:def?x=1&y=2", hostile()]), "browser": RNG.choice(["Chrome", "Safari", hostile()]), "version": RNG.choice(["120.0", "17.2", hostile()]), "platform": RNG.choice(["macOS", "iPhone", hostile()])} for _ in range(RNG.randrange(0, 5))]
+    case("users/push_subscriptions/index", {"push_subscriptions": subscriptions, "frame": RNG.choice(FRAMES)}, random_ctx())
+    case("users/push_subscriptions/_push_subscription", {"push_subscription": subscriptions[0] if subscriptions else {"id": 1, "endpoint": "e", "browser": "b", "version": "v", "platform": "p"}}, random_ctx())
+    case("users/avatars/show", {"user_id": RNG.choice([RNG.randrange(1, 10**12), RNG.randrange(1, 100)]), "initials": RNG.choice(["D", "JZ", "ABC", "ABCD", "", "É", "日本語", "😀😀", hostile()])})
+    case("pwa/manifest", {"account_name": RNG.choice([None, "Campfire", hostile(), 'Back\\slash "quoted" <b>&amp;</b>', "  \u0007 \u001f \u007f ퟿"]), "logo_path_small": RNG.choice(["/account/logo?size=small&v=1", hostile()]), "logo_path": RNG.choice(["/account/logo?v=1", hostile()]), "base_url": RNG.choice(["http://campfire.test", "https://chat.example.com:8443", hostile()])})
+for account in ACCOUNTS:
+    case("pwa/manifest", {"account_name": account["name"], "logo_path_small": "/account/logo?size=small&v=20260926130029", "logo_path": "/account/logo?v=20260926130029", "base_url": "http://campfire.test"})
+case("pwa/manifest", {"account_name": None, "logo_path_small": "/a", "logo_path": "/b", "base_url": ""})
+case("pwa/service_worker", {})

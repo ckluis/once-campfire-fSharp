@@ -41,7 +41,7 @@ let private recordedAnswer (page: RecordedPage) : Answer =
 
 /// A page: rendered cold, then warm (the same bytes), plain and recorded (the same bytes), and in the Turbo-Frame
 /// layout when `frame` is set.
-let private pageAnswer (args: JsonElement) (render: Out -> unit) (head: Out -> unit) (content: Out -> unit) : Answer =
+let pageAnswer (args: JsonElement) (render: Out -> unit) (head: Out -> unit) (content: Out -> unit) : Answer =
     let frame = bool (get args "frame")
     let once () =
         let plain = Render.text render
@@ -54,7 +54,7 @@ let private pageAnswer (args: JsonElement) (render: Out -> unit) (head: Out -> u
     recordedAnswer recorded
 
 /// A template that is not a page: rendered cold and then warm.
-let private fragmentAnswer (render: Out -> unit) : Answer =
+let fragmentAnswer (render: Out -> unit) : Answer =
     let cold = Render.text render
     let warm = Render.text render
     if cold <> warm then failwith "a warm render is not the cold one"

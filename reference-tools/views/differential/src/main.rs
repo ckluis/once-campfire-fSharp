@@ -12,6 +12,7 @@
 
 mod ops;
 mod pages;
+mod rest;
 
 // The templates this tool declares (`ops.rs`, `pages.rs`) name `crate::messages` as the views crate's own do.
 pub use campfire_views::messages;

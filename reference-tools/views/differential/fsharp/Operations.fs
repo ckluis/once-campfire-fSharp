@@ -248,6 +248,9 @@ let run (case: JsonElement) (shared: JsonElement) : Answer =
     match Pages.tryRun op args ctx shared with
     | Some answer -> answer
     | None ->
+    match Rest.tryRun op args ctx shared with
+    | Some answer -> answer
+    | None ->
     match op with
     | "layouts/application_wrapper" ->
         let part key = Html.Raw(str (get args key))
