@@ -106,14 +106,14 @@ module AttachmentWrites =
     let destroy (tx: Tx) (record: Record) (name: string) : bool =
         let attachment =
             tx.Conn.QueryOne(
-                "SELECT id, blob_id FROM active_storage_attachments WHERE record_type = ?1 AND record_id = ?2 AND name = ?3 LIMIT 1",
+                "SELECT id, blob_id FROM active_storage_attachments WHERE record_type = ? AND record_id = ? AND name = ? LIMIT 1",
                 [| S record.RecordType; I record.Id; S name |],
                 fun r -> r.Int64 0, r.Int64 1
             )
         match attachment with
         | None -> false
         | Some(attachmentId, blobId) ->
-            tx.Conn.Execute("DELETE FROM active_storage_attachments WHERE id = ?1", [| I attachmentId |]) |> ignore
+            tx.Conn.Execute("DELETE FROM active_storage_attachments WHERE id = ?", [| I attachmentId |]) |> ignore
             Common.touch tx.Conn record.Table record.Id (tx.Now())
             tx.EmitAfterCommit(Event.PurgeBlob blobId)
             true
