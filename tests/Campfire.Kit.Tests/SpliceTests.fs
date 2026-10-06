@@ -405,3 +405,48 @@ let ``texts that share a recent slot each get their own sha256`` () =
     for _ in 1..4 do
         Assert.Equal(sha one, (SpliceCaches.textSha (ReadOnlyMemory<byte> one)).A)
         Assert.Equal(sha two, (SpliceCaches.textSha (ReadOnlyMemory<byte> two)).A)
+
+[<Fact>]
+let ``a short tail after a fragment is one piece for every fragment`` () =
+    // A turbo-stream answer: a fragment and the few bytes that end it. The tail's piece does not depend on the fragment, so it
+    // is stored under its text alone and every answer finds it; each answer decodes to its page.
+    let storedAlone (text: string) =
+        let hash = SHA256.HashData(utf8 text)
+        let sha: BodyDigest =
+            { A = BitConverter.ToUInt64(hash, 0)
+              B = BitConverter.ToUInt64(hash, 8)
+              C = BitConverter.ToUInt64(hash, 16)
+              D = BitConverter.ToUInt64(hash, 24) }
+        let stored = lock SpliceCaches.textPiecesGate (fun () -> SpliceCaches.textPieces.Get({ Text = sha; Before = Before.nothing }, ignore))
+        stored.IsSome
+    let tail = "</template></turbo-stream>\n[short-tail-test]"
+    let first = page "<turbo-stream><template>" [ message 1 ] tail
+    Assert.False(storedAlone tail)
+    Assert.Equal<byte[]>(utf8 first.Plain, gunzip (first.Gzip 0u))
+    Assert.True(storedAlone tail, "found by its text alone")
+    let second = page "<turbo-stream><template>" [ message 2 ] tail
+    Assert.Equal<byte[]>(utf8 second.Plain, gunzip (second.Gzip 0u))
+    // A long tail still goes against the fragment before it (its dictionary), so it is not stored alone.
+    let long = String.replicate 40 "<p>the end of the page, which is long enough to want a dictionary</p>\n"
+    let a = page "<main>" [ message 3 ] long
+    Assert.Equal<byte[]>(utf8 a.Plain, gunzip (a.Gzip 0u))
+    Assert.False(storedAlone long)
+
+[<Fact>]
+let ``pieces and members made through the shim are the bytes DeflateStream makes`` () =
+    let corpus = utf8 (String.concat "\n" [ for i in 1..400 -> sprintf "<li class=\"row-%d\">item %d of %d, some words to repeat</li>" (i % 17) i (i * 31 % 101) ])
+    let viaStream (data: byte[]) (finish: bool) =
+        use output = new MemoryStream()
+        let deflate = new DeflateStream(output, CompressionLevel.Optimal, true)
+        deflate.Write(ReadOnlySpan<byte> data)
+        deflate.Flush()
+        if finish then deflate.Dispose()
+        output.ToArray()
+    for size in [ 1; 11; 300; 600; 2000; 4000; 9000; 20000; 30000; 40000; 60000 ] do
+        let data = corpus[.. min (size - 1) (corpus.Length - 1)]
+        let piece = Compress.deflate ReadOnlySpan<byte>.Empty ReadOnlySpan<byte>.Empty (ReadOnlySpan<byte> data)
+        Assert.Equal<byte[]>(viaStream data false, piece)
+        // gzipMember is the header, the stream finished, and the trailer.
+        let whole = Deflater.gzipMember (ReadOnlySpan<byte> data) 5u
+        Assert.Equal<byte[]>(viaStream data true, whole[10 .. whole.Length - 9])
+        Assert.Equal<byte[]>(data, gunzip whole)

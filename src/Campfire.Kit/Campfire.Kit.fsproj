@@ -14,6 +14,7 @@
     <Compile Include="Body.fs" />
     <Compile Include="Ctx.fs" />
     <Compile Include="Generations.fs" />
+    <Compile Include="Zlib.fs" />
     <Compile Include="Deflater.fs" />
     <Compile Include="Splice.fs" />
     <Compile Include="Actions.fs" />
