@@ -626,3 +626,43 @@ let ``cable over TLS`` () =
             (server :> IDisposable).Dispose()
             app.DisposeAsync().AsTask().Wait()
     }
+
+/// `Turbo::StreamsChannel` with the app's verifier: names signed as turbo-rails signs them.
+[<Fact>]
+let ``turbo streams channel verifies names signed with the app's secret`` () =
+    task {
+        let secrets = Secrets.create "a secret key base for the cable tests"
+        let signed = Campfire.RailsCompat.Turbo.signedStreamName secrets [ "Z2lk"; "messages" ]
+        let rooms = Campfire.RailsCompat.Turbo.signedStreamName secrets [ "rooms" ]
+        let server =
+            Server.builder testConfig cookieAuth identify
+            |> ServerBuilder.channel Campfire.Cable.Turbo.StreamsChannelName (fun () ->
+                Campfire.Cable.Turbo.StreamsChannel.create secrets
+                |> Campfire.Cable.Turbo.StreamsChannel.guardedBy (fun name -> name.EndsWith ":messages")
+                |> Campfire.Cable.Turbo.StreamsChannel.channel)
+            |> ServerBuilder.build
+        let! app, address = host server
+        try
+            let authority = (Uri address).Authority
+            match! Client.Open(authority, [ "Origin", $"http://{authority}"; "Cookie", "session_token=1" ]) with
+            | Choice2Of2 response -> failwith $"{response.Status}"
+            | Choice1Of2 client ->
+                use _ = client
+                do! expectText Welcome client
+                let turbo (name: string) = identifier (object' [ "channel", str Campfire.Cable.Turbo.StreamsChannelName; "signed_stream_name", str name ])
+                do! client.Subscribe(turbo rooms)
+                do! expectText (confirm (turbo rooms)) client
+                // The guard turns away a name that verifies.
+                do! client.Subscribe(turbo signed)
+                do! expectText (reject (turbo signed)) client
+                // A name signed with another secret doesn't verify.
+                let other = Campfire.RailsCompat.Turbo.signedStreamName (Secrets.create "another") [ "rooms" ]
+                do! client.Subscribe(turbo other)
+                do! expectText (reject (turbo other)) client
+                eq 1 (Campfire.Cable.Turbo.broadcastUpdateTo server [ "rooms" ] "list" "<b>1</b>")
+                let tag = Campfire.Cable.Turbo.actionTag Campfire.Cable.Turbo.Update (Campfire.Cable.Turbo.Target "list") (Some "<b>1</b>") []
+                do! expectText (message (turbo rooms) (Json.encode (str tag))) client
+        finally
+            (server :> IDisposable).Dispose()
+            app.DisposeAsync().AsTask().Wait()
+    }

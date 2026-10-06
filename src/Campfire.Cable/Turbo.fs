@@ -109,32 +109,18 @@ type private TagSink =
     abstract Raw: string -> unit
     abstract Html: Template -> unit
 
-/// `ERB::Util.unwrapped_html_escape`, a run at a time.
-let private appendEscaped (append: string -> unit) (value: string) : unit =
-    let mutable last = 0
-    for index in 0 .. value.Length - 1 do
-        let replacement: string | null =
-            match value[index] with
-            | '&' -> "&amp;"
-            | '<' -> "&lt;"
-            | '>' -> "&gt;"
-            | '"' -> "&quot;"
-            | '\'' -> "&#39;"
-            | _ -> null
-        match replacement with
-        | null -> ()
-        | replacement ->
-            if index > last then append (value.Substring(last, index - last))
-            append replacement
-            last <- index + 1
-    if last = 0 then append value
-    elif last < value.Length then append (value.Substring last)
+let private htmlSpecials = System.Buffers.SearchValues.Create "&<>\"'"
+
+/// An attribute value as `ERB::Util.unwrapped_html_escape` writes it (the escaping is `Campfire.Ruby`'s;
+/// most values have nothing to escape and are used as they are).
+let private escapedAttribute (value: string) : string =
+    if value.AsSpan().IndexOfAny htmlSpecials < 0 then value else Erb.htmlEscape value
 
 let private pushAttribute (sink: TagSink) (name: string) (value: string) : unit =
     sink.Raw " "
     sink.Raw name
     sink.Raw "=\""
-    appendEscaped sink.Raw value
+    sink.Raw(escapedAttribute value)
     sink.Raw "\""
 
 let private writeActionTag (sink: TagSink) (action: Action) (target: Target) (template: Template) (attributes: (string * string option) list) =
