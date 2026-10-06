@@ -11,6 +11,7 @@
     <Compile Include="../../reference-tools/views/differential/fsharp/Operations.fs" Link="Operations.fs" />
     <Compile Include="Support/Dom.fs" />
     <Compile Include="Support/Facts.fs" />
+    <Compile Include="Support/GoldenB.fs" />
     <Compile Include="OutTests.fs" />
     <Compile Include="TagTests.fs" />
     <Compile Include="FormsTests.fs" />
@@ -20,6 +21,9 @@
     <Compile Include="MessagesTests.fs" />
     <Compile Include="UsersTests.fs" />
     <Compile Include="ParityATests.fs" />
+    <Compile Include="MessagesViewsTests.fs" />
+    <Compile Include="RoomsViewsTests.fs" />
+    <Compile Include="SearchesViewsTests.fs" />
     <Compile Include="KitIntegrationTests.fs" />
     <Compile Include="DifferentialTests.fs" />
   </ItemGroup>

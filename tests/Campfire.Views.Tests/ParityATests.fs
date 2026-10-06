@@ -86,3 +86,67 @@ let ``a flash notice and a flash alert render in the layout`` () =
     let alert = Render.text (fun w -> Templates.Welcome.Show.render w (context name { Request.none with FlashAlert = Some "No" }) "X")
     Assert.Contains("style=\"--flash-background: var(--color-negative)\"", alert)
     Assert.Contains("alert-", alert)
+
+// The cases of parity_a.rs for the hot-path templates (unit 4.2): the sidebar and the mentions prompt.
+
+let private named (caseName: string) (userName: string) : Users.UserSummary =
+    Campfire.Views.Differential.Inputs.userSummary (user caseName userName)
+
+let private mentionUserOf (caseName: string) (userName: string) : Users.MentionUser =
+    { User = named caseName userName
+      AttachableSgid = nonNull ((user caseName userName).GetProperty("attachable_sgid").GetString()) }
+
+let private sidebar (name: string) : Users.SidebarShow =
+    let sidebar = (data name).GetProperty "sidebar"
+    let me = userByEmail name (nonNull ((case name).GetProperty("as").GetString()))
+    let meName = nonNull (me.GetProperty("name").GetString())
+    let text (e: JsonElement) = nonNull (e.GetString())
+    let strings (e: JsonElement) = [ for n in e.EnumerateArray() -> text n ]
+    { CurrentUser = Campfire.Views.Differential.Inputs.userSummary me
+      RoomsStream = text (facts.Value.GetProperty("signed_streams").GetProperty "rooms")
+      UserRoomsStream = text (facts.Value.GetProperty("signed_streams").GetProperty("user_rooms").GetProperty meName)
+      DirectMemberships =
+        [ for d in sidebar.GetProperty("direct").EnumerateArray() ->
+              let roomId = d.GetProperty("room_id").GetInt64()
+              Users.SidebarDirectItem.View
+                  { RoomId = roomId
+                    Unread = d.GetProperty("unread").GetBoolean()
+                    UpdatedAtEpoch = text (d.GetProperty "updated_at_epoch")
+                    Members = strings (d.GetProperty "member_names") |> List.map (named name)
+                    MembershipId = roomId
+                    MembershipUpdatedAt = Campfire.RailsCompat.Timestamps.unixEpoch } ]
+      DirectPlaceholderUsers = strings (sidebar.GetProperty "placeholders") |> List.map (named name)
+      OtherMemberships =
+        [ for r in sidebar.GetProperty("shared").EnumerateArray() ->
+              { Id = r.GetProperty("room_id").GetInt64()
+                ParamKey = text (r.GetProperty "param_key")
+                Name = text (r.GetProperty "name")
+                Unread = r.GetProperty("unread").GetBoolean() } ]
+      CanCreateRooms = sidebar.GetProperty("can_create_rooms").GetBoolean() }
+
+[<Fact>]
+let ``users sidebars show`` () =
+    for name in [ "sidebar_david"; "sidebar_kevin" ] do
+        let ctx = context name Request.none
+        let page = sidebar name
+        assertParity name "html" (Render.text (fun w -> Templates.Users.Sidebars.Show.render w ctx page))
+    let name = "sidebar_frame"
+    let ctx = context name Request.none
+    let page = sidebar name
+    let framed =
+        Layouts.frame Templates.Users.Sidebars.Show.head (fun w -> Templates.Users.Sidebars.Show.content w ctx page)
+    assertParity name "html" (framed.ToString())
+
+[<Fact>]
+let ``autocompletable users`` () =
+    let name = "autocompletable_users"
+    let ctx = context name Request.none
+    let users =
+        [ for n in (data name).GetProperty("autocompletable").EnumerateArray() -> mentionUserOf name (nonNull (n.GetString())) ]
+    assertParity name "html" (Render.text (fun w -> Templates.Autocompletable.Users.Index.render w ctx users))
+
+    let name = "autocompletable_users_json"
+    let users =
+        [ for n in (data name).GetProperty("autocompletable").EnumerateArray() -> mentionUserOf name (nonNull (n.GetString())) ]
+    let json = Autocompletable.usersIndexJson users (nonNull (facts.Value.GetProperty("base_url").GetString()))
+    Assert.Equal(golden name "json", json)
