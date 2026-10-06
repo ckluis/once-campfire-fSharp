@@ -260,24 +260,12 @@ module Adapter =
                 do! writer.Finish()
         }
 
-    /// A buffer as the body: written through the stream when it is small, and through the pipe with a size hint (`BufferWrites`)
-    /// when it is large enough for the pipe's block size to matter.
-    let private writeBuffer (http: HttpContext) (bytes: ReadOnlyMemory<byte>) : Task =
-        if bytes.Length <= BufferWrites.Segment then
-            http.Response.Body.WriteAsync(bytes).AsTask()
-        else
-            task {
-                BufferWrites.write http.Response.BodyWriter bytes.Span
-                let! _ = http.Response.BodyWriter.FlushAsync().AsTask()
-                ()
-            }
-
     let private writePlain (http: HttpContext) (response: Response) : Task =
         task {
             match response.Body with
             | Body.Empty -> ()
-            | Body.Bytes bytes -> do! writeBuffer http bytes
-            | Body.Pooled pooled -> do! writeBuffer http pooled.Memory
+            | Body.Bytes bytes -> do! http.Response.Body.WriteAsync bytes
+            | Body.Pooled pooled -> do! http.Response.Body.WriteAsync pooled.Memory
             | Body.Parts parts ->
                 parts.WritePlain http.Response.BodyWriter
                 let! _ = http.Response.BodyWriter.FlushAsync().AsTask()

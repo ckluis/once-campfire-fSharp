@@ -806,7 +806,7 @@ type PageParts internal (length: int, parts: SplicePart[]) =
         writer.Advance 10
         let mutable crc = 0u
         for piece in pieces do
-            BufferWrites.write writer (ReadOnlySpan<byte> piece.Deflated)
+            writer.Write(ReadOnlySpan<byte> piece.Deflated)
             crc <- Crc32.multiply crc piece.Crc.Shift ^^^ piece.Crc.Value
         // An empty final block (fixed Huffman), after the sync flushes that ended every piece.
         let trailer = writer.GetSpan 10
@@ -821,10 +821,10 @@ type PageParts internal (length: int, parts: SplicePart[]) =
         for i in 0 .. parts.Length - 1 do
             let part = &parts[i]
             match part.Fragment with
-            | null -> BufferWrites.write writer part.Bytes.Span
+            | null -> writer.Write part.Bytes.Span
             | fragment ->
-                if not part.Bytes.IsEmpty then BufferWrites.write writer part.Bytes.Span
-                BufferWrites.write writer (ReadOnlySpan<byte> fragment.Bytes)
+                if not part.Bytes.IsEmpty then writer.Write part.Bytes.Span
+                writer.Write(ReadOnlySpan<byte> fragment.Bytes)
 
     /// The number of parts, for tests.
     member internal _.PartCount = parts.Length

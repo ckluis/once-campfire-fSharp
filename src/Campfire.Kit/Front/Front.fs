@@ -88,7 +88,6 @@ module Front =
             let builder = WebApplication.CreateSlimBuilder [| "--hostBuilder:reloadConfigOnChange=false" |]
             builder.Services.AddSingleton<ILoggerFactory>(loggerFactory) |> ignore
             builder.Services.AddSingleton<IHostLifetime, NoLifetime>() |> ignore
-            builder.Services.AddSingleton<IMemoryPoolFactory<byte>, ConnPoolFactory>() |> ignore
             builder.WebHost.ConfigureKestrel(fun (options: KestrelServerOptions) ->
                 Adapter.configureKestrel options
                 FrontConn.configureLimits options timeouts
