@@ -63,10 +63,13 @@ let removeSoloUnfurledLinkText (content: Content) (ctx: RenderContext) : Result<
 
 // --- SanitizeTags ------------------------------------------------------------------------------
 
+let private sanitizeTagsAllowed =
+    System.Collections.Generic.HashSet<string>(Sanitizer.sanitizeTagsAllowedTags, System.StringComparer.Ordinal)
+
 /// Removes every element outside the allowlist, together with its contents.
 let sanitizeTags (content: Content) : Content =
     let dom = content.Dom
-    let allowed = Sanitizer.sanitizeTagsAllowedTags |> Set.ofArray
+    let allowed = sanitizeTagsAllowed
     let disallowed =
         dom.Descendants content.Root
         |> Seq.filter (fun n ->
