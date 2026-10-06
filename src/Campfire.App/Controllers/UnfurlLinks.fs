@@ -19,7 +19,7 @@ module UnfurlLinks =
                 | ValueSome net -> net
                 | ValueNone -> Network.system ()
             match! Opengraph.unfurl net url with
-            | Error e -> return Error(Internal e)
+            | Error e -> return Error(Internal(exn (UnfurlError.message e)))
             | Ok(Unfurl.Json json) -> return Ok(Some json)
             | Ok Unfurl.NoContent -> return Ok None
         }

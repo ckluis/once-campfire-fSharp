@@ -35,7 +35,7 @@ module TestNotifications =
                 match c.App.WebPush with
                 | Some pool -> Ok pool
                 | None -> Error(Internal(exn "Web Push is off (no valid VAPID keys)"))
-            match! WebPush.deliverTestNotification (Network.system ()) pool subscription badge location with
-            | Error e -> return! Error(Internal e)
+            match! WebPush.deliverTestNotification (Network.system ()) pool.Vapid subscription badge location with
+            | Error e -> return! Error(Internal(DeliveryError.toExn e))
             | Ok() -> return! c.RedirectTo location
         }

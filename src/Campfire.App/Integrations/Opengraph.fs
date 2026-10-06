@@ -1,18 +1,21 @@
-// Port of the entry point of rust/crates/campfire/src/integrations/opengraph.rs
+// Port of rust/crates/campfire/src/integrations/opengraph.rs
 //
-// Link unfurling: `UnfurlLinksController#create` (reference/app/controllers/unfurl_links_controller.rb)
-// over `Opengraph::Metadata`, `Location`, `Fetch` and `Document` (reference/app/models/opengraph).
+// Link unfurling: `UnfurlLinksController#create` (reference/app/controllers/unfurl_links_controller.rb) over
+// `Opengraph::Metadata`, `Location`, `Fetch` and `Document` (reference/app/models/opengraph).
 //
-// What is here is the part that needs no HTTP client: `Opengraph::Location#valid?` (http(s), and a host
-// the private network guard resolves to a public address). A URL that fails it unfurls nothing in the
-// reference too (no document, so no title: `head :no_content`), without any request. Fetching the
-// document, following redirects, parsing the page and checking the image are the integrations unit's;
-// until then a valid URL raises, which the controller answers as a 500.
+// Every address is resolved through the private network guard and pinned, every redirect is re-checked, and documents
+// are capped at 5MB and 10 responses.
+//
+// Unlike Rails, which gives each connect and read 60 seconds, an unfurl has 10 seconds in all and each connect or
+// read 5, at most 16 run at once, and parsing runs off the async workers: the endpoint is open to any signed-in user
+// and fetches pages they choose.
 namespace Campfire.App.Integrations
 
 open System
+open System.Threading
 open System.Threading.Tasks
-open Campfire.RichText
+open Microsoft.Extensions.Logging
+open Microsoft.Extensions.Logging.Abstractions
 
 /// What `UnfurlLinksController#create` responds with.
 type Unfurl =
@@ -22,36 +25,41 @@ type Unfurl =
     | NoContent
 
 module Opengraph =
-    /// `Location#valid?`: both validations run, so the host is resolved even for a non-http URL.
-    let private isValidLocation (net: Network) (url: string) : Task<bool> =
+    /// The most one unfurl may take, redirects and the image check included.
+    let UnfurlDeadline: TimeSpan = TimeSpan.FromSeconds 10.0
+
+    /// Unfurls in flight at once; more wait their turn, within their deadline.
+    [<Literal>]
+    let private MaxConcurrentUnfurls = 16
+
+    let private slots = new SemaphoreSlim(MaxConcurrentUnfurls)
+
+    let unfurlWithin (net: Network) (url: string) (deadline: TimeSpan) (logger: ILogger) : Task<Result<Unfurl, UnfurlError>> =
         task {
-            let parsed =
-                match RubyUri.parse url with
-                | Ok uri -> Some uri
-                | Error _ -> None
-            let! public' =
-                match parsed |> Option.bind (fun uri -> uri.Host) with
-                | Some host ->
-                    task {
-                        match! Guard.resolve net.Resolver host with
-                        | Ok _ -> return true
-                        | Error _ -> return false
-                    }
-                | None -> Task.FromResult false
-            return public' && (parsed |> Option.exists RubyUri.isHttp)
+            use cancellation = new CancellationTokenSource(deadline)
+            let token = cancellation.Token
+            let unfurling =
+                task {
+                    do! slots.WaitAsync token
+                    try
+                        match! OpengraphMetadata.fromUrl net url token logger with
+                        | Error error -> return Error error
+                        | Ok metadata ->
+                            match! OpengraphMetadata.validate net metadata token logger with
+                            | Error error -> return Error error
+                            | Ok(metadata, true) -> return Ok(Unfurl.Json(OpengraphMetadata.toJson metadata))
+                            | Ok(_, false) -> return Ok NoContent
+                    finally
+                        slots.Release() |> ignore
+                }
+            try
+                return! unfurling
+            with _ when cancellation.IsCancellationRequested ->
+                logger.LogWarning("Gave up unfurling {Url} after {Deadline}", url, deadline)
+                return Ok NoContent
         }
 
-    /// The action after `params.require(:url)` (a missing or blank `url` is the controller's 400).
-    let unfurl (net: Network) (url: string) : Task<Result<Unfurl, exn>> =
-        task {
-            match! isValidLocation net url with
-            | false -> return Ok NoContent
-            | true ->
-                return
-                    Error(
-                        NotImplementedException(
-                            "Opengraph fetching (Opengraph::Fetch, Metadata, Document) is ported with the integrations unit"
-                        )
-                        :> exn
-                    )
-        }
+    /// The action after `params.require(:url)` (a missing or blank `url` is the controller's 400). One that runs out
+    /// of time unfurls nothing.
+    let unfurl (net: Network) (url: string) : Task<Result<Unfurl, UnfurlError>> =
+        unfurlWithin net url UnfurlDeadline NullLogger.Instance

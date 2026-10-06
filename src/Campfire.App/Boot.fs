@@ -22,6 +22,7 @@ open Microsoft.AspNetCore.Http.Features
 open Microsoft.Data.Sqlite
 open Microsoft.Extensions.Logging
 open Campfire.App.Channels
+open Campfire.App.Integrations
 open Campfire.Assets
 open Campfire.Db
 open Campfire.RailsCompat
@@ -172,11 +173,13 @@ module Boot =
             let kitConfig = { KitConfig.Production config.DisableSsl with ErrorPages = errorPages () }
 
             let fragmentCache = FragmentCache(int (min config.FragmentCacheBytes (int64 Int32.MaxValue)))
+            // config/initializers/web_push.rb: off without a valid VAPID key pair.
+            let webPush = IntegrationJobs.webPushPool config db (loggers.CreateLogger "campfire.web_push")
             let app =
-                AppState(config, secrets, clock, db, storage, cable, Broadcasts cable, jobs, None, fragmentCache)
+                AppState(config, secrets, clock, db, storage, cable, Broadcasts cable, jobs, webPush, fragmentCache)
 
-            // Room::PushMessageJob and Bot::WebhookJob register with the integrations (Phase 5's later units).
             let registry = CoreJobs.withCoreJobs ()
+            IntegrationJobs.registerJobs registry
             let runner = JobRunner.start jobs cable app registry config.JobConcurrency
 
             let kit = Kit(kitConfig, secrets, clock, app, logger)

@@ -8,28 +8,7 @@ open System.Net
 open System.Threading.Tasks
 open Xunit
 open Campfire.App.Integrations
-
-/// Fixed answers per host. A host with several answer lists gives the next one on each lookup and then
-/// keeps giving the last (like the Ruby tests' `Resolv.stubs(...).returns(a, b)`).
-type FakeResolver(hosts: (string * string list) list) =
-    let answers = Dictionary<string, IPAddress list list>()
-    let lookups = List<string>()
-
-    do
-        for (host, addresses) in hosts do
-            answers[host] <- [ addresses |> List.map IPAddress.Parse ]
-
-    member _.Lookups: string list = lock lookups (fun () -> List.ofSeq lookups)
-
-    interface IResolver with
-        member _.Lookup(host: string) : Task<Result<IPAddress list, exn>> =
-            lock lookups (fun () -> lookups.Add host)
-            match answers.TryGetValue host with
-            | true, first :: rest ->
-                let answer = first
-                if not rest.IsEmpty then answers[host] <- rest
-                Task.FromResult(Ok answer)
-            | _ -> Task.FromResult(Error(exn $"no address for {host}"))
+open Campfire.App.Tests.IntegrationsSupport
 
 let private blocked (ip: string) = Guard.blockedAddress (IPAddress.Parse ip)
 

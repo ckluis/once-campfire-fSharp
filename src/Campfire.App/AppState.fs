@@ -7,6 +7,7 @@ namespace Campfire.App
 open System
 open System.Threading.Tasks
 open Campfire.App.Channels
+open Campfire.App.Integrations
 open Campfire.Db
 open Campfire.Kit
 open Campfire.RailsCompat
@@ -26,10 +27,6 @@ module AppErrors =
         | Other e -> Campfire.Kit.Error.Internal e
         | WriterGone -> Campfire.Kit.Error.Internal(Exception(DbError.display error))
 
-/// `config.x.web_push_pool`: what the app shuts down with. The pool itself is the integrations'.
-type IWebPushPool =
-    abstract Shutdown: unit -> Task
-
 /// Everything that outlives a request.
 [<Sealed; NoComparison; NoEquality>]
 type AppState
@@ -42,7 +39,7 @@ type AppState
         cable: Cable,
         broadcasts: Broadcasts,
         jobs: Jobs,
-        webPush: IWebPushPool option,
+        webPush: WebPushPool option,
         fragmentCache: FragmentCache
     ) =
     member _.Config = config
