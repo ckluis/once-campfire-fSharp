@@ -1,3 +1,5 @@
+// Port of rust/crates/campfire/src/test_support.rs and rust/crates/campfire/src/controllers/presenters/test_support.rs
+//
 /// What the app's tests share: a real Kestrel server on a loopback port running a pipeline, a raw
 /// HTTP/1.1 client for it (`Uri` rewrites a bare `%` in a query to `%25`, and these tests need the bytes
 /// they wrote on the wire), and a booted app over a copy of a reference-built parity seed
@@ -7,16 +9,21 @@ module Campfire.App.Tests.Support
 
 open System
 open System.Collections.Generic
+open System.Buffers
 open System.IO
+open System.IO.Pipelines
 open System.Net
 open System.Net.Sockets
 open System.Text
 open System.Text.Json
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
 open Microsoft.AspNetCore.Hosting.Server
 open Microsoft.AspNetCore.Hosting.Server.Features
+open Microsoft.AspNetCore.Http
+open Microsoft.AspNetCore.Http.Features
 open Microsoft.AspNetCore.Server.Kestrel.Core
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Logging
@@ -120,8 +127,60 @@ let private parseReply (bytes: byte[]) : Reply =
       Body = if chunked then decodeChunked body else body }
 
 /// A Kestrel server on a free loopback port running a pipeline.
-type Host(host: WebApplication, port: int) =
+/// Counts what goes through a response's `BodyWriter`: each `Advance` that commits bytes is one write the
+/// handler made. A page recorded as parts is written part by part (`PageParts.WritePlain`), so the count
+/// stands in for the Rust `Reply::frames` (the data frames of a hyper body), which a raw HTTP/1.1 client
+/// over a socket can't see.
+type BodyWrites() =
+    let mutable writes = 0L
+
+    /// The writes counted so far, over every response of the host.
+    member _.Total: int64 = Interlocked.Read &writes
+
+    member internal _.Add() : unit = Interlocked.Increment &writes |> ignore
+
+/// Hands the handler one large buffer, so that a `Write` of a span is one `Advance` however big it is
+/// (Kestrel's own writer hands out 4 KB blocks and would split every write into many), and passes what
+/// it was given on to the host's writer.
+type private CountingWriter(inner: PipeWriter, counter: BodyWrites) =
+    inherit PipeWriter()
+
+    let mutable buffer: byte[] = Array.zeroCreate (512 * 1024)
+
+    override _.Advance(bytes: int) =
+        if bytes > 0 then
+            counter.Add()
+            inner.Write(ReadOnlySpan<byte>(buffer, 0, bytes))
+
+    override _.GetMemory(sizeHint: int) =
+        if sizeHint > buffer.Length then buffer <- Array.zeroCreate sizeHint
+        Memory<byte> buffer
+
+    override this.GetSpan(sizeHint: int) = (this.GetMemory sizeHint).Span
+    override _.FlushAsync(cancellationToken: CancellationToken) = inner.FlushAsync cancellationToken
+    override _.CancelPendingFlush() = inner.CancelPendingFlush()
+    override _.Complete(exn: exn | null) = inner.Complete exn
+    override _.CompleteAsync(exn: exn | null) = inner.CompleteAsync exn
+    override _.CanGetUnflushedBytes = inner.CanGetUnflushedBytes
+    override _.UnflushedBytes = inner.UnflushedBytes
+
+/// The response body feature of the host with its writer counted; everything else is the host's.
+type private CountingBody(inner: IHttpResponseBodyFeature, counter: BodyWrites) =
+    let writer = CountingWriter(inner.Writer, counter)
+
+    interface IHttpResponseBodyFeature with
+        member _.Stream = inner.Stream
+        member _.Writer = writer :> PipeWriter
+        member _.DisableBuffering() = inner.DisableBuffering()
+        member _.StartAsync(cancellationToken) = inner.StartAsync cancellationToken
+        member _.SendFileAsync(path, offset, count, cancellationToken) = inner.SendFileAsync(path, offset, count, cancellationToken)
+        member _.CompleteAsync() = inner.CompleteAsync()
+
+type Host(host: WebApplication, port: int, writes: BodyWrites) =
     member _.Port = port
+
+    /// How many writes the app's handlers have made to response bodies.
+    member _.BodyWrites: BodyWrites = writes
 
     /// Send `req` on a connection of its own and read the reply to the end.
     member _.Send(req: Req) : Task<Reply> =
@@ -165,10 +224,19 @@ let startPipeline (pipeline: IApplicationBuilder -> unit) : Task<Host> =
         |> ignore
         builder.Logging.ClearProviders() |> ignore
         let app = builder.Build()
+        let writes = BodyWrites()
+        app.Use(
+            Func<HttpContext, RequestDelegate, Task>(fun http next ->
+                match http.Features.Get<IHttpResponseBodyFeature>() with
+                | null -> ()
+                | inner -> http.Features.Set<IHttpResponseBodyFeature>(CountingBody(inner, writes))
+                next.Invoke http)
+        )
+        |> ignore
         pipeline app
         do! app.StartAsync()
         let addresses = (nonNull (app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>())).Addresses
-        return new Host(app, Uri(Seq.head addresses).Port)
+        return new Host(app, Uri(Seq.head addresses).Port, writes)
     }
 
 /// Log lines written to a factory, formatted as the console would (without its timestamp).
@@ -203,6 +271,9 @@ type Test(booted: Booted, dir: string, host: Host, logs: CapturingLoggers) =
     member _.App = booted.App
     member _.Dir = dir
     member _.Host = host
+
+    /// The writes the app's handlers have made to response bodies (see `BodyWrites`).
+    member _.BodyWrites: int64 = host.BodyWrites.Total
 
     /// The request to the booted app's whole pipeline.
     member _.Send(req: Req) : Task<Reply> = host.Send req
@@ -320,7 +391,8 @@ let sessionVectors () : SessionVector list * string list * string =
 // (`vectors/campfire_sessions.json`), with a tiny cookie jar and CSRF token handling.
 //
 // `TestApp::boot` is `bootSeeded "default"`. The Rust `Reply::frames` (how many data frames a body came in)
-// can't be seen through a raw HTTP/1.1 client over a socket, so there is no counterpart.
+// can't be seen through a raw HTTP/1.1 client over a socket; `Host.BodyWrites` counts the writes the handler made
+// to the response body instead (see `BodyWrites`).
 
 let DAVID = 127326141L
 let JASON = 149087659L

@@ -1,3 +1,6 @@
+// No Rust test of rust/crates/campfire is ported here: this stands in for the contract of
+// rust/crates/kit/src/deflater/splice.rs (the kit's page parts) and `Campfire.Views.Tests.KitIntegrationTests`.
+//
 // The contract Phase 4 left in `Campfire.Views.Tests.KitIntegrationTests`, run through the app's own glue
 // (`FragmentGlue`): a page rendered with `Render.page` is a text and the fragments it recorded, the kit's
 // `PageParts.Splice` takes those, and the kit's SHA and pieces for each fragment hang off the view fragment
