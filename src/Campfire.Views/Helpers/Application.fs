@@ -143,6 +143,40 @@ let private mapped (simpleTable: int[]) (specialTable: (int * int[])[]) (rune: R
 let private upperCase (rune: Rune) : string = mapped UnicodeTables.upperSimple UnicodeTables.upperSpecial rune
 let private lowerCase (rune: Rune) : string = mapped UnicodeTables.lowerSimple UnicodeTables.lowerSpecial rune
 
+let private inRanges (table: struct (int * int)[]) (code: int) : bool =
+    let mutable low = 0
+    let mutable high = table.Length - 1
+    let mutable found = false
+    while not found && low <= high do
+        let middle = (low + high) / 2
+        let struct (first, last) = table[middle]
+        if code < first then high <- middle - 1
+        elif code > last then low <- middle + 1
+        else found <- true
+    found
+
+/// Whether, going from `index` in `runes` in direction `step`, the first character that isn't case-ignorable is cased
+/// (`case_ignorable_then_cased`).
+let private caseIgnorableThenCased (runes: Rune[]) (index: int) (step: int) : bool =
+    let mutable at = index
+    while at >= 0 && at < runes.Length && inRanges UnicodeTables.caseIgnorable runes[at].Value do
+        at <- at + step
+    at >= 0 && at < runes.Length && inRanges UnicodeTables.casedNotIgnorable runes[at].Value
+
+/// `str::to_lowercase`: each character's `char::to_lowercase`, except that a capital sigma becomes ς at the end of a
+/// word (a cased letter before it, skipping case-ignorable characters, and none after) and σ elsewhere.
+let toLowercase (text: string) : string =
+    let runes = text.EnumerateRunes() |> Seq.toArray
+    let out = StringBuilder(text.Length)
+    for index in 0 .. runes.Length - 1 do
+        let rune = runes[index]
+        if rune.Value = 0x3A3 then
+            let final = caseIgnorableThenCased runes (index - 1) -1 && not (caseIgnorableThenCased runes (index + 1) 1)
+            out.Append(if final then 'ς' else 'σ') |> ignore
+        else
+            out.Append(lowerCase rune) |> ignore
+    out.ToString()
+
 /// `String#capitalize`: first character upcased, the rest downcased.
 let capitalize (text: string) : string =
     let out = StringBuilder(text.Length)

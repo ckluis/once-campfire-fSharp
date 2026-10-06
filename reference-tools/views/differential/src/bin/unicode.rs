@@ -1,7 +1,8 @@
 //! Prints the Unicode tables the F# helpers need to behave as Rust's `char` methods do, as F# source
 //! for `src/Campfire.Views/Helpers/UnicodeTables.fs`: `char::is_alphanumeric` (what `User#initials`'s
 //! word-boundary check calls a word character) and the characters whose upper or lower case is more
-//! than one character (`str::to_uppercase`, `capitalize`). Run by `bin/views-differential --unicode`.
+//! than one character (`str::to_uppercase`, `capitalize`), and the two sets `str::to_lowercase` consults to decide
+//! whether a capital sigma ends a word. Run by `bin/views-differential --unicode`.
 
 fn ranges(test: impl Fn(char) -> bool) -> Vec<(u32, u32)> {
     let mut out: Vec<(u32, u32)> = Vec::new();
@@ -26,6 +27,32 @@ fn main() {
     println!("let alphanumeric: struct (int * int)[] =");
     println!("    [|");
     for chunk in ranges(char::is_alphanumeric).chunks(6) {
+        let line: Vec<String> = chunk.iter().map(|(a, b)| format!("struct (0x{a:X}, 0x{b:X})")).collect();
+        println!("        {}", line.join("; "));
+    }
+    println!("    |]");
+    println!();
+    // `str::to_lowercase` turns a Σ into ς at the end of a word and σ elsewhere, by `core::unicode`'s `Case_Ignorable`
+    // and `Cased`, which the standard library doesn't expose. Its answers do: with a cased letter before and
+    // nothing after, Σ is final unless what follows is skipped as case-ignorable and then cased. Probing Σ's
+    // lowercase with one character on either side gives the two sets the F# port needs: `neither` (not ignorable and
+    // not cased: "aΣ" + c + "a" ends a word) and `cased` (cased and not ignorable: c + "Σ" does).
+    let final_sigma = |text: String| text.to_lowercase().contains('ς');
+    let neither = |c: char| final_sigma(format!("aΣ{c}a"));
+    let cased = |c: char| final_sigma(format!("{c}Σ"));
+    println!("/// `Case_Ignorable` as inclusive code point ranges (what `str::to_lowercase` skips around a capital sigma).");
+    println!("let caseIgnorable: struct (int * int)[] =");
+    println!("    [|");
+    for chunk in ranges(|c| !neither(c) && !cased(c)).chunks(6) {
+        let line: Vec<String> = chunk.iter().map(|(a, b)| format!("struct (0x{a:X}, 0x{b:X})")).collect();
+        println!("        {}", line.join("; "));
+    }
+    println!("    |]");
+    println!();
+    println!("/// `Cased` less `Case_Ignorable`, as inclusive code point ranges (the letters that make a capital sigma final or not).");
+    println!("let casedNotIgnorable: struct (int * int)[] =");
+    println!("    [|");
+    for chunk in ranges(cased).chunks(6) {
         let line: Vec<String> = chunk.iter().map(|(a, b)| format!("struct (0x{a:X}, 0x{b:X})")).collect();
         println!("        {}", line.join("; "));
     }

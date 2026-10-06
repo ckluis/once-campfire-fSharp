@@ -99,3 +99,31 @@ let ``every translation key has its popup and an unknown key is a bug`` () =
     let html = Render.text (fun w -> Translations.translationsFor w "password")
     Assert.StartsWith("<dl class=\"language-list\"><dt>🇺🇸</dt><dd class=\"margin-none\">Enter your password</dd>", html)
     Assert.Throws<exn>(fun () -> Render.plain (fun w -> Translations.translationsFor w "nope") |> ignore) |> ignore
+
+// `str::to_lowercase`, which the room forms' `data-value` calls on a user's name: the answers are Rust's (the
+// differential compares every code point and the sigma rules live; these are the cases that explain them).
+
+[<Fact>]
+let ``to_lowercase maps a capital sigma by where the word ends`` () =
+    Assert.Equal("ας", Application.toLowercase "ΑΣ")
+    Assert.Equal("ασα", Application.toLowercase "ΑΣΑ")
+    Assert.Equal("σα", Application.toLowercase "ΣΑ")
+    Assert.Equal("σ", Application.toLowercase "Σ")
+    Assert.Equal("οδυσσευς", Application.toLowercase "ΟΔΥΣΣΕΥΣ")
+    // a case-ignorable character (a combining mark, a soft hyphen, an apostrophe) between the letter and the sigma is skipped
+    Assert.Equal("άς", Application.toLowercase "ΆΣ")
+    Assert.Equal("α­ς", Application.toLowercase "Α­Σ")
+    Assert.Equal("α'ς", Application.toLowercase "Α'Σ")
+    // ... on either side: a cased letter after the ignorable characters that follow the sigma makes it medial
+    Assert.Equal("ασ'α", Application.toLowercase "ΑΣ'Α")
+    Assert.Equal("ας'", Application.toLowercase "ΑΣ'")
+    // a space or digit is not ignorable, so nothing cased is before the sigma
+    Assert.Equal("α σ", Application.toLowercase "Α Σ")
+    Assert.Equal("1σα", Application.toLowercase "1ΣΑ")
+
+[<Fact>]
+let ``to_lowercase lowercases the way char::to_lowercase does`` () =
+    Assert.Equal("i̇stanbul", Application.toLowercase "İstanbul")
+    Assert.Equal("straße", Application.toLowercase "STRAßE")
+    Assert.Equal("日本語 テキスト", Application.toLowercase "日本語 テキスト")
+    Assert.Equal("😀 emoji 👍🏽", Application.toLowercase "😀 EMOJI 👍🏽")
