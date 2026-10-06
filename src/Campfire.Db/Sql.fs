@@ -211,6 +211,29 @@ module internal Library =
 
     let ensureConfigured () : unit = configure.Force()
 
+/// How the statement cache finds a statement by its SQL: the default string hash reads every character of a 300-character
+/// `SELECT` each time (about 0.3 us of a 1.5 us query), where these texts differ in their length and in a few places, so a hash
+/// of the length and sixteen characters spread over the text tells them apart, and `Equals` settles the rare collision (a
+/// reference check first, which is all a literal ever needs).
+type internal SqlTextComparer() =
+    static member val Instance = SqlTextComparer()
+
+    interface IEqualityComparer<string> with
+        member _.Equals(a: string, b: string) : bool = Object.ReferenceEquals(a, b) || String.Equals(a, b)
+
+        member _.GetHashCode(sql: string) : int =
+            let n = sql.Length
+            let mutable hash = uint32 n
+            if n <= 16 then
+                for i in 0 .. n - 1 do
+                    hash <- hash * 31u + uint32 sql[i]
+            else
+                let step = n / 16
+                for k in 0..15 do
+                    hash <- hash * 31u + uint32 sql[k * step]
+                hash <- hash * 31u + uint32 sql[n - 1]
+            int hash
+
 /// A prepared statement (its pointer, and the object that owns it) and the number of `?` it has.
 [<Sealed; AllowNullLiteral>]
 type internal Prepared(owner: sqlite3_stmt, parameters: int) =
@@ -236,7 +259,7 @@ type Conn(raw: SqliteConnection, capacity: int) =
     let db = owner.DangerousGetHandle()
     // Each statement with the tick at which it was last given back, for evicting the least recently used
     // (rusqlite's cache is an LRU too). A scan at eviction beats a list node per use.
-    let cache = Dictionary<string, struct (Prepared * int64)>()
+    let cache = Dictionary<string, struct (Prepared * int64)>(SqlTextComparer.Instance)
     let mutable tick = 0L
     let mutable closed = false
     // Text is encoded here to be bound (SQLite copies it), so a bind allocates nothing. Pinned, because its address is bound.
@@ -420,7 +443,10 @@ type Conn(raw: SqliteConnection, capacity: int) =
             while step prepared.Handle do
                 rows.Add(map row)
             succeeded <- true
-            List.ofSeq rows
+            let mutable list = []
+            for i = rows.Count - 1 downto 0 do
+                list <- rows[i] :: list
+            list
         finally
             finish sql prepared succeeded
 

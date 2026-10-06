@@ -35,6 +35,9 @@ let private time (seconds: float) (f: unit -> unit) : float * float =
 
 [<EntryPoint>]
 let main argv =
+    if not (isNull (Environment.GetEnvironmentVariable "DB_MICRO_NOMUTEX")) then
+        SQLitePCL.Batteries_V2.Init()
+        printfn "config MULTITHREAD: %d, MEMSTATUS off: %d" (SQLitePCL.raw.sqlite3_config 2) (SQLitePCL.raw.sqlite3_config (9, 0))
     let root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."))
     let seed = if argv.Length > 0 then argv[0] else Path.Combine(root, "parity/.seed/default/db/production.sqlite3")
     let seconds = if argv.Length > 1 then float argv[1] else 3.0
@@ -51,7 +54,16 @@ let main argv =
     let middle = (Message.lastPage conn room)[10]
 
     let scenarios: (string * (unit -> unit)) list =
-        [ "1 statement: Account.first", (fun () -> Account.first conn |> ignore)
+        [ "last 40 messages: stepping only (map ignores the row)",
+          (fun () -> conn.QueryAll(Selects.Message + " WHERE \"messages\".\"room_id\" = ? ORDER BY \"messages\".\"created_at\" DESC LIMIT 40", [| I room |], fun _ -> ()) |> ignore)
+          "last 40 messages: 4 integers per row",
+          (fun () -> conn.QueryAll(Selects.Message + " WHERE \"messages\".\"room_id\" = ? ORDER BY \"messages\".\"created_at\" DESC LIMIT 40", [| I room |], fun r -> r.Int64 0 + r.Int64 1 + r.Int64 2 + (defaultArg (r.OptInt64 3) 0L)) |> ignore)
+          "last 40 messages: the 2 timestamps per row",
+          (fun () -> conn.QueryAll(Selects.Message + " WHERE \"messages\".\"room_id\" = ? ORDER BY \"messages\".\"created_at\" DESC LIMIT 40", [| I room |], fun r -> r.Timestamp 4, r.Timestamp 5) |> ignore)
+          "SELECT 1 (floor: bind, step, reset, cache)", (fun () -> conn.QueryRow("SELECT 1", [||], fun r -> r.Int64 0) |> ignore)
+          "SELECT 1 with a 400-character SQL text (the cache lookup's hashing)",
+          (let pad = String(' ', 380) in let sql = "SELECT 1" + pad + " /* x */" in fun () -> conn.QueryRow(sql, [||], fun r -> r.Int64 0) |> ignore)
+          "1 statement: Account.first", (fun () -> Account.first conn |> ignore)
           "session + user (2 lookups)", (fun () -> Session.findByToken conn token |> ignore; User.findById conn user.Id |> ignore)
           "room page db (room, last 40 messages, account, last room)",
           (fun () ->
