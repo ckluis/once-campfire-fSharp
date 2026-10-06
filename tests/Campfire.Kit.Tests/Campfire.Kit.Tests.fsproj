@@ -17,6 +17,7 @@
     <Compile Include="ResponseTests.fs" />
     <Compile Include="BodyTests.fs" />
     <Compile Include="DeflaterTests.fs" />
+    <Compile Include="ConnPoolTests.fs" />
     <Compile Include="SpliceTests.fs" />
     <Compile Include="ServerTests.fs" />
     <Compile Include="LoggingTests.fs" />
