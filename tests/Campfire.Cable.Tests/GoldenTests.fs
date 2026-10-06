@@ -4,7 +4,9 @@
 //
 // `rust/crates/cable/tests/golden/reference.json` holds the fixture values the reference run used
 // (user, rooms, signed stream names) and the frames it answered each step with. It was recorded from
-// the Docker reference (Thruster, Puma, Redis adapter). To re-record, with the reference up (see
+// the Docker reference (Thruster, Puma, Redis adapter). The replay reads that file, or
+// `tests/Campfire.Cable.Tests/golden/reference.json` when there is one: a re-recording is written there,
+// never over rust/ (which is not edited). To re-record, with the reference up (see
 // parity/bin/reference) and its fixtures printed by
 // `parity/bin/reference runner --port 3141 rust/crates/cable/tests/golden/fixtures.rb`:
 //
@@ -29,7 +31,12 @@ open Campfire.RailsCompat
 open Campfire.Cable
 open Campfire.Cable.Tests.Support
 
-let private goldenPath () = Campfire.Tests.Repo.path "rust/crates/cable/tests/golden/reference.json"
+/// Where a re-recording is written: a file this repository owns.
+let private recordedPath () = Campfire.Tests.Repo.path "tests/Campfire.Cable.Tests/golden/reference.json"
+
+/// What the replay reads: this repository's re-recording if there is one, else the pinned Rust port's.
+let private goldenPath () =
+    if File.Exists(recordedPath ()) then recordedPath () else Campfire.Tests.Repo.path "rust/crates/cable/tests/golden/reference.json"
 
 type private Exchange = { Step: string; Frames: string list }
 
@@ -377,5 +384,6 @@ let ``record_reference`` () =
                    sessions = sessions |> Map.map (fun _ exchanges -> exchanges |> List.map (fun e -> {| step = e.Step; frames = e.Frames |})) |},
                 JsonSerializerOptions(WriteIndented = true)
             )
-        File.WriteAllText(goldenPath (), json + "\n")
+        Directory.CreateDirectory(Path.GetDirectoryName(recordedPath ()) |> nonNull) |> ignore
+        File.WriteAllText(recordedPath (), json + "\n")
     }
