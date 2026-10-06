@@ -198,7 +198,7 @@ let ``a write that never completes is cut and fails after the timeout`` () =
                 member _.Write(_, _, _) = ()
                 member _.WriteAsync(_: ReadOnlyMemory<byte>, ct: CancellationToken) = ValueTask(Task.Delay(Timeout.Infinite, ct)) }
         let writer = Writer(stuck, false, TimeSpan.FromMilliseconds 100.0, (fun () -> aborted.Value <- true))
-        let! ex = Assert.ThrowsAsync<TimeoutException>(fun () -> writer.Send [| Frame.OfString "x" |])
+        let! ex = Assert.ThrowsAsync<TimeoutException>(fun () -> (writer.Send [| Frame.OfString "x" |]).AsTask())
         ignore ex
         Assert.True aborted.Value
     }

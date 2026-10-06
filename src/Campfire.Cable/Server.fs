@@ -87,12 +87,12 @@ type Server<'U>
 
     /// `ActionCable.server.broadcast(broadcasting, message)`.
     member this.Broadcast(broadcasting: string, message: Value) : int =
-        logger.LogDebug("[ActionCable] Broadcasting {Broadcasting}", broadcasting)
+        if logger.IsEnabled LogLevel.Debug then logger.LogDebug("[ActionCable] Broadcasting {Broadcasting}", broadcasting)
         let json = Text.Encoding.UTF8.GetBytes(Json.encode message)
         hub.Broadcast(broadcasting, ReadOnlySpan json)
 
     member this.BroadcastText(broadcasting: string, text: string) : int =
-        logger.LogDebug("[ActionCable] Broadcasting {Broadcasting}", broadcasting)
+        if logger.IsEnabled LogLevel.Debug then logger.LogDebug("[ActionCable] Broadcasting {Broadcasting}", broadcasting)
         use json = new JsonStringWriter(text.Length + 16)
         json.Begin()
         json.Append text
@@ -100,7 +100,7 @@ type Server<'U>
         hub.Broadcast(broadcasting, json.Span)
 
     member this.BroadcastEncoded(broadcasting: string, json: ReadOnlySpan<byte>) : int =
-        logger.LogDebug("[ActionCable] Broadcasting {Broadcasting}", broadcasting)
+        if logger.IsEnabled LogLevel.Debug then logger.LogDebug("[ActionCable] Broadcasting {Broadcasting}", broadcasting)
         hub.Broadcast(broadcasting, json)
 
     /// `SomeChannel.broadcast_to(broadcastables, message)`.

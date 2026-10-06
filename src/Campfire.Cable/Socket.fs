@@ -472,61 +472,74 @@ let private writeHeader (dest: Span<byte>) (opcode: byte) (compressed: bool) (le
 type Writer(io: Stream, deflate: bool, timeout: TimeSpan, abort: unit -> unit) =
     new(io: Stream, deflate: bool) = Writer(io, deflate, WriteTimeout, ignore)
 
-    member private _.Write(bytes: ReadOnlyMemory<byte>) : Task =
+    /// A write that didn't complete in place: waits for it, and cuts it after the timeout.
+    member private _.Finish(write: ValueTask, pooled: byte[] | null) : Task =
         task {
-            let write = io.WriteAsync bytes
-            if write.IsCompleted then
-                do! write
+            use gave = new CancellationTokenSource()
+            let pending = write.AsTask()
+            let! first = Task.WhenAny(pending, Task.Delay(timeout, gave.Token))
+            if obj.ReferenceEquals(first, pending) then
+                gave.Cancel()
+                do! pending
+                match pooled with
+                | null -> ()
+                | pooled -> ArrayPool<byte>.Shared.Return pooled
             else
-                use gave = new CancellationTokenSource()
-                let pending = write.AsTask()
-                let! first = Task.WhenAny(pending, Task.Delay(timeout, gave.Token))
-                if obj.ReferenceEquals(first, pending) then
-                    gave.Cancel()
-                    do! pending
-                else
-                    abort ()
-                    raise (TimeoutException "a socket write timed out")
+                // The stalled write still holds its buffer, so that one isn't returned to the pool.
+                abort ()
+                raise (TimeoutException "a socket write timed out")
         }
 
-    /// Writes `frames` as text messages, in order, in one write.
-    member this.Send(frames: IReadOnlyList<Frame>) : Task =
-        task {
-            let payloads = ArrayPool<byte[]>.Shared.Rent frames.Count
-            let mutable total = 0
+    /// Writes `bytes` (all of `pooled`'s used part, when it is given, which goes back to the pool
+    /// afterwards). A write the socket takes at once completes without a task.
+    member private this.Write(bytes: ReadOnlyMemory<byte>, pooled: byte[] | null) : ValueTask =
+        let write =
             try
-                for i in 0 .. frames.Count - 1 do
-                    let frame = frames[i]
-                    let payload =
-                        if deflate then
-                            match frame.Deflated with
-                            | null -> frame.Bytes
-                            | deflated -> deflated
-                        else
-                            frame.Bytes
-                    payloads[i] <- payload
-                    total <- total + 10 + payload.Length
-                let buffer = ArrayPool<byte>.Shared.Rent total
-                try
-                    let mutable at = 0
-                    for i in 0 .. frames.Count - 1 do
-                        let payload = payloads[i]
-                        let compressed = deflate && not (obj.ReferenceEquals(payload, frames[i].Bytes))
-                        at <- at + writeHeader (Span(buffer, at, 10)) OpText compressed payload.Length
-                        Buffer.BlockCopy(payload, 0, buffer, at, payload.Length)
-                        at <- at + payload.Length
-                    do! this.Write(ReadOnlyMemory(buffer, 0, at))
-                finally
-                    ArrayPool<byte>.Shared.Return buffer
-            finally
-                ArrayPool<byte[]>.Shared.Return(payloads, true)
-        }
+                io.WriteAsync bytes
+            with _ ->
+                (match pooled with
+                 | null -> ()
+                 | pooled -> ArrayPool<byte>.Shared.Return pooled)
+                reraise ()
+        if write.IsCompleted then
+            write.GetAwaiter().GetResult()
+            match pooled with
+            | null -> ()
+            | pooled -> ArrayPool<byte>.Shared.Return pooled
+            ValueTask()
+        else
+            ValueTask(this.Finish(write, pooled))
+
+    /// The payload a frame goes out with: its deflated form on a compressed socket when that is worth it.
+    member private _.Payload(frame: Frame) : byte[] =
+        if deflate then
+            match frame.Deflated with
+            | null -> frame.Bytes
+            | deflated -> deflated
+        else
+            frame.Bytes
+
+    /// Writes `frames` as text messages, in order, in one write.
+    member this.Send(frames: IReadOnlyList<Frame>) : ValueTask =
+        let mutable total = 0
+        for i in 0 .. frames.Count - 1 do
+            total <- total + 10 + this.Payload(frames[i]).Length
+        let buffer = ArrayPool<byte>.Shared.Rent total
+        let mutable at = 0
+        for i in 0 .. frames.Count - 1 do
+            let frame = frames[i]
+            let payload = this.Payload frame
+            let compressed = deflate && not (obj.ReferenceEquals(payload, frame.Bytes))
+            at <- at + writeHeader (Span(buffer, at, 10)) OpText compressed payload.Length
+            Buffer.BlockCopy(payload, 0, buffer, at, payload.Length)
+            at <- at + payload.Length
+        this.Write(ReadOnlyMemory(buffer, 0, at), buffer)
 
     member private this.Control(opcode: byte, payload: byte[]) : Task =
         let buffer = Array.zeroCreate<byte> (10 + payload.Length)
         let used = writeHeader (Span buffer) opcode false payload.Length
         Buffer.BlockCopy(payload, 0, buffer, used, payload.Length)
-        this.Write(ReadOnlyMemory(buffer, 0, used + payload.Length))
+        this.Write(ReadOnlyMemory(buffer, 0, used + payload.Length), null).AsTask()
 
     member this.Pong(payload: byte[]) : Task = this.Control(OpPong, payload)
 

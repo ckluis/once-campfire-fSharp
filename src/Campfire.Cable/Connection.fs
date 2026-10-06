@@ -110,6 +110,22 @@ let private processInternalMessage (frame: Frame) : Closing voption =
               Reconnect = defaultArg (message.TryGet "reconnect") (Value.Bool true) }
     | _ -> ValueNone
 
+/// Reads the internal channel's ready messages, up to the first that disconnects this connection.
+let private drainInternal (internal': Subscriber) : Closing voption =
+    let mutable closing = ValueNone
+    let mutable frame = Unchecked.defaultof<Frame>
+    let mutable reading = true
+    while reading do
+        match internal'.TryRecv(&frame) with
+        | RecvStatus.Got ->
+            match processInternalMessage frame with
+            | ValueSome remote ->
+                closing <- ValueSome remote
+                reading <- false
+            | ValueNone -> ()
+        | _ -> reading <- false
+    closing
+
 let private tryGet (key: string) (data: Params) : Value option = data |> List.tryFind (fun (k, _) -> k = key) |> Option.map snd
 
 [<Sealed>]
@@ -310,7 +326,7 @@ let private rejectUnauthorized (server: Server<'U>) (sink: Writer) (incoming: Ch
     task {
         server.Logger.LogError "An unauthorized connection attempt was rejected"
         let frame = Frame.OfString(Protocol.disconnect (Some Unauthorized) (Value.Bool false))
-        let! _ = attempt (sink.Send [| frame |])
+        let! _ = attempt ((sink.Send [| frame |]).AsTask())
         do! closeSocket sink incoming server.Config.CloseTimeout
     }
 
@@ -364,8 +380,11 @@ let run (server: Server<'U>) (stream: Stream) (deflate: bool) (request: ConnectR
             let mutable closing: Closing voption = ValueNone
             try
                 try
-                    let! welcomed = attempt (sink.Send [| Frame.OfString(Protocol.welcome ()) |])
-                    let mutable running = welcomed
+                    let mutable running = true
+                    try
+                        do! sink.Send [| Frame.OfString(Protocol.welcome ()) |]
+                    with _ ->
+                        running <- false
                     while running do
                         let! _ = wake.WaitAsync()
 
@@ -400,17 +419,9 @@ let run (server: Server<'U>) (stream: Stream) (deflate: bool) (request: ConnectR
                             // The internal channel carries raw payloads.
                             match internal' with
                             | ValueSome internal' ->
-                                let mutable frame = Unchecked.defaultof<Frame>
-                                let mutable reading = true
-                                while reading do
-                                    match internal'.TryRecv(&frame) with
-                                    | RecvStatus.Got ->
-                                        match processInternalMessage frame with
-                                        | ValueSome remote ->
-                                            closing <- ValueSome remote
-                                            reading <- false
-                                        | ValueNone -> ()
-                                    | _ -> reading <- false
+                                match drainInternal internal' with
+                                | ValueSome remote -> closing <- ValueSome remote
+                                | ValueNone -> ()
                             | ValueNone -> ()
 
                             // One ping per beat, shared by every connection.
@@ -429,13 +440,15 @@ let run (server: Server<'U>) (stream: Stream) (deflate: bool) (request: ConnectR
                                 connection.Started.Clear()
                                 wake.Set()
                             if pending.Count > 0 then
-                                let! written = attempt (sink.Send pending)
+                                try
+                                    do! sink.Send pending
+                                with _ ->
+                                    running <- false
                                 pending.Clear()
-                                if not written then running <- false
                             if running && closing.IsSome then
                                 let { Reason = reason; Reconnect = reconnect } = closing.Value
                                 closing <- ValueNone
-                                let! _ = attempt (sink.Send [| Frame.OfString(Protocol.disconnect reason reconnect) |])
+                                let! _ = attempt ((sink.Send [| Frame.OfString(Protocol.disconnect reason reconnect) |]).AsTask())
                                 do! closeSocket sink incoming config.CloseTimeout
                                 running <- false
                 finally
