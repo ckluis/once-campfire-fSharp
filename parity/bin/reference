@@ -157,9 +157,11 @@ docker_up() {
   docker rm -f "$(docker_name "$port")" >/dev/null 2>&1 || true
   rm -rf "$dir"; copy_seed_into "$seed" "$dir"
   local args=(); mapfile -t args < <(docker_env_args)
+  # Request logging stays on; only its retention is capped (one unbounded json log of a Rust bench run was 9 GB).
   docker run -d --name "$(docker_name "$port")" \
     --label parity.seed="$seed" --label parity.port="$port" --label parity.owner="$OWNER" \
     --cpus "${PARITY_CPUS:-2}" \
+    --log-driver json-file --log-opt "max-size=${LOG_MAX_SIZE:-10m}" --log-opt "max-file=${LOG_MAX_FILE:-2}" \
     --user "$(id -u):$(id -g)" \
     -p "127.0.0.1:$port:80" \
     "${args[@]}" \

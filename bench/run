@@ -49,7 +49,19 @@
 # colima the repo is a virtiofs mount, where a message post costs ~8-10 ms (each commit's writes cross to the host);
 # WORK=/var/tmp/campfire-bench-work puts it on the VM's own disk, as the upstream measurement had its btrfs.
 #
-# Knobs (env): SERVER_CPUS=8-11 LOADGEN_CPUS=12-15 HTTP_SECS=8 HTTP_CONCS="1 16 64"
+# Warm-up: before each measured run of a route at concurrency c the load generator runs that route at c (the measured
+# concurrency) until the app has settled: at least WARMUP_SECS (default 20; 0 skips it), then until the last three 2 s
+# windows are flat and not below their peak, at most WARMUP_MAX_SECS (default 60); bench/lib/warmup.py has the rule. It is the
+# same rule for every app. The CLR's tiered JIT needs 8 to 40 s of load, run to run, to reach its steady throughput
+# (bench/warmup draws the curves: the first 2 s window is 0.33-0.75x the plateau); a 2 s warm-up at c=4 left the first
+# measured seconds 13-20% slow. Rust and Rails are flat from the first window and stop at the minimum. Each run's JSON
+# records its warm-up (seconds, window rates, settled or not) and bench/report flags runs that did not settle.
+#
+# CPU: every measured run goes through bench/lib/cpurun.py, so each HTTP result also carries the container's CPU per
+# request (cgroup cpu.stat, user and system, unprofiled) and the load generator's; bench/report prints it.
+#
+# Knobs (env): SERVER_CPUS=8-11 LOADGEN_CPUS=12-15 HTTP_SECS=8 HTTP_CONCS="1 16 64" WARMUP_SECS=20 WARMUP_MAX_SECS=60 IDLE_SECS=10
+#   HTTP_ROUTES="room_show messages_page sidebar search avatar static_css up post_message" (a subset, in this order)
 #   CABLE_CLIENTS="100 500 1000" CABLE_TPUT_SECS=15 CABLE_POSTERS=4 UPLOAD_REPS=5 PORT=4390
 # The apps run with --network host: PORT and PORT+1 (and 6379, for the reference's Redis) must be
 # free on the host. NETWORK=bridge measures as the preliminary run did instead: the container on
@@ -70,6 +82,10 @@ SERVER_CPUS=${SERVER_CPUS:-8-11}
 LOADGEN_CPUS=${LOADGEN_CPUS:-12-15}
 HTTP_SECS=${HTTP_SECS:-8}
 HTTP_CONCS=${HTTP_CONCS:-1 16 64}
+HTTP_ROUTES=${HTTP_ROUTES:-room_show messages_page sidebar search avatar static_css up post_message}
+WARMUP_SECS=${WARMUP_SECS:-20}
+WARMUP_MAX_SECS=${WARMUP_MAX_SECS:-60}
+IDLE_SECS=${IDLE_SECS:-10}
 CABLE_CLIENTS=${CABLE_CLIENTS:-100 500 1000}
 CABLE_TPUT_SECS=${CABLE_TPUT_SECS:-15}
 CABLE_POSTERS=${CABLE_POSTERS:-4}
@@ -109,6 +125,15 @@ CONTAINER=bench-campfire-$PORT
 log() { echo "[$(date +%T)] $*" >&2; }
 label() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$LABELS" "$1"; }
 lg() { taskset -c "$LOADGEN_CPUS" "$LOADGEN" "$@" "${USER_AGENT_ARGS[@]}"; }
+# The same, with the container's CPU over the run (cgroup $1, then the load generator's arguments): the result gains `cost`.
+lgc() { local cg=$1; shift; taskset -c "$LOADGEN_CPUS" python3 "$BENCH/lib/cpurun.py" "$cg" -- "$LOADGEN" "$@" "${USER_AGENT_ARGS[@]}"; }
+# Warm-up: route arguments (after the cookie) at concurrency $2, until settled (bench/lib/warmup.py); prints the load
+# generator's counters summed over the windows with a `warmup` object (seconds, window rates, settled or not).
+warm_up() {
+  local cookie=$1 conc=$2; shift 2
+  python3 "$BENCH/lib/warmup.py" --min "$WARMUP_SECS" --max "$WARMUP_MAX_SECS" --window 2 -- \
+    taskset -c "$LOADGEN_CPUS" "$LOADGEN" http --base "$BASE" --cookie "$cookie" "$@" --conc "$conc" "${USER_AGENT_ARGS[@]}"
+}
 
 teardown() {
   [ -n "${SAMPLER:-}" ] && kill "$SAMPLER" 2>/dev/null || true
@@ -207,6 +232,12 @@ start_sampler() {
 
 # Extra `docker run` arguments for the app's container (bench/breakdown mounts a trace directory with them).
 DOCKER_EXTRA_ARGS=()
+# Every app logs a line per request (the work both ports do, kept on); only the retention is capped. The default
+# json-file driver wrote 9 GB for one Rust run and filled the Mac's disk. `docker logs` still works (the last
+# LOG_MAX_FILE files of LOG_MAX_SIZE each).
+LOG_MAX_SIZE=${LOG_MAX_SIZE:-10m}
+LOG_MAX_FILE=${LOG_MAX_FILE:-2}
+DOCKER_LOG_ARGS=(--log-driver json-file --log-opt "max-size=$LOG_MAX_SIZE" --log-opt "max-file=$LOG_MAX_FILE")
 
 start_app() {
   local app=$1
@@ -229,7 +260,7 @@ start_app() {
   local scratch=()
   if [ "$app" = reference ] && [ "$(id -u)" != 1000 ]; then scratch=(--tmpfs /rails/tmp:mode=1777 --tmpfs /rails/log:mode=1777); fi
   docker run -d --name "$CONTAINER" --cpuset-cpus "$SERVER_CPUS" --user "$(id -u):$(id -g)" \
-    "${net[@]}" "${scratch[@]}" "${args[@]}" "${DOCKER_EXTRA_ARGS[@]}" \
+    "${DOCKER_LOG_ARGS[@]}" "${net[@]}" "${scratch[@]}" "${args[@]}" "${DOCKER_EXTRA_ARGS[@]}" \
     -v "$dir/db:/rails/storage/db" -v "$dir/storage:/rails/storage/files" \
     "$(image_for "$app")" >/dev/null
   for _ in $(seq 1 3000); do
@@ -266,7 +297,7 @@ run_rep() {
   log "$app rep $rep: starting (load: $(cut -d' ' -f1-3 /proc/loadavg))"
   local cold_ms; cold_ms=$(start_app "$app")
   local cg; cg=$(cgroup_dir)
-  sleep 10
+  sleep "$IDLE_SECS"
   local idle_cur idle_anon
   idle_cur=$(( $(cat "$cg/memory.current") / 1048576 )); idle_anon=$(( $(mem_anon "$cg") / 1048576 ))
   start_sampler "$cg" "$OUT/.$app-$rep.mem"
@@ -289,6 +320,9 @@ run_rep() {
     "up|/up"
     "post_message|POST"
   )
+  local wanted=() known
+  for known in "${routes[@]}"; do [[ " $HTTP_ROUTES " = *" ${known%%|*} "* ]] && wanted+=("$known"); done
+  routes=("${wanted[@]}")
   local http_json="[]" rows_json="[]" probe_json="[]" r name path args enc=()
   [[ "$app" = *-identity ]] && enc=(--gzip 0)
   suite http || routes=()
@@ -301,23 +335,24 @@ run_rep() {
     if [ "$path" = POST ]; then args=(--post-room "$WRITE_ROOM" --csrf "$csrf"); else args=(--path "$path"); fi
     args+=("${enc[@]}")
     # Rows written, for the route that writes: the messages of the write room in the app's own SQLite file
-    # before and after each run (the warm-up too), against the answers below 400 the load generator saw.
-    local before=0 after=0 wres
-    [ "$path" = POST ] && before=$(room_rows "$app")
-    wres=$(lg http --base "$BASE" --cookie "$cookie" "${args[@]}" --conc 4 --duration 2) # warm up
-    if [ "$path" = POST ]; then
-      after=$(room_rows "$app")
-      rows_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); w=json.loads(sys.argv[2]); a.append({"phase":"warm-up","conc":4,"ok":w["ok"],"statuses":w["statuses"],"rows":int(sys.argv[3])-int(sys.argv[4])}); print(json.dumps(a))' "$rows_json" "$wres" "$after" "$before")
-    fi
+    # before and after each warm-up and each run, against the answers below 400 the load generator saw.
+    local before=0 after=0 wres res
     for c in $HTTP_CONCS; do
       [ "$path" = POST ] && before=$(room_rows "$app")
-      local res; res=$(lg http --base "$BASE" --cookie "$cookie" "${args[@]}" --conc "$c" --duration "$HTTP_SECS")
+      wres=$(warm_up "$cookie" "$c" "${args[@]}")
+      if [ "$path" = POST ]; then
+        after=$(room_rows "$app")
+        rows_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); w=json.loads(sys.argv[2]); a.append({"phase":"warm-up","conc":int(sys.argv[5]),"ok":w["ok"],"statuses":w["statuses"],"rows":int(sys.argv[3])-int(sys.argv[4])}); print(json.dumps(a))' "$rows_json" "$wres" "$after" "$before" "$c")
+        before=$after
+      fi
+      res=$(lgc "$cg" http --base "$BASE" --cookie "$cookie" "${args[@]}" --conc "$c" --duration "$HTTP_SECS")
       if [ "$path" = POST ]; then
         after=$(room_rows "$app")
         rows_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); w=json.loads(sys.argv[2]); a.append({"phase":"run","conc":w["conc"],"ok":w["ok"],"statuses":w["statuses"],"rows":int(sys.argv[3])-int(sys.argv[4])}); print(json.dumps(a))' "$rows_json" "$res" "$after" "$before")
       fi
-      http_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); r=json.loads(sys.argv[2]); r["route"]=sys.argv[3]; a.append(r); print(json.dumps(a))' "$http_json" "$res" "$name")
-      log "$app rep $rep: $name c=$c $(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); print(r["rps"], "rps p50", r["latency"].get("p50_ms"), "p99", r["latency"].get("p99_ms"), r["statuses"], "err", r["errors"])' "$res")"
+      res=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); r["route"]=sys.argv[2]; r["warmup"]=json.loads(sys.argv[3])["warmup"]; print(json.dumps(r))' "$res" "$name" "$wres")
+      http_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); a.append(json.loads(sys.argv[2])); print(json.dumps(a))' "$http_json" "$res")
+      log "$app rep $rep: $name c=$c $(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); w=r["warmup"]; print(r["rps"], "rps p50", r["latency"].get("p50_ms"), "p99", r["latency"].get("p99_ms"), r["statuses"], "err", r["errors"], "cpu", r["cost"].get("server_cpu_us_per_req"), "us/req; warm-up", w["secs"], "s", w["reason"], "tail", w["tail_rps"])' "$res")"
     done
   done
 
@@ -369,11 +404,12 @@ write_env() {
   echo "rust extra env: $RUST_EXTRA_ENV"
   echo "fsharp extra env: $FSHARP_EXTRA_ENV"
   echo "user agent: ${USER_AGENT_ARGS[1]:-(none)}"
-  for app in ${APPS//,/ }; do echo "$app image: $(image_for "$app") $(docker image inspect -f '{{.Id}} {{.Created}}' "$(image_for "$app")")"; done
+  for app in ${APPS//,/ }; do echo "$app image: $(image_for "$app") $(docker image inspect -f '{{.Id}} {{.Created}}' "$(image_for "$app")") built from commit: $(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(image_for "$app")")"; done
   echo "repo HEAD: $(git -C "$ROOT" rev-parse --short HEAD) (dirty: $(git -C "$ROOT" status --porcelain -- src rust Cargo.toml Cargo.lock | wc -l) files under src/ and rust/)"
   echo "work dir (seed copies): $WORK ($(findmnt -T "$WORK" -n -o FSTYPE))"
   echo "loadgen: $LOADGEN ($(stat -c %y "$LOADGEN" | cut -d. -f1)), built with $RUST_BUILD_IMAGE"
-  echo "schedule: apps ${APPS}, reps ${REPS}; suites: ${SUITES}; http secs ${HTTP_SECS}, concs ${HTTP_CONCS}"
+  echo "schedule: apps ${APPS}, reps ${REPS}; suites: ${SUITES}; http secs ${HTTP_SECS}, concs ${HTTP_CONCS}, routes ${HTTP_ROUTES}, warm-up ${WARMUP_SECS}s at each route and concentration, idle ${IDLE_SECS}s"
+  echo "log retention: ${LOG_MAX_FILE} x ${LOG_MAX_SIZE} (json-file)"
 }
 # `BENCH_RUN_LIB=1 source bench/run` stops here with the functions above defined (bench/breakdown uses them).
 if [ -n "${BENCH_RUN_LIB:-}" ]; then return 0 2>/dev/null || exit 0; fi
