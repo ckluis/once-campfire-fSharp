@@ -5,10 +5,28 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
-    <Compile Include="Tests.fs" />
+    <Compile Include="../../reference-tools/views/differential/fsharp/Inputs.fs" Link="Inputs.fs" />
+    <Compile Include="../../reference-tools/views/differential/fsharp/Operations.fs" Link="Operations.fs" />
+    <Compile Include="Support/Dom.fs" />
+    <Compile Include="Support/Facts.fs" />
+    <Compile Include="OutTests.fs" />
+    <Compile Include="TagTests.fs" />
+    <Compile Include="FormsTests.fs" />
+    <Compile Include="HelpersTests.fs" />
+    <Compile Include="FragmentCacheTests.fs" />
+    <Compile Include="RecordedTests.fs" />
+    <Compile Include="MessagesTests.fs" />
+    <Compile Include="UsersTests.fs" />
+    <Compile Include="ParityATests.fs" />
+    <Compile Include="KitIntegrationTests.fs" />
+    <Compile Include="DifferentialTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.Views/Campfire.Views.fsproj" />
+    <!-- Only the tests read the DOM: the HTML tokenizer ports the one the Rust crate's dev-dependency is. -->
+    <ProjectReference Include="../../src/Campfire.RichText/Campfire.RichText.fsproj" />
+    <!-- Only the tests join the two: Campfire.App will, as the Rust app does. See KitIntegrationTests. -->
+    <ProjectReference Include="../../src/Campfire.Kit/Campfire.Kit.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
