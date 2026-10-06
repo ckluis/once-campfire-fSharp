@@ -15,6 +15,10 @@
     <Compile Include="Channels/ReadRooms.fs" />
     <Compile Include="Channels/UnreadRooms.fs" />
     <Compile Include="Channels/Broadcasts.fs" />
+    <Compile Include="Channels/RoomChannel.fs" />
+    <Compile Include="Channels/Presence.fs" />
+    <Compile Include="Channels/RoomMessages.fs" />
+    <Compile Include="Channels/TypingNotifications.fs" />
     <Compile Include="Channels/Registry.fs" />
     <Compile Include="Jobs.fs" />
     <Compile Include="AppState.fs" />

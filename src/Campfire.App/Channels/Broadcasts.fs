@@ -61,7 +61,7 @@ module BroadcastNames =
 
     /// `ActionCable.server.broadcast "user_#{id}_reads", { room_id: }`
     /// (reference/app/channels/presence_channel.rb).
-    let readRoom (server: Cable) (userId: int64) (roomId: int64) : int =
+    let readRoom (server: IServer) (userId: int64) (roomId: int64) : int =
         server.Broadcast(ReadRooms.streamNameFor userId, Value.Object [ "room_id", Value.Int roomId ])
 
 [<Sealed>]

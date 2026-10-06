@@ -24,9 +24,15 @@
     <Compile Include="RoomsTests.fs" />
     <Compile Include="MessagesTests.fs" />
     <Compile Include="SearchesTests.fs" />
+    <Compile Include="ChannelsSupport.fs" />
+    <Compile Include="ChannelsTests.fs" />
+    <Compile Include="BroadcastsTests.fs" />
+    <Compile Include="RevocationTests.fs" />
+    <Compile Include="ChannelsGoldenTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="testdata/rqrcode.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="testdata/channels_golden.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.App/Campfire.App.fsproj" />
