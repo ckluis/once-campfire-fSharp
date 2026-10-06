@@ -113,32 +113,35 @@ def describe(rows):
 
 
 def versions(rows):
-    """The dots. Consecutive kept runs logged with the same commit measured the same build (or a control of
-    the old build first, then the change), so they merge into one dot: later measurements override earlier
-    ones on the same workload, different workloads combine, and the label is the run that measured the most."""
-    out, i = [], 0
-    while i < len(rows):
-        r = rows[i]
-        group = [r]
-        while (not r.get("description") and r.get("commit") and r.get("kept", True) and i + 1 < len(rows)
-               and rows[i + 1].get("commit") == r.get("commit") and rows[i + 1].get("kept", True)):
-            i += 1
-            group.append(rows[i])
-        i += 1
+    """The dots: one per commit. Every logged run with the same commit measured the same build (a unit may log
+    a control first, A/B variants, or several workloads in separate runs, and may log them in one batch,
+    interleaved), so all of a commit's runs form one group wherever they sit in the log. The dot merges the
+    group's kept runs (later measurements override earlier ones per workload; different workloads combine) and
+    takes its label from the kept run that measured the most. Reverted runs in a group with kept runs are
+    absorbed; a group with only reverted runs is a single hollow dot (a code experiment that was undone).
+    Earlier versions and the Phase 7 start (rows with their own description) are always their own dots."""
+    groups, order = {}, []
+    for i, r in enumerate(rows):
+        key = ("own", i) if r.get("description") or not r.get("commit") else ("commit", r["commit"])
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(r)
+    out = []
+    for key in order:
+        group = groups[key]
         if not any(g.get("version") for g in group):
             continue
-        if len(group) == 1:
-            out.append(r)
-            continue
+        kept = [g for g in group if g.get("kept", True)]
+        use = kept or group
         merged_w = {}
-        for g in group:
+        for g in use:
             for w, cs in g.get("workloads", {}).items():
                 merged_w.setdefault(w, {}).update({c: dict(v) for c, v in cs.items()})
-        label = max(enumerate(group), key=lambda iv: (len(iv[1].get("workloads", {})), iv[0]))[1]
-        m = dict(label, workloads=merged_w, version=True,
-                 commits=next((g.get("commits") for g in group if g.get("commits")), []),
-                 time=group[-1].get("time", label.get("time")))
-        out.append(m)
+        label = max(enumerate(use), key=lambda iv: (len(iv[1].get("workloads", {})), iv[0]))[1]
+        out.append(dict(label, workloads=merged_w, version=True, kept=bool(kept),
+                        commits=next((g.get("commits") for g in group if g.get("commits")), label.get("commits") or []),
+                        time=use[-1].get("time", label.get("time"))))
     return out
 
 
