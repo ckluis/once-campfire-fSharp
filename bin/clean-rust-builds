@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Drop Rust compile intermediates under target/, keeping the executables the scripts run.
+# Drop Rust compile intermediates and stale differential outputs under target/, keeping the
+# executables the scripts run.
 # Every Rust helper (differentials, bench servers, loadgen) builds into the shared target/rust;
 # deps/, build/, incremental/ and .fingerprint/ there grow by hundreds of MB per tool and are only
 # needed to make the next build incremental. Run at each phase gate; scripts rebuild on demand.
@@ -16,5 +17,8 @@ else
     rm -rf "$prof"/deps "$prof"/build "$prof"/incremental "$prof"/.fingerprint "$prof"/examples
   done
 fi
+# Differential outputs left by a failed or interrupted run (both sides' full answers, often gigabytes).
+find target -path 'target/*-differential/*' -maxdepth 2 -type f \
+  \( -name '*.input' -o -name '*.rust' -o -name '*.fsharp' -o -name '*.jsonl' -o -name '*.output' -o -name input \) -delete 2>/dev/null || true
 after=$(du -sk target 2>/dev/null | cut -f1 || echo 0)
 echo "target/: $((before / 1024)) MB -> $((after / 1024)) MB"

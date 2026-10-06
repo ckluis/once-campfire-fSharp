@@ -29,6 +29,10 @@ compare() { # kind mode
     dotnet "$out/fsharp/Differential.dll" pipeline "$corpus" < "$out/$1.input" > "$out/$1.fsharp"
   fi
   python3 "$tool/compare.py" "$2" "$out/$1.rust" "$out/$1.fsharp" "$out/$1.input" | sed "s/^/$1: /"
+  local status=${PIPESTATUS[0]}
+  # Both sides' outputs run to gigabytes (depth alone is 1.2 GB each); keep them only to inspect a failure.
+  if [ "$status" -eq 0 ]; then rm -f "$out/$1.input" "$out/$1.rust" "$out/$1.fsharp"; else echo "$1: outputs kept in $out" >&2; fi
+  return "$status"
 }
 
 status=0

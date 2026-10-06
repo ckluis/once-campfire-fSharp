@@ -138,7 +138,8 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   built; `CAMPFIRE_REQUIRE_SEED=1` turns the skip into a failure.
 - Rust helper builds (differentials, bench servers, loadgen, one-off comparisons) all use the shared
   `CARGO_TARGET_DIR=target/rust`, never a per-tool or scratch target directory: each separate target
-  costs ~500 MB of duplicated dependencies. Run `bin/clean-rust-builds` when you're done measuring.
+  costs ~500 MB of duplicated dependencies. Differential scripts delete both sides' outputs when the
+  comparison passes and keep them only on failure. Run `bin/clean-rust-builds` when you're done measuring.
 - Commit each logical unit on the current branch with a message saying what and why. Don't push.
 - Toolchain: .NET SDK 10.0.401 in `~/.dotnet` (`export PATH="$HOME/.dotnet:$PATH"`).
 - Docker runs in colima. Run `parity/`, `bench/` and `reference-tools/` scripts inside the VM,

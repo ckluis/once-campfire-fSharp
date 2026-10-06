@@ -50,8 +50,15 @@ python3 "$tool/generate.py" "$count" "$seed" > "$out/input"
 if [ $mode = golden ]; then
   python3 "$tool/golden.py" "$out/input" "$out/rust.output" 150 > tests/Campfire.Kit.Tests/differential.jsonl
   echo "tests/Campfire.Kit.Tests/differential.jsonl: $(wc -l < tests/Campfire.Kit.Tests/differential.jsonl) cases"
+  rm -f "$out/input" "$out/rust.output"
   exit 0
 fi
 
 dotnet "$out/fsharp/Differential.dll" < "$out/input" > "$out/fsharp.output"
-python3 "$tool/compare.py" "$out/input" "$out/rust.output" "$out/fsharp.output"
+# Keep both sides' outputs only to inspect a failure.
+if python3 "$tool/compare.py" "$out/input" "$out/rust.output" "$out/fsharp.output"; then
+  rm -f "$out/input" "$out/rust.output" "$out/fsharp.output"
+else
+  echo "outputs kept in $out" >&2
+  exit 1
+fi

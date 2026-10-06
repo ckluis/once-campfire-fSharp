@@ -55,7 +55,14 @@ target/rust/release/views-differential < "$out/cases.jsonl" > "$out/rust.jsonl"
 if [ $mode = golden ]; then
   python3 "$tool/golden.py" "$out/cases.jsonl" "$out/rust.jsonl" > tests/Campfire.Views.Tests/differential.jsonl
   echo "tests/Campfire.Views.Tests/differential.jsonl: $(wc -l < tests/Campfire.Views.Tests/differential.jsonl) lines, $(du -k tests/Campfire.Views.Tests/differential.jsonl | cut -f1) KB"
+  rm -f "$out/cases.jsonl" "$out/rust.jsonl"
   exit 0
 fi
 dotnet "$out/fsharp/Differential.dll" < "$out/cases.jsonl" > "$out/fsharp.jsonl"
-python3 "$tool/compare.py" "$out/cases.jsonl" "$out/rust.jsonl" "$out/fsharp.jsonl"
+# The rendered pages run to a gigabyte or more; keep them only to inspect a failure.
+if python3 "$tool/compare.py" "$out/cases.jsonl" "$out/rust.jsonl" "$out/fsharp.jsonl"; then
+  rm -f "$out/cases.jsonl" "$out/rust.jsonl" "$out/fsharp.jsonl"
+else
+  echo "outputs kept in $out" >&2
+  exit 1
+fi
