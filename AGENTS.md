@@ -95,16 +95,23 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   every view helper, the fragment cache's keys and eviction, and the view-model helpers, on cases made from the parity seeds
   (`parity/.seed/*`) and the views crate's golden facts plus generated variations (hostile text, every combination of platform
   flags, attribute kinds, sizes). `bin/views-differential golden` refreshes the sample of Rust's answers that
-  `Campfire.Views.Tests` replays, and `bin/views-differential bench` records render times (`bench/results/views-foundations.md`).
-  Adding a template or helper to it is a branch in `reference-tools/views/differential/src/ops.rs` (what Rust renders), one in
-  `fsharp/Operations.fs`, and cases for it in `generate.py`; run `golden` after, so `bin/verify` replays them. It needs mise for the
-  Rust toolchain.
+  `Campfire.Views.Tests` replays, and `bin/views-differential bench` records render times (`bench/results/views-foundations.md`, and for a busy room page
+  and a messages page `bench/results/views-hot-paths.md`).
+  Adding a template or helper to it is a branch in `reference-tools/views/differential/src/ops.rs` (what Rust renders; the
+  hot-path templates are in `src/pages.rs`), one in `fsharp/Operations.fs` (`fsharp/Pages.fs`), and cases for it in `generate.py`;
+  run `golden` after, so `bin/verify` replays them. A page case also renders cold and warm and plain and recorded and checks
+  they are the same bytes, and takes `frame` (the Turbo-Frame layout) and `mode` ("mixed" gives half the messages to the
+  template as cached fragments). It needs mise for the Rust toolchain.
 - Porting a template: read the comment at the top of `src/Campfire.Views/Core/Out.fs` (the writer, `Utf8.lit` for static text, `w.Text`
   for escaped values, blocks as functions of the writer, no strings for markup), and run `reference-tools/views/transcribe.py
   <path under rust/crates/views/templates>`: it cuts the askama template into its literal text (exact bytes, with askama's whitespace
   control and its dropped trailing newline applied) and a skeleton of the render steps, translating the common helper calls and
   conditions. The result is a starting point; compare the module with Rust's through the differential, and with the Rails golden
-  renders through `ParityATests`-style DOM tests (`Campfire.Views.Tests/Support`).
+  renders through `ParityATests`-style DOM tests (`Campfire.Views.Tests/Support`; `GoldenB` for the messages, rooms and search
+  goldens). A page module exposes its regions (`head`, `nav`, `content`, `footer`, `sidebar`) as functions of the writer, which
+  `render` hands to the layout and `Layouts.frame` (`head` and `content`) to the Turbo-Frame layout. A module and a namespace of
+  one name can't both be in an assembly, so `rooms/show.html` is `Templates/Rooms/Show.fs` as module `ShowPage`, beside the
+  `rooms/show/` partials' namespace.
 - `Campfire.Kit`'s front server tests (`FrontTests`, `FrontAcmeIntegrationTests`) open real sockets on loopback and take
   about 20 seconds; ACME is tested against a stub CA in the tests, and against a real Pebble CA when `PEBBLE_MINICA`
   names its `pebble.minica.pem` (the recipe is at the top of `FrontAcmeIntegrationTests.fs`; in colima, give Pebble

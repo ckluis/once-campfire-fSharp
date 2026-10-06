@@ -91,6 +91,9 @@ Findings of a phase's verifier that a later phase has to meet. Each is a gate of
   the kit's page parts hang their SHA and pieces on (`Campfire.App` links the two when it first splices a view
   fragment, Phase 5), and the cache counts `Fragment.HeldBytes` each time an entry is used; the test is
   `FragmentCacheTests` ("fragments a page keeps showing stay while the rest age out, pieces and SHA included").
+  *Unit 4.2:* a room page (and the messages page, search and a refresh) gives each message to the recorded page as a
+  fragment, `Fragment` and all, and `RoomsViewsTests` ("show recorded keeps every message as a fragment") holds a
+  recorded page to a plain render, cold and warm, in the application layout and the Turbo-Frame one.
 - **Phase 7: the gaps `bench/results/cable-fanout.md` and `bench/results/front.md` record are open.** F# is slower
   than Rust on plain-frame Cable bursts, lone broadcasts, idle CPU and memory per client, and on the front's
   signed-cookie page, 100 KB identity page and 20 KB asset cache hit. They are gates, not accepted costs.

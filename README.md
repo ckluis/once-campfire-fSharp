@@ -103,6 +103,10 @@ specific to this port are listed below, each citing the reference file it depart
     casing (`ß` is `SS`), the Turkish dotless i and characters Unicode added since. Rust's `capitalize` is what
     the references' `String#capitalize` is closest to; a name whose first letter has special casing prints as Rust
     prints it. Tested by `HelpersTests` ("capitalizes like rust") and the differential's every-code-point cases.
+  - `String#downcase` of a user's name (the room forms' `data-value`) is Rust's `str::to_lowercase`, final-sigma rule included
+    (`ΑΣ` is `ας`, `ΑΣΑ` is `ασα`), from `Case_Ignorable` and `Cased` ranges generated from Rust's standard library with the
+    other Unicode tables. .NET's `ToLowerInvariant` writes `σ` for every sigma and leaves out special casing. Tested by
+    `HelpersTests` ("to_lowercase ...") and the differential's sigma cases and every code point.
   - Timestamps in cache keys and `to_fs(:epoch)` are `DateTimeOffset`s, which hold 100 ns where jiff holds 1 ns.
     A key shows microseconds, so no key differs; a record dated before 1970 or outside the years 1 to 9999 is not
     representable (no record is).
