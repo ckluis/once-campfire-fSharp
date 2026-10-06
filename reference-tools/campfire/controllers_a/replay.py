@@ -9,6 +9,14 @@ port, both booted on the `default` parity seed with the parity SECRET_KEY_BASE:
 Each scenario runs the same requests on both servers (each with its own cookie jar) and compares
 status, Location, the shape of Set-Cookie (names and attributes, not values), the content and
 cache headers, and the body with CSRF tokens, transfer ids and request-specific values masked.
+
+The ports differ from Rails in ways their READMEs list ("Known differences"), and the replay masks
+those: pages carry no CSRF tags (forgery protection is by `Sec-Fetch-Site`, so there is no
+`_campfire_session` cookie from a page and a wrong token is accepted), `session_token` is re-sent
+hourly rather than on every request, the manifest's values are JSON strings, and the three JavaScript
+overrides (`Campfire.Assets/OVERRIDES.md`) change their asset digests. The F# app has one more until
+its Web Push pool is ported: no VAPID public key in the layout. `EXPECTED` lists the scenarios whose
+point is a token check; they differ by design and are reported apart.
 `--cross RAILS_DB RUST_DB` also carries sessions (cookies and CSRF-bound forms) from one server
 to the other, copying the session row between the two databases.
 """
@@ -44,6 +52,11 @@ class Reply:
         return self.body.decode("utf-8", "replace")
 
     def form_token(self, action):
+        # The ports' pages have no CSRF tags (see the top): a form is found by its action alone.
+        if "authenticity_token" not in self.text():
+            if f'action="{action}"' not in self.text() and f'action="http://{HOST}{action}"' not in self.text():
+                raise KeyError(f"no form for {action}")
+            return ""
         html = self.text()
         for candidate in (f'action="{action}"', f'action="http://{HOST}{action}"'):
             at = html.find(candidate)
@@ -58,11 +71,13 @@ class Reply:
             # An action ending in "?" matches any query string (`fresh_account_logo_path`).
             target = f'action="{action}' if action.endswith("?") else f'action="{action}"'
             if target in form and f'name="_method" value="{method}"' in form:
-                return re.search(r'name="authenticity_token" value="([^"]+)"', form).group(1)
+                found = re.search(r'name="authenticity_token" value="([^"]+)"', form)
+                return found.group(1) if found else ""
         raise KeyError(f"no {method} button for {action}")
 
     def meta_token(self):
-        return re.search(r'name="csrf-token" content="([^"]+)"', self.text()).group(1)
+        found = re.search(r'name="csrf-token" content="([^"]+)"', self.text())
+        return found.group(1) if found else ""
 
 
 class Browser:
@@ -119,6 +134,12 @@ class Browser:
 
 
 def normalize_body(text):
+    # What the ports leave out or do differently on purpose (see the top).
+    text = re.sub(r'<meta name="csrf-(param|token)"[^>]*>\n?', "", text)
+    text = re.sub(r'<input type="hidden" name="authenticity_token" value="[^"]*" ?/?>', "", text)
+    text = re.sub(r'<meta name="vapid-public-key"[^>]*>', '<meta name="vapid-public-key">', text)
+    text = re.sub(r'(/assets/[A-Za-z0-9_/.-]+?)-[0-9a-f]{8}\.(js|css|svg|png)', r'\1-«digest».\2', text)
+    text = text.replace("&amp;", "&")
     text = re.sub(r'(name="authenticity_token" value=")[^"]+"', r'\1«csrf»"', text)
     text = re.sub(r'(name="csrf-token" content=")[^"]+"', r'\1«csrf»"', text)
     text = re.sub(r"/session/transfers/[A-Za-z0-9_=%+/-]+--[0-9a-f]+", "/session/transfers/«transfer»", text)
@@ -142,10 +163,25 @@ def cookie_shape(cookie):
 
 FAILURES = []
 PASSES = []
+DIFFERED_BY_DESIGN = []
+
+# Scenarios that are token checks: Rails answers 422 (or follows the 422 with other results), the ports have no
+# tokens to check. (The first leaves the port's browser signed in, which changes the next scenario too.)
+EXPECTED = ("POST /session with a bad token", "POST /join/<wrong code>", "anon GET /join/")
+
+
+def drop_cookies_that_differ_by_design(reply):
+    reply.headers = [
+        (k, v)
+        for k, v in reply.headers
+        if not (k.lower() == "set-cookie" and (v.startswith("_campfire_session=") or (v.startswith("session_token=") and not v.startswith("session_token=;"))))
+    ]
 
 
 def compare(name, rails, rust, body=True, headers=COMPARED_HEADERS):
     problems = []
+    drop_cookies_that_differ_by_design(rails)
+    drop_cookies_that_differ_by_design(rust)
     if rails.status != rust.status:
         problems.append(f"status {rails.status} != {rust.status}")
     for header in headers:
@@ -171,7 +207,10 @@ def compare(name, rails, rust, body=True, headers=COMPARED_HEADERS):
             else:
                 diff = f"binary bodies differ ({len(a)} vs {len(b)} bytes)"
             problems.append("body:\n" + diff)
-    if problems:
+    if problems and name.startswith(EXPECTED):
+        DIFFERED_BY_DESIGN.append(name)
+        print(f"~ {name} (differs by design)")
+    elif problems:
         FAILURES.append(name)
         print(f"✗ {name}")
         for problem in problems:
@@ -194,7 +233,7 @@ def run(rails_base, rust_base, cross, seed="default"):
 
 
 def finish(_):
-    print(f"\n{len(PASSES)} matched, {len(FAILURES)} differed")
+    print(f"\n{len(PASSES)} matched, {len(DIFFERED_BY_DESIGN)} differed by design, {len(FAILURES)} differed")
     return 1 if FAILURES else 0
 
 
