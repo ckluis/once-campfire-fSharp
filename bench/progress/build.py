@@ -25,10 +25,10 @@ CONCS = [("c16", 16), ("c1", 1)]
 e = html.escape
 
 
-def medians(app):
-    """Median req/s and CPU µs/req per (workload, concurrency) over an app's reps in the starting point."""
+def medians(app, where=None):
+    """Median req/s and CPU µs/req per (workload, concurrency) over an app's reps (the Phase 7 start by default)."""
     reps = {}
-    for p in sorted(glob.glob(os.path.join(START, f"{app}-[0-9].json"))):
+    for p in sorted(glob.glob(os.path.join(where or START, f"{app}-[0-9].json"))):
         with open(p) as f:
             for run in json.load(f)["http"]:
                 if run.get("gzip"):
@@ -167,7 +167,7 @@ def prelude(hist):
             '<div class="pre-grid">%s</div></section>' % "".join(cards))
 
 
-def card(r, view, measured, rust, ov):
+def card(r, view, measured, rust, ov, rails):
     t = when(r)
     rows = []
     for w, label in WORKLOADS:
@@ -178,24 +178,29 @@ def card(r, view, measured, rust, ov):
             q = ratio(view, rust, w, c)
             cls = "win" if q and q >= 1 else ("close" if q and q >= 0.9 else "")
             carried = "carried" if (w, c) not in measured and v else ""
-            cells.append('<td class="fs %s">%s<small>%s µs</small></td><td class="rs">%s<small>%s µs</small></td><td class="q %s">%s</td>'
+            ra = rails.get(w, {}).get(c, {}).get("rps")
+            vs_rails = ("%.0f× Rails" % (v["rps"] / ra)) if ra and v.get("rps") else ""
+            cells.append('<td class="fs %s">%s<small>%s µs</small></td><td class="rs">%s<small>%s µs</small></td>'
+                         '<td class="ra">%s</td><td class="q %s">%s<small>%s</small></td>'
                          % (carried, num(v.get("rps")), num(v.get("cpu_us")), num(ru.get("rps")), num(ru.get("cpu_us")),
-                            cls, ("%.2f×" % q) if q else "–"))
+                            num(ra), cls, ("%.2f×" % q) if q else "–", vs_rails))
         rows.append("<tr><th>%s</th>%s</tr>" % (e(label), "".join(cells)))
     kept = r.get("kept", True)
     return ('<div class="card" role="tooltip"><p class="when">%s · %s · tier %s%s</p><p class="what">%s</p>'
             '<p class="meta">commit <code>%s</code> · %s build%s</p>'
-            '<table><tr class="grp"><th></th><th colspan="3">16 connections</th><th colspan="3">1 connection</th></tr>'
-            '<tr class="sub"><th></th><th>F#</th><th>Rust</th><th>F#/Rust</th><th>F#</th><th>Rust</th><th>F#/Rust</th></tr>%s</table>'
+            '<table><tr class="grp"><th></th><th colspan="4">16 connections</th><th colspan="4">1 connection</th></tr>'
+            '<tr class="sub"><th></th><th>F#</th><th>Rust</th><th>Rails</th><th>F#/Rust</th><th>F#</th><th>Rust</th><th>Rails</th><th>F#/Rust</th></tr>%s</table>'
             '%s<p class="foot">Requests per second, CPU µs per request beneath. %s Greyed F# values were carried from an earlier run.</p></div>'
             % (e(t.astimezone().strftime("%a %-d %b, %H:%M %Z") if t else "?"), e(str(r.get("unit", ""))), e(str(r.get("tier", ""))),
                "" if kept else " · reverted", e(str(r.get("change", ""))), e(str(r.get("commit", ""))),
                e(str(r.get("build", ""))[:30]), (" · overall %.2f× of Rust" % ov) if ov else "", "".join(rows), done(r),
-               "Rust was measured in the same run." if r.get("rust") else "Rust is the stored Phase 7 starting point."))
+               ("Rust was measured in the same run." if r.get("rust") else "Rust is the stored Phase 7 starting point.")
+               + " Rails is the 5b baseline (3 reps), the last time it ran; it doesn't change."))
 
 
 def page():
     stored = medians("rust")
+    rails = medians("reference", os.path.join(ROOT, "bench/results/baseline-20261006"))
     hist = history()
     rows = carry(describe(entries(hist)))
     pts = [(when(r), overall(v, r.get("rust") or stored), r, v, m) for r, v, m in rows]
@@ -220,6 +225,10 @@ def page():
             svg.append('<line x1="%d" x2="%d" y1="%.1f" y2="%.1f" class="grid"/><text x="10" y="%.1f" class="axis">%.1f×</text>'
                        % (L, W - R, Y(g), Y(g), Y(g) + 4, g))
         g = round(g + 0.1, 2)
+    rr = [rails[w]["c16"]["rps"] / stored[w]["c16"]["rps"] for w, _ in WORKLOADS if rails.get(w, {}).get("c16") and stored.get(w, {}).get("c16")]
+    if rr:
+        svg.append('<text x="%d" y="%d" class="rails">Rails is %.0f-%.0f%% of Rust&#39;s throughput, far below this axis ↓</text>'
+                   % (L + 6, H - B - 8, min(rr) * 100, max(rr) * 100))
     svg.append('<line x1="%d" x2="%d" y1="%.1f" y2="%.1f" class="rust"/><text x="%d" y="%.1f" class="rustlabel">Rust</text>'
                % (L, W - R, Y(1), Y(1), W - R + 10, Y(1) + 5))
     if kept:
@@ -241,7 +250,7 @@ def page():
         side = "flip" if left > 58 else ""
         dots.append('<span class="dot %s %s %s" tabindex="0" role="button" style="left:%.2f%%;top:%.2f%%" aria-label="%s, %.2f times Rust">%s</span>'
                     % ("kept" if isk else "dropped", "last" if last else "", side, left, top,
-                       e(r.get("change", "")), v, card(r, view, measured, r.get("rust") or stored, v)))
+                       e(r.get("change", "")), v, card(r, view, measured, r.get("rust") or stored, v, rails)))
 
     if kept:
         start = next((p for p in kept if p[2].get("unit") == "phase 7 start"), kept[0])
@@ -275,13 +284,13 @@ main{{max-width:1100px;margin:0 auto;padding:28px 16px 48px}} h1{{font-size:30px
 .climb{{fill:none;stroke:var(--acc);stroke-width:4;stroke-linejoin:round;stroke-linecap:round}} .area{{fill:var(--acc);opacity:.1}}
 .dot{{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;border:3px solid var(--acc);background:var(--card);padding:0;cursor:pointer}}
 .dot.last{{background:var(--acc);width:20px;height:20px;margin:-10px 0 0 -10px}} .dot.dropped{{border-color:var(--drop);width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-width:2px}}
-.dot{{display:block}} .dot .card{{display:none;position:absolute;left:18px;top:-12px;z-index:5;width:520px;max-width:88vw;text-align:left;background:var(--card);color:var(--ink);
+.dot{{display:block}} .dot .card{{display:none;position:absolute;left:18px;top:-12px;z-index:5;width:640px;max-width:92vw;text-align:left;background:var(--card);color:var(--ink);
   border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 12px 32px rgba(0,0,0,.18);font:13px/1.4 -apple-system,system-ui,sans-serif;cursor:default}}
 .dot.flip .card{{left:auto;right:18px}} .dot:hover .card,.dot:focus .card,.dot:focus-within .card{{display:block}}
 .card p{{margin:0 0 4px}} .when{{color:var(--mute);font-size:12px}} .what{{font-weight:650;font-size:14px}} .meta{{color:var(--mute);font-size:12px}}
 .card table{{width:100%;border-collapse:collapse;margin-top:8px;font-variant-numeric:tabular-nums}} .card th,.card td{{padding:5px 4px;border-top:1px solid var(--line);text-align:right;vertical-align:top}}
 .card th:first-child{{text-align:left;font-weight:600}} 
-.card .carried{{opacity:.45}} .card small{{display:block;color:var(--mute);font-size:10.5px}} .card .rs{{color:var(--mute)}} .card .q{{font-weight:700;font-size:13.5px;vertical-align:middle}} .card tr.grp th{{text-align:center;border-top:0;color:var(--ink)}} .card tr.sub th{{font-size:11px;color:var(--mute);font-weight:600;border-top:0}} .card td.fs{{border-left:1px solid var(--line)}} .win{{color:var(--win)}} .close{{color:var(--close)}} .foot{{color:var(--mute);font-size:11px;margin-top:8px}}
+.card .carried{{opacity:.45}} .card small{{display:block;color:var(--mute);font-size:10.5px}} .card .rs{{color:var(--mute)}} .card .ra{{color:var(--mute);opacity:.8;font-size:11.5px}} .rails{{fill:var(--mute);font-size:12px;font-style:italic}} .card .q{{font-weight:700;font-size:13.5px;vertical-align:middle}} .card tr.grp th{{text-align:center;border-top:0;color:var(--ink)}} .card tr.sub th{{font-size:11px;color:var(--mute);font-weight:600;border-top:0}} .card td.fs{{border-left:1px solid var(--line)}} .win{{color:var(--win)}} .close{{color:var(--close)}} .foot{{color:var(--mute);font-size:11px;margin-top:8px}}
 .done{{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}} .done h4{{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}}
 .done p{{margin:0}} .done ul{{margin:0;padding-left:16px}} .done li{{margin:2px 0}} .done code{{color:var(--mute);font-size:11px}}
 .prelude{{margin:6px 0 16px}} .prelude h2{{font-size:15px;margin:0;text-transform:uppercase;letter-spacing:.06em;color:var(--mute)}}
