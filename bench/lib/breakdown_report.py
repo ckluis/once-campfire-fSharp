@@ -6,7 +6,10 @@
 DIR holds `<app>-<rep>.json` from `bench/breakdown cpu` (CPU per request, Rust and F#) and
 `profile-<route>.json` from `bench/breakdown profile` (F# time per layer, runtime counters). --nolog
 names a cpu directory made with LOG_REQUESTS=false for both apps, for the cost of the request log line. --perf
-names a `bench/breakdown perf` directory (`perf-<app>-<route>.json`, CPU per layer from perf for F# and Rust).
+names a `bench/breakdown perf` directory (`perf-<app>-<route>-c16.json`, CPU per layer from perf for F# and Rust). Since Phase 7's
+unit 7.0 those files carry the unprofiled CPU per request of the same process and route and every layer, resource and allocation
+figure is that CPU times the share perf measured (`*_us_scaled`); a directory from before it (no `unprofiled_us_per_request`) is
+reported with perf's own, inflated, microseconds as it always was, and says so.
 --identity names a cpu directory made with --identity (Accept-Encoding: identity).
 """
 import glob, json, os, re, statistics, sys
@@ -150,9 +153,24 @@ GROUPS = [
     ("HTTP server and request plumbing (server, front, kit, routing, log line)",
      lambda a, k: k.startswith(("Kestrel", "Falco", "front server", "request log line", "kit ", "route table", "hyper, tokio")) or k.startswith("kit (")),
     ("controllers, presenters, authentication, rich text", lambda a, k: k.startswith(("controllers", "authentication", "rich text"))),
-    ("memory management and runtime (F#: GC threads, CLR/BCL without a Campfire caller; Rust: allocator)",
-     lambda a, k: k.startswith(("GC (", "runtime and BCL", "allocator", "libc, kernel and unnamed"))),
+    ("allocation and reclamation (F#: CLR allocation helpers + GC; Rust: jemalloc; both: libc malloc/free)",
+     lambda a, k: k.startswith(("allocation:", "GC (", "allocator"))),
+    ("runtime, other (F#: CLR/BCL with no Campfire caller; Rust: libc, kernel and unnamed code)",
+     lambda a, k: k.startswith(("runtime and BCL", "libc, kernel and unnamed"))),
 ]
+
+
+def scaled(x, kind):
+    """layers / resource microseconds per request: scaled to the unprofiled CPU when the run has it, else perf's own."""
+    if "unprofiled_us_per_request" in x:
+        return x[f"{kind}_us_scaled"] if kind == "layers" else x["resource_us_scaled"]
+    if kind == "layers":
+        return x["layers_us_per_request"]
+    return {k: v * x["us_per_request"] / 100 for k, v in x["resource_pct"].items()}
+
+
+def total_us(x):
+    return x.get("unprofiled_us_per_request", x["us_per_request"])
 
 
 def perf_low(low):
@@ -164,8 +182,8 @@ def perf_low(low):
             a, b = low.get(("rust", route)), low.get(("fsharp", route))
             if not a or not b:
                 continue
-            u = lambda x, *keys: sum(x["resource_pct"].get(k, 0) for k in keys) * x["us_per_request"] / 100
-            print(f"| {route} | {a['rps']:,.0f} / {b['rps']:,.0f} | {a['us_per_request']:.0f} / {b['us_per_request']:.0f} | {a['cores']} / {b['cores']} | "
+            u = lambda x, *keys: sum(x["resource_pct"].get(k, 0) for k in keys) * total_us(x) / 100
+            print(f"| {route} | {a['rps']:,.0f} / {b['rps']:,.0f} | {total_us(a):.0f} / {total_us(b):.0f} | {a['cores']} / {b['cores']} | "
                   f"{u(a, 'kernel'):.0f} / {u(b, 'kernel'):.0f} | {u(a, 'allocator (jemalloc, libc malloc)'):.0f} / {u(b, 'CLR runtime (GC, JIT, type system)'):.0f} | "
                   f"{u(a, 'libc (mutexes, memcpy, other)'):.0f} / {u(b, 'libc (malloc, mutexes, memcpy)', 'System.Native shim'):.0f} | "
                   f"{u(a, 'Rust code (app, hyper, tokio, std)'):.0f} / {u(b, 'managed code (JIT and precompiled)'):.0f} |")
@@ -184,11 +202,25 @@ def perf_tables(d):
     if not data:
         return
     routes = [r for r in ROUTES if ("fsharp", r) in data and ("rust", r) in data]
-    print("\n| Route | Rust µs/req (cores) | F# µs/req (cores) | F# / Rust | Rust req/s | F# req/s |")
-    print("|---|---|---|---|---|---|")
-    for r in routes:
-        a, b = data[("rust", r)], data[("fsharp", r)]
-        print(f"| {r} | {a['us_per_request']:.1f} ({a['cores']}) | {b['us_per_request']:.1f} ({b['cores']}) | {b['us_per_request'] / a['us_per_request']:.2f}× | {a['rps']:,.0f} | {b['rps']:,.0f} |")
+    is_scaled = all("unprofiled_us_per_request" in x for x in data.values())
+    if is_scaled:
+        print("Every µs figure below is the share perf measured times the unprofiled CPU per request of the same process, route and "
+              "concentration (cgroup cpu.stat of an unprofiled window just before the perf window), so the columns add up to the "
+              "unprofiled total. perf's own overhead is in the next table.\n")
+        print("| Route | Rust µs/req unprofiled (cores) | F# µs/req unprofiled (cores) | F# / Rust | Rust perf overhead | F# perf overhead | Rust req/s | F# req/s |")
+        print("|---|---|---|---|---|---|---|---|")
+        for r in routes:
+            a, b = data[("rust", r)], data[("fsharp", r)]
+            print(f"| {r} | {a['unprofiled_us_per_request']:.1f} ({a['unprofiled_cores']}) | {b['unprofiled_us_per_request']:.1f} ({b['unprofiled_cores']}) | "
+                  f"{b['unprofiled_us_per_request'] / a['unprofiled_us_per_request']:.2f}× | {a['perf_overhead_pct']:+.0f}% | {b['perf_overhead_pct']:+.0f}% | "
+                  f"{a['unprofiled_rps']:,.0f} | {b['unprofiled_rps']:,.0f} |")
+    else:
+        print("\n*This directory predates scaling: the µs figures are perf's own, 3-14% (Rust more) above the unprofiled CPU.*\n")
+        print("| Route | Rust µs/req (cores) | F# µs/req (cores) | F# / Rust | Rust req/s | F# req/s |")
+        print("|---|---|---|---|---|---|")
+        for r in routes:
+            a, b = data[("rust", r)], data[("fsharp", r)]
+            print(f"| {r} | {a['us_per_request']:.1f} ({a['cores']}) | {b['us_per_request']:.1f} ({b['cores']}) | {b['us_per_request'] / a['us_per_request']:.2f}× | {a['rps']:,.0f} | {b['rps']:,.0f} |")
 
     print("\n#### CPU per request by what the code is, Rust against F# (µs/req; perf of each app's process at c=16)\n")
     print("Each cell is Rust / F#. Samples are given to the layer that owns the nearest frame of the call chain (F#: the chain is complete, native callees included; Rust: frames have no frame pointers, so the leaf's own symbol or the first named crate on the chain decides, and libc, kernel and allocator time under a Rust frame lands in *libc, kernel and unnamed code* or *allocator*).\n")
@@ -200,10 +232,37 @@ def perf_tables(d):
             vals = []
             for app in ("rust", "fsharp"):
                 x = data[(app, r)]
-                vals.append(sum(v for k, v in x["layers_us_per_request"].items() if match(app, k)))
+                vals.append(sum(v for k, v in scaled(x, "layers").items() if match(app, k)))
             cells.append(f"{vals[0]:.1f} / {vals[1]:.1f}")
         print(f"| {name} | " + " | ".join(cells) + " |")
-    print("| **total** | " + " | ".join(f"{data[('rust', r)]['us_per_request']:.1f} / {data[('fsharp', r)]['us_per_request']:.1f}" for r in routes) + " |")
+    print("| **total** | " + " | ".join(f"{total_us(data[('rust', r)]):.1f} / {total_us(data[('fsharp', r)]):.1f}" for r in routes) + " |")
+
+    if all("allocation_us_scaled" in x for x in data.values()):
+        print("\n#### Allocation, attributed the same way for both apps (µs/req, unprofiled-scaled; Rust / F#)\n")
+        print("The runtime allocator is F#'s CLR allocation helpers (RhpNew*, JIT_New*, GCHeap::Alloc, gc_heap::allocate_*, the memset that "
+              "clears an allocation context) and Rust's jemalloc; reclamation is F#'s GC (Rust frees in the allocator, so it has none); libc "
+              "malloc/free is both apps' native allocations (SQLite, OpenSSL, the runtime). A sample belongs to the first bucket whose "
+              "frames appear anywhere on its call chain; Rust's chains stop at the first Rust frame.\n")
+        print("| Bucket | " + " | ".join(routes) + " |")
+        print("|---|" + "---|" * len(routes))
+        for name in ("runtime allocator", "reclamation (GC)", "libc malloc/free", "total"):
+            cells = [f"{data[('rust', r)]['allocation_us_scaled'][name]:.1f} / {data[('fsharp', r)]['allocation_us_scaled'][name]:.1f}" for r in routes]
+            print(f"| {'**total**' if name == 'total' else name} | " + " | ".join(cells) + " |")
+        print("| *share of CPU, total* | " + " | ".join(
+            f"{100 * data[('rust', r)]['allocation_us_scaled']['total'] / total_us(data[('rust', r)]):.1f}% / "
+            f"{100 * data[('fsharp', r)]['allocation_us_scaled']['total'] / total_us(data[('fsharp', r)]):.1f}%" for r in routes) + " |")
+    clr_routes = [r for r in routes if "clr_us_scaled" in data[("fsharp", r)]]
+    if clr_routes:
+        print("\n#### F#: what the CLR's own native code does (µs/req, unprofiled-scaled; samples whose leaf is in libcoreclr or libclrjit)\n")
+        names = []
+        for r in clr_routes:
+            for k in data[("fsharp", r)]["clr_us_scaled"]:
+                if k not in names:
+                    names.append(k)
+        print("| What | " + " | ".join(clr_routes) + " |")
+        print("|---|" + "---|" * len(clr_routes))
+        for k in names:
+            print(f"| {k} | " + " | ".join(f"{data[('fsharp', r)]['clr_us_scaled'].get(k, 0):.1f}" for r in clr_routes) + " |")
 
     print("\n#### CPU per request by resource, Rust against F# (µs/req; the leaf's own object, whoever called it)\n")
     names = ["kernel", "SQLite engine", "crypto: OpenSSL (F#) / SHA, HMAC, AES crates (Rust)", "memory: CLR runtime, GC, JIT (F#) / allocator (Rust)", "libc (mutexes, memcpy, other)", "managed code (F#) / Rust code"]
@@ -217,7 +276,7 @@ def perf_tables(d):
         if name.startswith("libc"): return t.get("libc (malloc, mutexes, memcpy)", 0) + t.get("libc (mutexes, memcpy, other)", 0) + t.get("System.Native shim", 0)
         return t.get("managed code (JIT and precompiled)", 0) + t.get("Rust code (app, hyper, tokio, std)", 0)
     for x in data.values():
-        x["resource_us"] = {k: v * x["us_per_request"] / 100 for k, v in x["resource_pct"].items()}
+        x["resource_us"] = scaled(x, "resource")
     print("| Resource | " + " | ".join(routes) + " |")
     print("|---|" + "---|" * len(routes))
     for name in names:
@@ -226,25 +285,25 @@ def perf_tables(d):
     print("\n#### F# CPU per request by layer (µs/req and share of the app's CPU)\n")
     layers = []
     for r in routes:
-        for k in data[("fsharp", r)]["layers_us_per_request"]:
+        for k in scaled(data[("fsharp", r)], "layers"):
             if k not in layers:
                 layers.append(k)
-    layers.sort(key=lambda k: -sum(data[("fsharp", r)]["layers_us_per_request"].get(k, 0) for r in routes if r in ("room_show", "messages_page", "sidebar", "search", "post_message")))
+    layers.sort(key=lambda k: -sum(scaled(data[("fsharp", r)], "layers").get(k, 0) for r in routes if r in ("room_show", "messages_page", "sidebar", "search", "post_message")))
     print("| Layer | " + " | ".join(routes) + " |")
     print("|---|" + "---|" * len(routes))
     for k in layers:
-        print(f"| {k} | " + " | ".join(f"{data[('fsharp', r)]['layers_us_per_request'].get(k, 0):.1f} ({data[('fsharp', r)]['layers_pct'].get(k, 0):.0f}%)" for r in routes) + " |")
+        print(f"| {k} | " + " | ".join(f"{scaled(data[('fsharp', r)], 'layers').get(k, 0):.1f} ({data[('fsharp', r)]['layers_pct'].get(k, 0):.0f}%)" for r in routes) + " |")
 
     print("\n#### Rust CPU per request by crate or library (µs/req and share)\n")
     layers = []
     for r in routes:
-        for k in data[("rust", r)]["layers_us_per_request"]:
+        for k in scaled(data[("rust", r)], "layers"):
             if k not in layers:
                 layers.append(k)
     print("| Layer | " + " | ".join(routes) + " |")
     print("|---|" + "---|" * len(routes))
     for k in layers:
-        print(f"| {k} | " + " | ".join(f"{data[('rust', r)]['layers_us_per_request'].get(k, 0):.1f} ({data[('rust', r)]['layers_pct'].get(k, 0):.0f}%)" for r in routes) + " |")
+        print(f"| {k} | " + " | ".join(f"{scaled(data[('rust', r)], 'layers').get(k, 0):.1f} ({data[('rust', r)]['layers_pct'].get(k, 0):.0f}%)" for r in routes) + " |")
 
     print("\n#### F# threads: share of CPU by thread name\n")
     for r in routes:

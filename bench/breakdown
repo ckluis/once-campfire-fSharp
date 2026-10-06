@@ -9,9 +9,22 @@
 # Apps start the way bench/run starts them (same image, environment, CPU pinning, seed copy, host
 # network: this sources bench/run's functions), one at a time, the order alternating between reps.
 #
+# Every mode warms each route at the measured concurrency for WARMUP_SECS first (bench/run's knob, default 15).
+#
 # cpu: for each route at c=1 and c=16, the container's CPU (cgroup cpu.stat, user and system) per request
 # next to the load generator's, and how many cores each kept busy (bench/lib/cpurun.py). A server that
 # is not near its 4 cores while the load generator is is limited by the load generator, not by itself.
+#
+# perf: for each route at c=CONC (default 16), after the warm-up, one unprofiled window (cgroup CPU per request, saved as
+# cpu-<app>-<route>-c<CONC>.json) and one window under `perf record -g`. The perf samples give each layer's share of the
+# CPU; perf itself costs 3-14% and more on Rust, so the report scales every share to the unprofiled CPU per request of
+# the same process and route (layers_us_scaled, resource_us_scaled; the raw perf figures stay in the JSON as
+# layers_us_per_request). Allocation is attributed the same way for both apps (perf_layers.py, `alloc`): what the runtime's
+# allocator costs (F#: the CLR's allocation helpers, RhpNew*, GCHeap::Alloc; Rust: jemalloc's malloc, free, realloc), what
+# reclaiming costs (F#: the GC's collections and its threads; Rust has none, free is in the allocator), and libc malloc/free
+# (both: SQLite, OpenSSL and the runtime). perf script runs after the container is stopped: with the process alive perf reads
+# the stripped binaries in its mount namespace and ignores the debug files, so libcoreclr's and libc's symbols (bench/lib/
+# clr-symbols installs them under /usr/lib/debug/.build-id, once) would not be used.
 #
 # profile (F# only): the container gets a trace directory as /tmp, so the runtime's diagnostic socket is
 # reachable from a tool container sharing its PID namespace, where dotnet-trace samples every managed
@@ -95,9 +108,9 @@ cpu_unit() {
   sign_in
   for route in ${ROUTES//,/ }; do
     route_args "$route"; local a=("${ROUTE_ARGS[@]}")
-    lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc 4 --duration 2 >/dev/null # warm up
     for c in 1 16; do
       local before=0 after=0 res
+      warm_up "$COOKIE" "$c" "${a[@]}" >/dev/null
       [ "$route" = post_message ] && before=$(room_rows "$app")
       res=$(taskset -c "$LOADGEN_CPUS" python3 "$BENCH/lib/cpurun.py" "$cg" -- "$LOADGEN" http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$c" --duration "$SECS")
       [ "$route" = post_message ] && after=$(room_rows "$app")
@@ -126,7 +139,7 @@ tool_offline() {
 
 profile_route() {
   local route=$1; route_args "$route"; local a=("${ROUTE_ARGS[@]}")
-  lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc 4 --duration 3 >/dev/null
+  warm_up "$COOKIE" 16 "${a[@]}" >/dev/null
   rm -f "$DIAG_DIR"/*.nettrace "$DIAG_DIR"/*.speedscope.json "$DIAG_DIR"/counters*
   lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc 16 --duration $((SECS + 6)) > "$DIAG_DIR/lg.json" &
   local lgpid=$!
@@ -140,38 +153,62 @@ profile_route() {
   log "profile $route: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("busy", r["busy_ms"], "ms; ", ", ".join(f"{k} {v}%" for k, v in list(r["layers_pct"].items())[:6]))' "$OUT/profile-$route.json")"
 }
 
-perf_route() {
+# One route of the perf mode, while the app runs: warm-up, an unprofiled window for the CPU per request, then the window
+# under perf (the load generator runs SECS + 6 s, perf records SECS of it from the 2nd second). Leaves perf-<route>.data and
+# lg-<route>.json in DIAG_DIR; perf_report_route turns them into $OUT/perf-<app>-<route>-c<CONC>.json once the app is gone.
+perf_record_route() {
   local route=$1 app=$2; route_args "$route"; local a=("${ROUTE_ARGS[@]}")
-  lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration 6 >/dev/null
-  rm -f "$DIAG_DIR/perf.data" "$DIAG_DIR/perf.script"
-  lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration $((SECS + 6)) > "$DIAG_DIR/lg.json" &
+  warm_up "$COOKIE" "$CONC" "${a[@]}" >/dev/null
+  lgc "$CG" http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration "$SECS" > "$OUT/cpu-$app-$route-c$CONC.json"
+  rm -f "$DIAG_DIR/perf-$route.data"
+  lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration $((SECS + 6)) > "$DIAG_DIR/lg-$route.json" &
   local lgpid=$!
   sleep 2
-  sudo perf record -F 999 -g -p "$PERF_PID" -o "$DIAG_DIR/perf.data" -- sleep "$SECS" >/dev/null 2>&1
+  sudo perf record -F 999 -g -p "$PERF_PID" -o "$DIAG_DIR/perf-$route.data" -- sleep "$SECS" >/dev/null 2>&1
   wait "$lgpid"
-  [ "$app" = fsharp ] && sudo cp "$DIAG_DIR/perf-1.map" "/tmp/perf-$PERF_PID.map"
-  sudo perf script -i "$DIAG_DIR/perf.data" -F comm,tid,ip,sym,dso --no-inline 2>/dev/null > "$DIAG_DIR/perf.script"
+  log "perf $app $route: recorded; unprofiled $(python3 -c 'import json,sys; c=json.load(open(sys.argv[1]))["cost"]; print(c["server_cpu_us_per_req"], "us/req,", c["server_cores_busy"], "cores")' "$OUT/cpu-$app-$route-c$CONC.json")"
+}
+
+perf_report_route() {
+  local route=$1 app=$2
+  sudo perf script -i "$DIAG_DIR/perf-$route.data" -F comm,tid,ip,sym,dso --no-inline 2>/dev/null > "$DIAG_DIR/perf.script"
   local flag=(); [ "$app" = rust ] && flag=(--rust)
-  python3 "$BENCH/lib/perf_layers.py" "${flag[@]}" "$DIAG_DIR/perf.script" "$DIAG_DIR/lg.json" "$route" "$SECS" > "$OUT/perf-$app-$route-c$CONC.json"
-  sudo rm -f "$DIAG_DIR/perf.data" "$DIAG_DIR/perf.script" "/tmp/perf-$PERF_PID.map"
-  log "perf $app $route: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["us_per_request"], "us/req,", r["cores"], "cores;", ", ".join(f"{k} {v}%" for k, v in list(r["layers_pct"].items())[:5]))' "$OUT/perf-$app-$route-c$CONC.json")"
+  python3 "$BENCH/lib/perf_layers.py" "${flag[@]}" --unprofiled "$OUT/cpu-$app-$route-c$CONC.json" "$DIAG_DIR/perf.script" "$DIAG_DIR/lg-$route.json" "$route" "$SECS" > "$OUT/perf-$app-$route-c$CONC.json"
+  if [ -n "${KEEP_PERF_DATA:-}" ]; then sudo cp "$DIAG_DIR/perf-$route.data" "$KEEP_PERF_DATA/perf-$app-$route.data"; fi
+  sudo rm -f "$DIAG_DIR/perf-$route.data" "$DIAG_DIR/perf.script"
+  log "perf $app $route: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["unprofiled_us_per_request"], "us/req unprofiled (perf", r["us_per_request"], ");", ", ".join(f"{k} {v}%" for k, v in list(r["layers_pct"].items())[:4]))' "$OUT/perf-$app-$route-c$CONC.json")"
+}
+
+# libcoreclr's and libc's symbols, so perf can name the CLR's allocation helpers and GC and libc's malloc and memcpy
+# (the images ship both stripped): installed once, under /usr/lib/debug/.build-id of the VM. libcoreclr.so.dbg comes from
+# Microsoft's symbol server through dotnet-symbol (the tool image has it: dotnet tool install --tool-path /tools dotnet-symbol),
+# libc's from the libc6-dbg package of the same version as the images' libc. A failure only costs the allocation view its
+# CLR rows; the layers are named by managed frames and do not need it.
+ensure_symbols() {
+  bash "$BENCH/lib/clr-symbols" "$(image_for fsharp)" || log "no native symbols: the allocation view will lump the CLR's runtime"
 }
 
 case "$MODE" in
   perf)
     OUT=${OUT:-$BENCH/results/breakdown-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$OUT"
     mkdir -p "$DIAG_DIR"; find "$DIAG_DIR" -mindepth 1 -delete; chmod 1777 "$DIAG_DIR"
+    [ -z "${KEEP_PERF_DATA:-}" ] || mkdir -p "$KEEP_PERF_DATA"
     sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0 >/dev/null
+    ensure_symbols
     DOCKER_EXTRA_ARGS=(-v "$DIAG_DIR:/tmp")
     for app in ${APPS//,/ }; do
       [ "$app" = fsharp ] && FSHARP_EXTRA_ENV="DOTNET_PerfMapEnabled=1 DOTNET_EnableWriteXorExecute=0"
       wait_for_quiet
       start_app "$app" >/dev/null
+      CG=$(cgroup_dir)
       PERF_PID=$(docker inspect -f '{{.State.Pid}}' "$CONTAINER")
       sleep 5
       sign_in
-      for route in ${ROUTES//,/ }; do perf_route "$route" "$app"; done
+      for route in ${ROUTES//,/ }; do perf_record_route "$route" "$app"; done
+      [ "$app" = fsharp ] && sudo cp "$DIAG_DIR/perf-1.map" "/tmp/perf-$PERF_PID.map"
       drop_app_dir "$app"
+      for route in ${ROUTES//,/ }; do perf_report_route "$route" "$app"; done
+      sudo rm -f "/tmp/perf-$PERF_PID.map"
     done
     ;;
   cpu)
