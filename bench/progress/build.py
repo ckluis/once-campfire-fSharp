@@ -120,17 +120,20 @@ def card(r, view, measured, rust, ov):
         cells = []
         for c, _ in CONCS:
             v = view.get(w, {}).get(c, {})
+            ru = rust.get(w, {}).get(c, {})
             q = ratio(view, rust, w, c)
             cls = "win" if q and q >= 1 else ("close" if q and q >= 0.9 else "")
-            carried = (w, c) not in measured and v
-            cells.append('<td class="%s">%s<br><b class="%s">%s</b><br><small>%s µs</small></td>'
-                         % ("carried" if carried else "", num(v.get("rps")), cls, ("%.2f×" % q) if q else "–", num(v.get("cpu_us"))))
+            carried = "carried" if (w, c) not in measured and v else ""
+            cells.append('<td class="fs %s">%s<small>%s µs</small></td><td class="rs">%s<small>%s µs</small></td><td class="q %s">%s</td>'
+                         % (carried, num(v.get("rps")), num(v.get("cpu_us")), num(ru.get("rps")), num(ru.get("cpu_us")),
+                            cls, ("%.2f×" % q) if q else "–"))
         rows.append("<tr><th>%s</th>%s</tr>" % (e(label), "".join(cells)))
     kept = r.get("kept", True)
     return ('<div class="card" role="tooltip"><p class="when">%s · %s · tier %s%s</p><p class="what">%s</p>'
             '<p class="meta">commit <code>%s</code> · %s build%s</p>'
-            '<table><tr><th></th><th>16 conn.</th><th>1 conn.</th></tr>%s</table>'
-            '<p class="foot">req/s · F#/Rust · CPU µs per request. Greyed values were carried from an earlier run.</p></div>'
+            '<table><tr class="grp"><th></th><th colspan="3">16 connections</th><th colspan="3">1 connection</th></tr>'
+            '<tr class="sub"><th></th><th>F#</th><th>Rust</th><th>F#/Rust</th><th>F#</th><th>Rust</th><th>F#/Rust</th></tr>%s</table>'
+            '<p class="foot">Requests per second, CPU µs per request beneath. Rust is the stored Phase 7 starting point. Greyed F# values were carried from an earlier run.</p></div>'
             % (e(t.strftime("%H:%M UTC") if t else "?"), e(str(r.get("unit", ""))), e(str(r.get("tier", ""))),
                "" if kept else " · reverted", e(str(r.get("change", ""))), e(str(r.get("commit", ""))),
                e(str(r.get("build", ""))[:19]), (" · overall %.2f× of Rust" % ov) if ov else "", "".join(rows)))
@@ -211,13 +214,13 @@ main{{max-width:1100px;margin:0 auto;padding:28px 16px 48px}} h1{{font-size:30px
 .climb{{fill:none;stroke:var(--acc);stroke-width:4;stroke-linejoin:round;stroke-linecap:round}} .area{{fill:var(--acc);opacity:.1}}
 .dot{{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;border:3px solid var(--acc);background:var(--card);padding:0;cursor:pointer}}
 .dot.last{{background:var(--acc);width:20px;height:20px;margin:-10px 0 0 -10px}} .dot.dropped{{border-color:var(--drop);width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-width:2px}}
-.dot{{display:block}} .dot .card{{display:none;position:absolute;left:18px;top:-12px;z-index:5;width:330px;max-width:80vw;text-align:left;background:var(--card);color:var(--ink);
+.dot{{display:block}} .dot .card{{display:none;position:absolute;left:18px;top:-12px;z-index:5;width:520px;max-width:88vw;text-align:left;background:var(--card);color:var(--ink);
   border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 12px 32px rgba(0,0,0,.18);font:13px/1.4 -apple-system,system-ui,sans-serif;cursor:default}}
 .dot.flip .card{{left:auto;right:18px}} .dot:hover .card,.dot:focus .card,.dot:focus-within .card{{display:block}}
 .card p{{margin:0 0 4px}} .when{{color:var(--mute);font-size:12px}} .what{{font-weight:650;font-size:14px}} .meta{{color:var(--mute);font-size:12px}}
 .card table{{width:100%;border-collapse:collapse;margin-top:8px;font-variant-numeric:tabular-nums}} .card th,.card td{{padding:5px 4px;border-top:1px solid var(--line);text-align:right;vertical-align:top}}
-.card th:first-child{{text-align:left;font-weight:600}} .card tr:first-child th{{border-top:0;color:var(--mute);font-weight:600}}
-.card .carried{{opacity:.45}} .card small{{color:var(--mute)}} .win{{color:var(--win)}} .close{{color:var(--close)}} .foot{{color:var(--mute);font-size:11px;margin-top:8px}}
+.card th:first-child{{text-align:left;font-weight:600}} 
+.card .carried{{opacity:.45}} .card small{{display:block;color:var(--mute);font-size:10.5px}} .card .rs{{color:var(--mute)}} .card .q{{font-weight:700;font-size:13.5px;vertical-align:middle}} .card tr.grp th{{text-align:center;border-top:0;color:var(--ink)}} .card tr.sub th{{font-size:11px;color:var(--mute);font-weight:600;border-top:0}} .card td.fs{{border-left:1px solid var(--line)}} .win{{color:var(--win)}} .close{{color:var(--close)}} .foot{{color:var(--mute);font-size:11px;margin-top:8px}}
 @media (max-width:640px){{.stats{{grid-template-columns:repeat(2,minmax(0,1fr))}} .chart{{aspect-ratio:auto;height:300px}}}}
 </style></head><body><main>
 <h1>F# climbing toward Rust</h1>
