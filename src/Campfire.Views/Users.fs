@@ -92,6 +92,15 @@ type ProfileMembership =
           ParamKey = this.RoomParamKey
           Direct = this.Direct }
 
+/// What `users/profiles/show` shows (`users::ProfileShow`'s fields beyond `ctx`).
+type ProfileShow =
+    { User: UserSummary
+      AvatarAttached: bool
+      /// `user.transfer_id`.
+      TransferId: string
+      SharedMemberships: ProfileMembership list
+      DirectMemberships: ProfileMembership list }
+
 /// A `Push::Subscription`, with its user agent parsed (`UserAgent.parse`).
 type PushSubscription =
     { Id: int64

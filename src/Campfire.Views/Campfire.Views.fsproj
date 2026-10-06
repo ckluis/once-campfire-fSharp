@@ -86,6 +86,31 @@
     <Compile Include="Templates/Autocompletable/Users/_PromptItem.fs" />
     <Compile Include="Templates/Autocompletable/Users/Index.fs" />
     <Compile Include="Templates/Users/Sidebars/Show.fs" />
+    <Compile Include="Templates/Accounts/Users/_NextPageContainer.fs" />
+    <Compile Include="Templates/Accounts/Users/_User.fs" />
+    <Compile Include="Templates/Accounts/Users/IndexTurboStream.fs" />
+    <Compile Include="Templates/Accounts/Edit.fs" />
+    <Compile Include="Templates/Accounts/Bots/_Bot.fs" />
+    <Compile Include="Templates/Accounts/Bots/_Form.fs" />
+    <Compile Include="Templates/Accounts/Bots/Edit.fs" />
+    <Compile Include="Templates/Accounts/Bots/Index.fs" />
+    <Compile Include="Templates/Accounts/Bots/New.fs" />
+    <Compile Include="Templates/Accounts/CustomStyles/Edit.fs" />
+    <Compile Include="Templates/FirstRuns/Show.fs" />
+    <Compile Include="Templates/Sessions/IncompatibleBrowser.fs" />
+    <Compile Include="Templates/Sessions/New.fs" />
+    <Compile Include="Templates/Sessions/Transfers/Show.fs" />
+    <Compile Include="Templates/Users/_BanButton.fs" />
+    <Compile Include="Templates/Users/Profiles/_Transfer.fs" />
+    <Compile Include="Templates/Users/Profiles/_Membership.fs" />
+    <Compile Include="Templates/Users/Profiles/Show.fs" />
+    <Compile Include="Templates/Users/New.fs" />
+    <Compile Include="Templates/Users/Show.fs" />
+    <Compile Include="Templates/Users/PushSubscriptions/_PushSubscription.fs" />
+    <Compile Include="Templates/Users/PushSubscriptions/Index.fs" />
+    <Compile Include="Templates/Users/Avatars/Show.fs" />
+    <Compile Include="Templates/Pwa/Manifest.fs" />
+    <Compile Include="Templates/Pwa/ServiceWorker.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.Routes/Campfire.Routes.fsproj" />

@@ -3,10 +3,25 @@
 /// Views for `reference/app/views/accounts`.
 module Campfire.Views.Accounts
 
+open Campfire.Routes
 open Campfire.Views.Users
 
 /// `User.administrator.first`, shown by `accounts/_help_contact`.
 type HelpContact = { Name: string; EmailAddress: string }
+
+/// What `accounts/edit` shows (`accounts::Edit`'s fields).
+type EditView =
+    { /// `Current.account.id`: `form_with model: @account` posts to `/account.<id>` because the
+      /// account is a singular resource (a quirk the reference ships with).
+      AccountId: int64
+      JoinCode: string
+      RestrictRoomCreationToAdministrators: bool
+      Administrators: UserSummary list
+      Members: UserSummary list
+      /// `@page.next_param` unless `@page.last?`.
+      NextPage: string option }
+
+    member this.AccountAction: string = Routes.account () + "." + string this.AccountId
 
 /// A bot's room (`room_display_name(room)`, the room's name for shared rooms).
 type BotRoom = { Id: int64; Name: string }
