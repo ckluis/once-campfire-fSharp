@@ -188,7 +188,7 @@ def main():
         for wdir in sorted(glob.glob(os.path.join(d, 'subagents', 'workflows', 'wf_*'))):
             wid = os.path.basename(wdir)
             name = scripts.get(wid, wid)
-            pm = re.search(r'phase(\d+)$', name)
+            pm = re.search(r'phase(\d+[a-z]?)$', name)
             key = 'phase' + pm.group(1) if pm else ('phase5b' if name.endswith('baseline') else wid)
             jinfo = journal_info(os.path.join(wdir, 'journal.jsonl'))
             agents = []
