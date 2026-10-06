@@ -171,6 +171,33 @@ let ``a gzipped page keeps its etag and answers conditional gets`` () =
     }
 
 [<Fact>]
+let ``a HEAD answered 304 has no content length, and an unknown method is a 404 without Allow`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            let! plain = app.Send(get "/page")
+            let etag = nonNull (plain.Header "etag" |> Option.toObj)
+            // Kestrel doesn't write `Content-Length: 0` for a HEAD that answers 304 (or 204), where Rust's hyper
+            // does; Puma writes none either (README: Known differences).
+            let! head = app.Send(((get "/page").AsMethod "HEAD").With("if-none-match", etag))
+            Assert.Equal(304, head.Status)
+            Assert.Equal(None, head.Header "content-length")
+            // `route` answers any other method with Rails' 404; axum's would carry `Allow: GET,HEAD`.
+            let! deleted = app.Send((get "/page").AsMethod "DELETE")
+            Assert.Equal(404, deleted.Status)
+            Assert.Equal(None, deleted.Header "allow")
+            // Endpoint routing matches literal segments without regard to case and ignores a trailing slash:
+            // Rails matches case-sensitively (and ignores the slash); axum is strict about both.
+            let! upper = app.Send(get "/PAGE")
+            Assert.Equal(200, upper.Status)
+            let! slash = app.Send(get "/page/")
+            Assert.Equal(200, slash.Status)
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
 let ``the deflater on HEAD, and when nothing is acceptable`` () =
     task {
         let! app, path = startApp true KitConfig.Default

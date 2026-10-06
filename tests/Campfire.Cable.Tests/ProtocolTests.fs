@@ -693,3 +693,24 @@ let ``a message of many keys is read in linear time`` () =
             let elapsed = Stopwatch.GetElapsedTime started
             Assert.True(elapsed < TimeSpan.FromSeconds 5.0, $"{elapsed}")
         })
+
+/// Not in Rust: what the 101 carries. websocket-driver writes `Connection: Upgrade` (the Rust port, which
+/// writes the handshake itself, has `connection: upgrade`), and Kestrel adds `Date` (and `Server`, unless
+/// the host turns it off).
+[<Fact>]
+let ``the 101 answers as websocket-driver does, plus the host's Date`` () =
+    withServer testConfig (fun app ->
+        task {
+            use tcp = new Net.Sockets.TcpClient()
+            do! tcp.ConnectAsync(Net.IPAddress.Loopback, int (app.Authority.Substring(app.Authority.LastIndexOf ':' + 1)))
+            let stream = tcp.GetStream()
+            let key = Convert.ToBase64String(Security.Cryptography.RandomNumberGenerator.GetBytes 16)
+            let request =
+                $"GET /cable HTTP/1.1\r\nHost: {app.Authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nCookie: session_token=1\r\nOrigin: {app.Origin}\r\n\r\n"
+            do! stream.WriteAsync(Text.Encoding.ASCII.GetBytes request)
+            let! response = readHttp stream
+            eq 101 response.Status
+            eq (Some "websocket") (response.Header "Upgrade" |> Option.map (fun v -> v.ToLowerInvariant()))
+            eq (Some "Upgrade") (response.Header "Connection")
+            Assert.True((response.Header "Date").IsSome, "Kestrel adds a Date")
+        })
