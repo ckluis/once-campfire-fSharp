@@ -553,7 +553,10 @@ type Database
     /// Runs `f` on a reader connection: right here, on the calling task's thread, when one is free
     /// and no read is queued for one, since a read on a warm page cache takes less time than the
     /// hop to a reader thread and back; otherwise as `ReadOffloaded` does. At most as
-    /// many pool threads as there are readers are ever inside `f`.
+    /// many pool threads as there are readers are ever inside `f`. The task is complete when it returns:
+    /// Rust yields to the runtime's other tasks here (`tokio::task::yield_now`, a re-queue on the same
+    /// worker), but a `Task.Yield` queues the continuation to the thread pool and wakes another worker to
+    /// look for it, which cost a request with five or six reads 190 us of CPU at one connection.
     ///
     /// Reads whose cost grows with the whole database rather than with a page (search, every
     /// user, all of a user's messages) use `ReadOffloaded`, to keep them off the pool's threads.
