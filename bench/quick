@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# A fast before/after runner for Rust and F# only (Phase 7's tuning loop). Run inside colima, like bench/run:
+#
+#   bench/quick [--reps 3] [--apps rust,fsharp] [--only APP:REP] [--out DIR] [--secs 8] [--warmup 20] [--warmup-max 60] [--concs "1 16"] [--routes a,b]
+#   bench/quick report DIR                            # bench/report again, on any bench/run or bench/quick directory
+#   bench/quick cpu [--reps 1] [--secs 6] [--warmup 20] [--out DIR]   # CPU per request only (bench/breakdown cpu on the five workloads)
+#
+# The default is bench/run restricted to what a tuning unit needs: the five workloads (room page, messages page,
+# sidebar, search, post a message) at c=1 and c=16, the HTTP suite only (no Cable, upload or extra concurrencies),
+# 3 reps with the app order alternating (rust, fsharp, then fsharp, rust, ...), a fresh container and seed copy per app
+# and rep, the same warm-up (WARMUP_SECS at each route and concurrency), the same pinning (SERVER_CPUS=0-3,
+# LOADGEN_CPUS=4-7), and the same validity checks and report as bench/run: the status of every response, rows written
+# against posts, response bytes per route, load average before each run, and the container's CPU per request
+# (cgroup cpu.stat, unprofiled) next to each throughput. The result directory defaults to bench/results/quick-<stamp>.
+#
+# Time: each (route, c) costs its warm-up (at least WARMUP_SECS = 20 s, until the app is flat, at most WARMUP_MAX_SECS = 60 s:
+# Rust stops at the minimum, F# usually needs 20-40 s) plus --secs 8, so one app-rep is about 10 x (20 + 8) s = 5 minutes for Rust
+# and 6-9 for F#, plus start-up and the wait for the load average to settle; the whole 2 apps x 3 reps matrix is about 45
+# minutes, which does not fit one foreground call. Run it a unit at a time, the schedule (and the alternating order) staying
+# the same:
+#   for u in rust:1 fsharp:1 fsharp:2 rust:2 rust:3 fsharp:3; do bench/quick --only $u --out DIR; done; bench/quick report DIR
+# `--reps 1 --secs 5 --warmup 10 --warmup-max 10` is the 4-minute smoke version (a fixed 10 s warm-up, two apps, one rep each): the
+# plumbing check, not a number to compare with a full run.
+#
+# Same seed (a copy of parity/.seed/default per app and rep), same images: FSHARP_IMAGE and RUST_IMAGE as in bench/run.
+set -euo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+export SERVER_CPUS=${SERVER_CPUS:-0-3} LOADGEN_CPUS=${LOADGEN_CPUS:-4-7}
+export WORK=${WORK:-/var/tmp/campfire-bench-work}
+
+if [ "${1:-}" = report ]; then shift; exec "$ROOT/bench/report" "$@"; fi
+MODE=run
+if [ "${1:-}" = cpu ]; then MODE=cpu; shift; fi
+
+APPS=rust,fsharp REPS=3 OUT="" ONLY="" SECS="" WARMUP="" WARMUP_MAX="" CONCS="1 16" ROUTES="room_show,messages_page,sidebar,search,post_message"
+[ "$MODE" = cpu ] && REPS=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --reps) REPS=$2; shift 2 ;;
+    --apps) APPS=$2; shift 2 ;;
+    --only) ONLY=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;;
+    --secs) SECS=$2; shift 2 ;;
+    --warmup) WARMUP=$2; shift 2 ;;
+    --warmup-max) WARMUP_MAX=$2; shift 2 ;;
+    --concs) CONCS=$2; shift 2 ;;
+    --routes) ROUTES=$2; shift 2 ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
+done
+OUT=${OUT:-$ROOT/bench/results/quick-$(date +%Y%m%d-%H%M%S)}
+[ -z "$WARMUP" ] || export WARMUP_SECS=$WARMUP
+[ -z "$WARMUP_MAX" ] || export WARMUP_MAX_SECS=$WARMUP_MAX
+
+case "$MODE" in
+  run)
+    export SUITES=http HTTP_CONCS="$CONCS" HTTP_ROUTES="${ROUTES//,/ }" HTTP_SECS=${SECS:-8} IDLE_SECS=${IDLE_SECS:-5}
+    only=(); [ -z "$ONLY" ] || only=(--only "$ONLY")
+    exec "$ROOT/bench/run" --apps "$APPS" --reps "$REPS" --out "$OUT" "${only[@]}"
+    ;;
+  cpu)
+    # bench/breakdown cpu runs each route at c=1 and c=16 (warm-up first) and prints the table that bench/breakdown report makes.
+    "$ROOT/bench/breakdown" cpu --apps "$APPS" --reps "$REPS" --routes "$ROUTES" --secs "${SECS:-6}" --out "$OUT"
+    "$ROOT/bench/breakdown" report "$OUT" | tee "$OUT/report.md"
+    ;;
+esac
