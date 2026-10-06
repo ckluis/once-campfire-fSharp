@@ -82,7 +82,10 @@ module Front =
             if h2c && not FrontH2c.available then
                 logger.LogWarning("H2C_ENABLED, but Kestrel's connection internals aren't as expected; serving HTTP/1.1 only")
 
-            let builder = WebApplication.CreateSlimBuilder()
+            // appsettings.json is read with reloadOnChange by default, which starts a FileSystemWatcher on the whole content
+            // root (recursive): every write SQLite makes under storage/ then wakes the "File Watch" thread, which lstats the
+            // path (about 5% of a post's CPU). Nothing here reloads configuration, so the host is told not to watch.
+            let builder = WebApplication.CreateSlimBuilder [| "--hostBuilder:reloadConfigOnChange=false" |]
             builder.Services.AddSingleton<ILoggerFactory>(loggerFactory) |> ignore
             builder.Services.AddSingleton<IHostLifetime, NoLifetime>() |> ignore
             builder.WebHost.ConfigureKestrel(fun (options: KestrelServerOptions) ->
