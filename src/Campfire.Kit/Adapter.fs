@@ -68,6 +68,9 @@ module Adapter =
     /// hyper's default `max_buf_size` (8192 + 4096 * 100): the most bytes of request line and headers the
     /// Rust port reads before it answers 431.
     let private maxRequestHead = 417_792
+    /// hyper's `MAX_URI_LEN` (414 past it), plus room for the method and ` HTTP/1.1`, since Kestrel limits
+    /// the whole request line where hyper limits the target alone.
+    let private maxRequestLine = 65_534 + "OPTIONS ".Length + " HTTP/1.1".Length
 
     /// Settings Campfire's Kestrel needs, whatever else the host configures: no `Server` header,
     /// the kit's own body limits (413) instead of Kestrel's 30 MB, and header values written as UTF-8
@@ -80,7 +83,7 @@ module Adapter =
         // domain would be locked out of every page. The ceiling is hyper's, the larger of the two
         // (`MaxRequestBufferSize` stays at its 1 MB, above both).
         options.Limits.MaxRequestHeadersTotalSize <- maxRequestHead
-        options.Limits.MaxRequestLineSize <- maxRequestHead
+        options.Limits.MaxRequestLineSize <- maxRequestLine
         options.ResponseHeaderEncodingSelector <- (fun _ -> Encoding.UTF8)
 
     /// The state for this request, made on first use.

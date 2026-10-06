@@ -466,7 +466,7 @@ let ``a request head as large as puma and hyper accept is served`` () =
         use _ = app
         try
             // Kestrel's own limits are 32 KB of headers and an 8 KB request line; Rails (Puma: 112 KB, 12 KB of
-            // URI) and the Rust port (hyper: 417,792 bytes) serve these, and a browser with many cookies on a
+            // URI) and the Rust port (hyper: 417,792 bytes of headers, a 65,534-byte URI) serve these, and a browser with many cookies on a
             // shared domain would otherwise get 431 on every page.
             let bigCookie = (get "/echo").With("cookie", "a=" + String('x', 40_000) + "; b=seen")
             let! cookie = app.Send bigCookie
@@ -484,9 +484,15 @@ let ``a request head as large as puma and hyper accept is served`` () =
             Assert.Equal(200, url.Status)
             Assert.Equal(10_000 + "/echo?q=".Length, (url.Json.TryGet "path").Value.AsString.Value.Length)
 
-            // Past hyper's buffer the Rust port answers 431; so does this.
+            // Past hyper's header buffer the Rust port answers 431; so does this.
             let! tooBig = app.Send((get "/echo").With("x-big", String('z', 450_000)))
             Assert.Equal(431, tooBig.Status)
+
+            // hyper caps the URI at 65,534 bytes and answers 414 past it; so does this.
+            let! longUrl = app.Send(get ("/echo?q=" + String('q', 65_000)))
+            Assert.Equal(200, longUrl.Status)
+            let! tooLongUrl = app.Send(get ("/echo?q=" + String('q', 70_000)))
+            Assert.Equal(414, tooLongUrl.Status)
         finally
             File.Delete path
     }

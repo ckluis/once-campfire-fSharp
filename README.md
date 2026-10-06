@@ -94,8 +94,9 @@ specific to this port are listed below, each citing the reference file it depart
     ("closes idle and slow connections").
   - Kestrel always sends `Date`, so the app's own listener on `TARGET_PORT` sends one, where Puma (and the
     Rust port) send none.
-  - Request head limits are hyper's, not Puma's: up to 417,792 bytes of request line and, separately, of headers
-    (Kestrel's own 8 KB and 32 KB refused cookies and URLs Rails serves); past that the answer is 431. Puma stops at
+  - Request head limits are hyper's, not Puma's: up to 417,792 bytes of headers (431 past that) and a 65,534-byte
+    URI (414 past that; Kestrel limits the whole request line, so the edge moves by the method's length). Kestrel's
+    own 8 KB line and 32 KB headers refused cookies and URLs Rails serves. Puma stops at
     112 KB of headers and answers 400 above 12 KB of URI (10 KB of query), where this port and the Rust port serve
     them. Tested by `AdapterTests` ("a request head as large as puma and hyper accept is served").
   - Three request-line rules are fixed in Kestrel's parser and can't be configured, so they differ from Puma's and
