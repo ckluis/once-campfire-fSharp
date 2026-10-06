@@ -13,6 +13,14 @@ let ``sanitizes nested object names`` () =
     Assert.Equal("user", Forms.sanitizeObjectName "user")
 
 [<Fact>]
+let ``a character that is not allowed in an id is one underscore, not one per UTF-16 unit`` () =
+    // Rust maps `chars()`: an emoji is one character.
+    Assert.Equal("__ab", Forms.sanitizeToId "😀 a]b")
+    Assert.Equal("a_b-c:d.e", Forms.sanitizeToId "a b-c:d.e")
+    Assert.Equal("a_b", Forms.sanitizeObjectName "a😀b")
+    Assert.Equal("a_b", Forms.sanitizeObjectName "a[b]")
+
+[<Fact>]
 let ``a form is written after its fields, so a file field makes it multipart`` () =
     let form = (Forms.formWith "/account").Model("account").Method("patch")
     let html =

@@ -23,17 +23,27 @@ let private hiddenInputStart = Utf8.lit "</form>"
 let methodTag (w: Out) (method: string) : unit =
     legacyTag w "input" (attrs().Type("hidden").Name("_method").Value(method))
 
+/// Each character (Unicode scalar value) that isn't one of `allowed` becomes one "_": Rust's `chars()`.
+let private replaceOthers (text: string) (allowed: Text.Rune -> bool) : string =
+    let out = Text.StringBuilder(text.Length)
+    for rune in text.EnumerateRunes() do
+        out.Append(if allowed rune then rune.ToString() else "_") |> ignore
+    out.ToString()
+
 /// `object_name.gsub(/\]\[|[^-a-zA-Z0-9:.]/, "_").delete_suffix("_")`.
 let sanitizeObjectName (name: string) : string =
     let replaced = name.Replace("][", "_")
-    let sanitized =
-        String(replaced.ToCharArray() |> Array.map (fun c -> if Char.IsAsciiLetterOrDigit c || c = '-' || c = ':' || c = '.' then c else '_'))
+    let isAllowed (rune: Text.Rune) =
+        rune.IsAscii && (Char.IsAsciiLetterOrDigit(char rune.Value) || rune.Value = int '-' || rune.Value = int ':' || rune.Value = int '.')
+    let sanitized = replaceOthers replaced isAllowed
     if sanitized.EndsWith '_' then sanitized.Substring(0, sanitized.Length - 1) else sanitized
 
 /// `sanitize_to_id`: `]` removed, other non-id characters become "_".
 let sanitizeToId (name: string) : string =
-    let removed = name.Replace("]", "")
-    String(removed.ToCharArray() |> Array.map (fun c -> if Char.IsAsciiLetterOrDigit c || c = '-' || c = '_' || c = ':' || c = '.' then c else '_'))
+    let isAllowed (rune: Text.Rune) =
+        rune.IsAscii
+        && (Char.IsAsciiLetterOrDigit(char rune.Value) || rune.Value = int '-' || rune.Value = int '_' || rune.Value = int ':' || rune.Value = int '.')
+    replaceOthers (name.Replace("]", "")) isAllowed
 
 /// Whether a field rendered so far needs `enctype="multipart/form-data"`, shared by a form and the
 /// builders it makes (`Rc<Cell<bool>>`).

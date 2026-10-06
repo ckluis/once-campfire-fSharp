@@ -14,7 +14,7 @@ open Campfire.Views.Helpers.Url
 let inline linkToRoom (w: Out) (roomId: int64) (options: Attrs) ([<InlineIfLambda>] content: Out -> unit) : unit =
     let defaults =
         [| "data-rooms-list-target", Text "room"
-           "data-room-id", Text(string roomId)
+           "data-room-id", Int roomId
            "data-badge-dot-target", Text "unread"
            "data-sorted-list-target", Text "item" |]
     let url = Routes.room roomId

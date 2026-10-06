@@ -29,6 +29,10 @@ let imageTag (w: Out) (ctx: ViewContext) (source: string) (options: Attrs) : uni
     let size = options.Remove "size"
     options.Set("src", ValueSome(Text(assetPath ctx source)))
     match size with
+    | ValueSome(Int number) ->
+        // `size: 20`: the common case, written without making a string of it.
+        options.Set("width", ValueSome(Int number))
+        options.Set("height", ValueSome(Int number))
     | ValueSome size ->
         let size = size.AsString
         let width, height =
