@@ -561,17 +561,16 @@ type Database
         match readers.TakeConnection() with
         | None -> this.ReadOffloaded f
         | Some conn ->
-            task {
-                // A read that raises a bug still gives its connection back.
+            // A read that raises a bug still gives its connection back, and fails its caller's task.
+            try
                 let result =
                     try
                         DbRun.attempt (fun () -> f conn)
                     finally
                         readers.GiveBack conn
-                // Give the pool's other tasks their turn, as the hop to another thread did.
-                do! Task.Yield()
-                return result
-            }
+                Task.FromResult result
+            with e ->
+                Task.FromException<Result<'T, DbError>> e
 
     /// Runs `f` on a reader thread, the next one free. Once queued, `f` runs even if its caller
     /// stops waiting (a request dropped when its client goes away): some reads broadcast
