@@ -60,6 +60,9 @@ specific to this port are listed below, each citing the reference file it depart
     generated corpus. Tested by `RouteTableTests` ("recognizes like a first match scan").
   - The `jemalloc` options of `main.rs` have no counterpart: .NET's GC is configured in the project file (server GC,
     tiered PGO); only the transparent-huge-page opt-out (`prctl`) is kept, on Linux.
+  - `GET /rooms/:room_id/refresh?since=` clamps a `since` too large for the clock to the end of the .NET `DateTime` range
+    (Rust: the end of jiff's), which only matters to what `created_at >` is compared with: no row is newer than either end,
+    and every row is newer than the low one. Reference: `app/controllers/rooms/refreshes_controller.rb`.
   - Logs are `Microsoft.Extensions.Logging`'s console lines (`RAILS_LOG_LEVEL` or `CAMPFIRE_LOG` set the level), not
     `tracing`'s; the request lines come from the front server as Thruster's did.
 

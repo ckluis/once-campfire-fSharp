@@ -1,6 +1,6 @@
 # Porting Campfire to F#
 
-Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, and 5.2, the account-side controllers, done 2026-10-06)
+Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, 5.2, the account-side controllers, and 5.3, the hot path, done 2026-10-06)
 
 ## Goal
 
@@ -104,6 +104,23 @@ findings are fixed.
   the F# image (152 scenarios matched on the default seed, 15 on crowd, 11 on first_run; three differ by design, being token
   checks); it found the one bug the Rust tests don't reach (a `?1` SQL parameter in the attachment writes, a 500 on every
   upload). Numbers: `bench/results/campfire-app-account-controllers.md`.
+
+- *Unit 5.3 (the hot path), 2026-10-06:* the room, message and search controllers are ported and routed, and no row of
+  the route table answers 501 any more. `Presenters/Presenter.fs` is `presenters.rs` (the rows-to-view-models mapper, with
+  the cached message fragment lookup, the Jbuilder caches keyed by base URL, `all_emoji` over regex-syntax's Unicode 16
+  tables as Rust's regex has them), `Integrations/Search.fs` is `SearchesController#query` over Ruby's `[[:word:]]` table.
+  Controllers: `MessagesController` (index with conditional gets, create with multipart upload and `process_attachment`,
+  show, edit, update, destroy, the broadcasts and webhook delivery), `BoostsController`, `ByBots` and `BoostsByBots` (the bot
+  API with raw bodies and multipart), `RoomsController` with `Opens`, `Closeds`, `Directs`, `Involvements` and
+  `Refreshes`, and `SearchesController`. The room, messages, search and refresh pages are recorded pages: each message is a
+  cached fragment noted at its offset, and the kit splices them as parts (gzipped from their stored pieces, never
+  re-rendered or joined), as in Rust; `RoomsTests` ("pages of messages go out in parts") holds the plain, gzipped and HEAD
+  answers to one page and one ETag. All of `rooms/tests.rs`, `messages/tests.rs`, `searches.rs`'s tests and
+  `concurrent_message_posts_all_complete` are ported. Still to come: the channels (`RoomChannel`, `RoomMessagesChannel`,
+  presence, typing and the guarded `Turbo::StreamsChannel`), which `a text message is answered and broadcast as it was
+  stored` stands in for by reading the hub, and the integrations (Web Push delivery, webhooks, opengraph fetch). Checked
+  against the Rust image on a frozen-clock seed: the room page, messages page, sidebar, search, refresh, bot JSON, room forms
+  and a posted message are byte for byte the same. Numbers (no tuning): `bench/results/campfire-app-hot-path-controllers.md`.
 
 ### Requirements carried forward
 

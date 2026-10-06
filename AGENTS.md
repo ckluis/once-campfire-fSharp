@@ -142,9 +142,9 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   `bin/linux-tests App` runs `Campfire.App.Tests` on Linux in the toolchain image (the transparent-huge-pages test skips on
   macOS); it builds a private copy of the sources there.
 - `Campfire.App`'s controllers take `Ctx` and are listed in `Controllers.fs` (module `RouteTable`, the 177 rows of
-  `config/routes.rb`): a row whose controller isn't ported answers 501 through `unported "controller#action"`, and porting
-  it means writing `Controllers/<Name>.fs` before `Controllers.fs` and replacing that call in its rows. The tests
-  boot the whole app over a copy of a parity seed (`Support.bootSeeded`).
+  `config/routes.rb`): every row is routed to its controller now; a controller added later goes in as
+  `Controllers/<Name>.fs` before `Controllers.fs`, and a row of a controller not yet written answers 501 through
+  `unported "controller#action"`. The tests boot the whole app over a copy of a parity seed (`Support.bootSeeded`).
 - `reference-tools/campfire/controllers_a/replay.py` runs the session, account and user controllers against the reference and
   the candidate image, both on a seed with the clock frozen (inside colima, `PARITY_NET_DIR=/tmp/parity-net`):
   `parity/bin/reference up --seed default --port 4311 --time 2026-03-02T16:00:00Z --freeze`, `parity/bin/candidate up --seed
