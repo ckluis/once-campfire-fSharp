@@ -6,7 +6,10 @@
 #   bin/linux-tests Kit                                   all of Campfire.Kit.Tests
 #   bin/linux-tests Kit --filter-method "*resume*"        extra arguments go to dotnet test
 #
-# Build output goes outside the repository (--artifacts-path), so it can't clash with the host's obj/ and bin/.
+# The build runs on a private copy of the sources (without bin/, obj/, target/, rust/ and the parity seeds,
+# which the tests still read from the real repository through CAMPFIRE_ROOT), so it can't clash with the
+# host's obj/ and bin/, and the projects that generate files beside their sources (Campfire.Assets writes its
+# embedded assets under obj/) can build. A run starts from a clean build.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -20,9 +23,16 @@ image="${IMAGE:-campfire-fsharp-toolchain}"
 cd "$root"
 docker build --tag "$image" - < Dockerfile.toolchain
 exec docker run --rm \
-  --volume "$root:/src:ro" \
+  --volume "$root:/repo:ro" \
   --volume campfire-fsharp-nuget:/nuget \
   --env NUGET_PACKAGES=/nuget \
-  --env CAMPFIRE_ROOT=/src \
+  --env CAMPFIRE_ROOT=/repo \
+  --env CAMPFIRE_REQUIRE_SEED \
   "$image" \
-  dotnet test --project "tests/Campfire.$project.Tests" -c Release --artifacts-path /artifacts "$@"
+  bash -c 'set -euo pipefail
+    mkdir -p /work
+    cd /repo
+    # (tar exits 1 for files that changed as it read them, which virtiofs reports for the directory itself.)
+    { tar --exclude=bin --exclude=obj --exclude=./target --exclude=./.git --exclude=./rust --exclude=./parity/.seed --exclude=./parity/node_modules -cf - . || test $? -eq 1; } | tar -xf - -C /work
+    cd /work
+    exec dotnet test --project "tests/Campfire.$0.Tests" -c Release "$@"' "$project" "$@"

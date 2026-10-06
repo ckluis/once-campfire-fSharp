@@ -14,6 +14,25 @@ The Rails frontend ships with a few
 [port-owned overrides](src/Campfire.Assets/OVERRIDES.md): three JavaScript files and one image that
 deliberately differ from Rails.
 
+## Running it
+
+With [ONCE](https://github.com/basecamp/once), or Docker directly, as with the Rust port (the image is a drop-in for
+the reference's: uid 1000, `/rails`, `/rails/storage/{db,files,backups}`, ports 80 and 443, the ONCE hooks):
+
+```sh
+docker build -t campfire-fsharp:app --build-arg APP_VERSION=... --build-arg GIT_REVISION=... .
+docker run -d -p 80:80 -p 443:443 \
+  -e SECRET_KEY_BASE=... -e VAPID_PUBLIC_KEY=... -e VAPID_PRIVATE_KEY=... \
+  -e TLS_DOMAIN=chat.example.com \
+  -v campfire:/rails/storage \
+  campfire-fsharp:app
+```
+
+`TLS_DOMAIN` enables automatic Let's Encrypt certificates; `DISABLE_SSL` enables plain HTTP. The settings are in
+[`Config.fs`](src/Campfire.App/Config.fs) (the app's) and [`Front/Config.fs`](src/Campfire.Kit/Front/Config.fs) (Thruster's).
+For local development, `dotnet run --project src/Campfire.App -- server` with `SECRET_KEY_BASE` (or
+`SECRET_KEY_BASE_DUMMY=1`) set and libvips installed (`HTTP_PORT=3000` avoids port 80).
+
 ## Development
 
 ```sh
@@ -27,6 +46,22 @@ See [`AGENTS.md`](AGENTS.md) for the layout and working rules.
 
 The differences the Rust port lists from Rails apply here too (see its README). Differences
 specific to this port are listed below, each citing the reference file it departs from.
+
+- **Application** (`Campfire.App`; `rust/crates/campfire` is the port it follows):
+  - `VAPID_SUBJECT` without a `TLS_DOMAIN` defaults to this project's URL (`https://github.com/ckluis/once-campfire-fsharp`);
+    Rust's names its own. Tested by `ConfigTests` ("vapid subject defaults to the tls domain").
+  - A response header whose first line is empty reaches the wire as a line of its own (the first line of a
+    `Content-Disposition` that begins with a line break, which Puma writes), where Kestrel's `Append` would drop a
+    lone empty value; the kit hands such a name's values over as one list. Tested by `AdapterTests` ("a header whose
+    first line is empty is written as a line of its own") and `AppTests` ("proxied blobs write odd dispositions as
+    puma does").
+  - Route recognition looks a path's routes up by its first segment and tries their regexes in table order (Rust asks a
+    `RegexSet` for the first of a verb's patterns that match). The answer is the same for every path of the
+    generated corpus. Tested by `RouteTableTests` ("recognizes like a first match scan").
+  - The `jemalloc` options of `main.rs` have no counterpart: .NET's GC is configured in the project file (server GC,
+    tiered PGO); only the transparent-huge-page opt-out (`prctl`) is kept, on Linux.
+  - Logs are `Microsoft.Extensions.Logging`'s console lines (`RAILS_LOG_LEVEL` or `CAMPFIRE_LOG` set the level), not
+    `tracing`'s; the request lines come from the front server as Thruster's did.
 
 - **Response headers set before the response exists** (`Ctx.SetHeader`, e.g. `X-Version` in a before-action)
   keep every line of a multi-line value. The Rust port keeps only the first line; Puma writes them all

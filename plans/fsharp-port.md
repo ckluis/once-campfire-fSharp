@@ -1,6 +1,6 @@
 # Porting Campfire to F#
 
-Status: in progress (Phase 0 done 2026-10-05)
+Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 unit 5.1, boot, wiring and the image, done 2026-10-06)
 
 ## Goal
 
@@ -74,6 +74,21 @@ findings are fixed.
 | 7 Performance | `bench/run --apps reference,rust,fsharp`; profile; optimize | aim: faster than Rust on all five workloads (rows verified for posts); close to Rust counts as a win, reported as close. Known gaps so far: signed-cookie requests, identity bodies through Kestrel, Db row reads, rich text, plain-frame Cable fan-out |
 | 8 Datastar (optional) | a second frontend | screenshots identical; behavior screens pass. Needs sign-off first |
 | 9 Publish | GitHub repo, README with results, upstream README PR | maintainers' review |
+
+### Phase 5 progress
+
+- *Unit 5.1 (boot, wiring and the image), 2026-10-06:* `Campfire.App` boots and serves. Ported from `rust/crates/campfire`: `main`
+  (`server`, `backup`), `app` (state, boot, the pipeline: Falco's `/cable`, public files, the Rails route table as the fallback),
+  `config`, `concerns` (the `ApplicationController` chain, `UserAgent`, `ApplicationPlatform`), `controllers.rs` (the 177-row route
+  table, the 111 recognitions of `vectors/campfire_routes.json`, health, Turbo Native, Action Mailbox), `jobs`, `rich_text`,
+  `active_storage` (all the engine's endpoints and `purge`), the fragment glue, and from `controllers/presenters` and
+  `controllers/{sessions,welcome}` what the layout and sign-in need (`view_context`, `page`, `rich_text`, `accounts`' helpers,
+  `attached_blob`); from `channels` the cable server, its connection, revocation, `Broadcasts` and the read/unread channels.
+  The image (`Dockerfile`) is built in colima as `campfire-fsharp:app`; `parity/bin/candidate up` serves it and a seed user signs in.
+  What is still to port, by the units that follow: every other controller (their rows answer 501), the remaining channels
+  (presence, room, room messages, typing, and `Turbo::StreamsChannel` with its room guard), the presenters that map rows to
+  view models, and the integrations (Web Push, webhooks, opengraph, network guard, QR, search word ranges). Numbers for this
+  unit are in `bench/results/campfire-app-boot.md`.
 
 ### Requirements carried forward
 

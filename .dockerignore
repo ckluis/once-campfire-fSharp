@@ -1,0 +1,19 @@
+# The app image (Dockerfile) builds from global.json, the Directory.*.props, src/ and the parts of the
+# reference/ submodule that src/Campfire.Assets.Build embeds (app/assets, app/javascript, vendor, public,
+# config) plus its hooks/. Everything else stays out of the build context.
+*
+
+!/global.json
+!/Directory.Build.props
+!/Directory.Packages.props
+!/src
+!/reference/app/assets
+!/reference/app/javascript
+!/reference/vendor
+!/reference/public
+!/reference/config
+!/reference/hooks
+
+# Build outputs inside what is let in.
+**/bin
+**/obj

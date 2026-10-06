@@ -198,5 +198,36 @@ let ``normalizes paths`` () =
     Assert.Equal("/rooms/1", RouteTable.normalizePath "//rooms//1//")
     Assert.Equal("/a%2Fb", RouteTable.normalizePath "/a%2fb")
 
-[<Fact(Skip = "a timing harness (bench/results/routing-20260930 in Rust); the numbers are in bench/results/campfire-app-boot.md")>]
-let ``times recognition`` () = ()
+/// Times `recognize` on the paths the page benchmarks request, `/up`, Active Storage URLs and a 404. Set
+/// `CAMPFIRE_TIMING=1` (and run it in Release): the numbers are in bench/results/campfire-app-boot.md, Rust's
+/// in its bench/results/routing-20260930.
+[<Fact>]
+let ``times recognition`` () =
+    if Environment.GetEnvironmentVariable "CAMPFIRE_TIMING" = "1" then
+        let longFilename = "/rails/active_storage/blobs/redirect/abc--def/" + String.replicate 160 "dir/café.tar/" + "photo.png"
+        let paths =
+            [ "room_show", "/rooms/12"
+              "messages_page", "/rooms/12/messages"
+              "search", "/searches"
+              "up", "/up"
+              "representation",
+              "/rails/active_storage/representations/redirect/eyJfcmFpbHMiOnsiZGF0YSI6NDIsInB1ciI6ImJsb2JfaWQifX0=--4c2a1f0e9b8d7c6a5f4e3d2c1b0a9f8e7d6c5b4a/eyJfcmFpbHMiOnsiZGF0YSI6eyJmb3JtYXQiOiJ3ZWJwIiwicmVzaXplX3RvX2xpbWl0IjpbMTIwMCwxMjAwXX0sInB1ciI6InZhcmlhdGlvbiJ9fQ==--0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4/photo.png"
+              "long filename", longFilename
+              "404", "/wp-login.php" ]
+        // The first call builds the table: 177 patterns compiled to regexes.
+        let first = Diagnostics.Stopwatch.GetTimestamp()
+        RouteTable.recognize "GET" "/up" |> ignore
+        Console.Error.WriteLine $"the table, built on first use: {Diagnostics.Stopwatch.GetElapsedTime(first).TotalMilliseconds:F0} ms"
+        for (_, path) in paths do
+            RouteTable.recognize "GET" path |> ignore
+        let samples = 9
+        let iterations = 200_000
+        for (name, path) in paths do
+            let runs =
+                [ for _ in 1..samples do
+                      let started = Diagnostics.Stopwatch.GetTimestamp()
+                      for _ in 1..iterations do
+                          RouteTable.recognize "GET" path |> ignore
+                      Diagnostics.Stopwatch.GetElapsedTime(started).TotalNanoseconds / float iterations ]
+                |> List.sort
+            Console.Error.WriteLine $"{name,-15} median {runs[samples / 2],6:F0} ns  (min {runs[0]:F0}, max {runs[samples - 1]:F0})"

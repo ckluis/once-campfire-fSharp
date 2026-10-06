@@ -59,6 +59,7 @@ let private routes (kit: Kit) (path: string) : HttpEndpoint list =
       route "/stream" [ "GET", streamed ]
       route "/file" [ "GET", fileIn path ]
       route "/empty" [ "GET", empty ]
+      route "/blank-line" [ "GET", (fun c -> act { return c.Head(Status.Ok).Header("content-disposition", "\nattachment; filename=\"a.txt\"") }) ]
       route "/boom" [ "GET", (fun _ -> failwith "boom") ]
       route "/missing" [ "GET", (fun _ -> Task.FromResult(Error NotFound)) ]
       route "/teapot" [ "GET", (fun _ -> Task.FromResult(Error(Status 418))) ]
@@ -439,6 +440,21 @@ let ``the deflater's 406 is outside the SSL middleware too`` () =
             let! refused = app.Send((get "/page").With("accept-encoding", "identity;q=0, *;q=0"))
             Assert.Equal(406, refused.Status)
             Assert.Equal(None, refused.Header "strict-transport-security")
+        finally
+            File.Delete path
+    }
+
+[<Fact>]
+let ``a header whose first line is empty is written as a line of its own`` () =
+    task {
+        let! app, path = startApp false KitConfig.Default
+        use _ = app
+        try
+            // Puma writes a value with a line break line by line, so a leading break leaves a header line with
+            // nothing after the colon; Kestrel's `Append` would drop it as a lone empty value.
+            let! reply = app.Send(get "/blank-line")
+            Assert.Equal(200, reply.Status)
+            Assert.Equal<string list>([ ""; "attachment; filename=\"a.txt\"" ], reply.HeaderValues "content-disposition")
         finally
             File.Delete path
     }

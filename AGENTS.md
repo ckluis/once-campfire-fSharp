@@ -134,6 +134,17 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   reporting. `bin/storage-media-vectors` runs them in `Dockerfile.toolchain` inside colima, with
   `CAMPFIRE_REQUIRE_MEDIA_VECTORS=1` (the header says why it checks vectors the reference image makes there
   rather than `vectors/storage.json` on aarch64).
+- `Dockerfile` builds the production image (`campfire-fsharp:app`) in colima, a drop-in for the reference's as
+  `rust/Dockerfile` is; its `media-base`, `vips`, `ffmpeg` and `dotnet` stages are copies of `Dockerfile.toolchain`'s, so
+  the two share layers, and they must stay identical to each other. `parity/bin/candidate build` builds it and the parity
+  candidate image on top (`PARITY_CANDIDATE_APP=rust` runs the Rust port in the same harness instead); `parity/bin/candidate
+  up` then serves a seed (`curl /up`, `POST /session` with `david@37signals.com` / `secret123456`).
+  `bin/linux-tests App` runs `Campfire.App.Tests` on Linux in the toolchain image (the transparent-huge-pages test skips on
+  macOS); it builds a private copy of the sources there.
+- `Campfire.App`'s controllers take `Ctx` and are listed in `Controllers.fs` (module `RouteTable`, the 177 rows of
+  `config/routes.rb`): a row whose controller isn't ported answers 501 through `unported "controller#action"`, and porting
+  it means writing `Controllers/<Name>.fs` before `Controllers.fs` and replacing that call in its rows. The tests
+  boot the whole app over a copy of a parity seed (`Support.bootSeeded`).
 - Tests that need the parity seed (`parity/.seed/default`) must skip with a message when it isn't
   built; `CAMPFIRE_REQUIRE_SEED=1` turns the skip into a failure.
 - Rust helper builds (differentials, bench servers, loadgen, one-off comparisons) all use the shared

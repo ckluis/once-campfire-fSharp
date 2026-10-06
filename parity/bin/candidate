@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Run the candidate (Rust) app for the parity harness. Same interface as parity/bin/reference.
+# Run the candidate app for the parity harness. Same interface as parity/bin/reference.
 #
-#   parity/bin/candidate build                      build campfire-rust:app (/Dockerfile) and the
+# The candidate is the F# app (campfire-fsharp:app, built from /Dockerfile) unless PARITY_CANDIDATE_APP=rust
+# selects the Rust port (campfire-rust:app, built from /rust/Dockerfile): one harness, either app. A custom
+# image (PARITY_CANDIDATE_APP_IMAGE) is built from PARITY_CANDIDATE_DOCKERFILE and PARITY_CANDIDATE_CONTEXT,
+# which default to those of the app named by PARITY_CANDIDATE_APP.
+#
+#   parity/bin/candidate build                      build campfire-fsharp:app (/Dockerfile) and the
 #                                                   campfire-candidate parity image on top of it
 #   parity/bin/candidate up   [--seed NAME] [--port N] [--time ISO8601 [--freeze]] [-e K=V]
 #   parity/bin/candidate down [--port N | --all [--everyone]]
@@ -36,14 +41,21 @@
 # CLAUDE_CODE_SESSION_ID, else the user), and `down --all` and `ps` only touch the caller's own;
 # --everyone takes them all. `down --port N` stops that port's instance whoever started it.
 #
-# Docker only: the Rust app has no native runtime here.
+# Docker only: neither app has a native runtime here.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 PARITY=$ROOT/parity
 SEEDS=${PARITY_SEED_DIR:-$PARITY/.seed}
 INSTANCES=$SEEDS/.candidates
-APP_IMAGE=${PARITY_CANDIDATE_APP_IMAGE:-campfire-rust:app}
+case ${PARITY_CANDIDATE_APP:-fsharp} in
+  fsharp) DEFAULT_APP_IMAGE=campfire-fsharp:app DEFAULT_DOCKERFILE=$ROOT/Dockerfile DEFAULT_CONTEXT=$ROOT ;;
+  rust)   DEFAULT_APP_IMAGE=campfire-rust:app DEFAULT_DOCKERFILE=$ROOT/rust/Dockerfile DEFAULT_CONTEXT=$ROOT/rust ;;
+  *)      echo "candidate: PARITY_CANDIDATE_APP is fsharp or rust, not ${PARITY_CANDIDATE_APP}" >&2; exit 1 ;;
+esac
+APP_IMAGE=${PARITY_CANDIDATE_APP_IMAGE:-$DEFAULT_APP_IMAGE}
+APP_DOCKERFILE=${PARITY_CANDIDATE_DOCKERFILE:-$DEFAULT_DOCKERFILE}
+APP_CONTEXT=${PARITY_CANDIDATE_CONTEXT:-$DEFAULT_CONTEXT}
 IMAGE=${PARITY_CANDIDATE_IMAGE:-campfire-candidate}
 ENV_FILE=$PARITY/.env.reference
 DEFAULT_PORT=3200
@@ -142,11 +154,17 @@ ports() {
   docker ps -a --filter label=parity.candidate.port "${owner[@]}" --format '{{.Label "parity.candidate.port"}}'
 }
 
+# The reference's pinned commit, for GIT_REVISION: git when it's there (the colima VM may not have it),
+# else read from the checkout's submodule pointer.
+reference_revision() {
+  git -C "$ROOT/reference" rev-parse HEAD 2>/dev/null || head -n 1 "$ROOT/.git/modules/reference/HEAD" 2>/dev/null || echo parity
+}
+
 build() {
-  log "building $APP_IMAGE from /Dockerfile"
-  docker build -t "$APP_IMAGE" -f "$ROOT/Dockerfile" \
-    --build-arg APP_VERSION=parity --build-arg GIT_REVISION="$(git -C "$ROOT/reference" rev-parse HEAD)" \
-    "$ROOT"
+  log "building $APP_IMAGE from ${APP_DOCKERFILE#"$ROOT"/}"
+  docker build -t "$APP_IMAGE" -f "$APP_DOCKERFILE" \
+    --build-arg APP_VERSION=parity --build-arg GIT_REVISION="$(reference_revision)" \
+    "$APP_CONTEXT"
   log "building $IMAGE from parity/docker/candidate/Dockerfile"
   docker build -t "$IMAGE" --build-arg BASE_IMAGE="$APP_IMAGE" "$PARITY/docker/candidate"
 }
