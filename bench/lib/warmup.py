@@ -8,12 +8,12 @@ until the app has settled, and prints the load generator's counters summed over 
 `errors`: bench/run checks the rows a warm-up wrote against them) with a `warmup` object: seconds run, each window's
 requests a second, whether it settled and why it stopped.
 
-Why not a fixed time: the CLR's tiered JIT takes 8 to 40 seconds of load to reach its steady throughput, run to run (bench/warmup
-draws the curves: the first 2 s window is 0.33-0.75x the plateau, the ramp is 0.9x at 6-10 s in one run and 0.95x at 40 s in
-the next), and 2 s windows swing +-5-10% on this VM even when settled. Rust and Rails are flat from the first window. The rule
-is the same for every app: after at least --min seconds, stop when the mean of the last 3 windows is within 4% of the mean of
-the 3 before them (the throughput is not still climbing) and is at least 97% of the best 3-window mean so far (it has not
-fallen off a peak either); stop at --max regardless and say so (`settled: false` if the rule does not hold then either), which
+Why not just a fixed time: the CLR's tiered JIT reaches 0.9x of its steady throughput in 6-10 s of load and the last 5-8% only
+after 25-45 s (its background compiler competes with the request threads for the four pinned CPUs; bench/warmup draws the
+curves, results/phase7-warmup.md has them), and 2 s windows swing +-5-10% on this VM when another program is running on the Mac.
+Rust and Rails are flat from the first window. The rule is the same for every app: after at least --min seconds, stop when the
+mean of the last 3 windows is within 3% of the mean of the 3 before them (the throughput is not still climbing) and is at least
+97% of the best 3-window mean so far (it has not fallen off a peak either); stop at --max regardless and say so (`settled: false` if the rule does not hold then either), which
 bench/report flags. --max equal to --min is a fixed warm-up; --min 0 skips it.
 """
 import json
@@ -27,14 +27,14 @@ def settled(rps):
         return False
     last, prev = statistics.mean(rps[-3:]), statistics.mean(rps[-6:-3])
     means = [statistics.mean(rps[i:i + 3]) for i in range(len(rps) - 2)]
-    return prev > 0 and abs(last - prev) / prev <= 0.04 and last >= 0.97 * max(means)
+    return prev > 0 and abs(last - prev) / prev <= 0.03 and last >= 0.97 * max(means)
 
 
 def main():
     argv = sys.argv[1:]
     cmd = argv[argv.index("--") + 1:]
     opt = lambda name, default: float(argv[argv.index(name) + 1]) if name in argv else default
-    lo, hi, window = opt("--min", 20.0), opt("--max", 60.0), opt("--window", 2.0)
+    lo, hi, window = opt("--min", 30.0), opt("--max", 90.0), opt("--window", 2.0)
     hi = max(lo, hi)
     out = {"ok": 0, "statuses": {}, "errors": 0}
     rps, elapsed, reason = [], 0.0, "skipped"

@@ -50,17 +50,17 @@
 # WORK=/var/tmp/campfire-bench-work puts it on the VM's own disk, as the upstream measurement had its btrfs.
 #
 # Warm-up: before each measured run of a route at concurrency c the load generator runs that route at c (the measured
-# concurrency) until the app has settled: at least WARMUP_SECS (default 20; 0 skips it), then until the last three 2 s
-# windows are flat and not below their peak, at most WARMUP_MAX_SECS (default 60); bench/lib/warmup.py has the rule. It is the
-# same rule for every app. The CLR's tiered JIT needs 8 to 40 s of load, run to run, to reach its steady throughput
-# (bench/warmup draws the curves: the first 2 s window is 0.33-0.75x the plateau); a 2 s warm-up at c=4 left the first
+# concurrency) until the app has settled: at least WARMUP_SECS (default 30; 0 skips it), then until the last three 2 s
+# windows are flat and not below their peak, at most WARMUP_MAX_SECS (default 90); bench/lib/warmup.py has the rule. It is the
+# same rule for every app. The CLR's tiered JIT reaches 0.9x of its steady throughput in 6-10 s of load and the last 5-8% only after
+# 25-45 s (bench/warmup draws the curves: the first 2 s window is 0.33-0.75x the plateau); a 2 s warm-up at c=4 left the first
 # measured seconds 13-20% slow. Rust and Rails are flat from the first window and stop at the minimum. Each run's JSON
 # records its warm-up (seconds, window rates, settled or not) and bench/report flags runs that did not settle.
 #
 # CPU: every measured run goes through bench/lib/cpurun.py, so each HTTP result also carries the container's CPU per
 # request (cgroup cpu.stat, user and system, unprofiled) and the load generator's; bench/report prints it.
 #
-# Knobs (env): SERVER_CPUS=8-11 LOADGEN_CPUS=12-15 HTTP_SECS=8 HTTP_CONCS="1 16 64" WARMUP_SECS=20 WARMUP_MAX_SECS=60 IDLE_SECS=10
+# Knobs (env): SERVER_CPUS=8-11 LOADGEN_CPUS=12-15 HTTP_SECS=8 HTTP_CONCS="1 16 64" WARMUP_SECS=30 WARMUP_MAX_SECS=90 IDLE_SECS=10
 #   HTTP_ROUTES="room_show messages_page sidebar search avatar static_css up post_message" (a subset, in this order)
 #   CABLE_CLIENTS="100 500 1000" CABLE_TPUT_SECS=15 CABLE_POSTERS=4 UPLOAD_REPS=5 PORT=4390
 # The apps run with --network host: PORT and PORT+1 (and 6379, for the reference's Redis) must be
@@ -90,8 +90,8 @@ LOADGEN_CPUS=${LOADGEN_CPUS:-12-15}
 HTTP_SECS=${HTTP_SECS:-8}
 HTTP_CONCS=${HTTP_CONCS:-1 16 64}
 HTTP_ROUTES=${HTTP_ROUTES:-room_show messages_page sidebar search avatar static_css up post_message}
-WARMUP_SECS=${WARMUP_SECS:-20}
-WARMUP_MAX_SECS=${WARMUP_MAX_SECS:-60}
+WARMUP_SECS=${WARMUP_SECS:-30}
+WARMUP_MAX_SECS=${WARMUP_MAX_SECS:-90}
 IDLE_SECS=${IDLE_SECS:-10}
 CABLE_CLIENTS=${CABLE_CLIENTS:-100 500 1000}
 CABLE_TPUT_SECS=${CABLE_TPUT_SECS:-15}
