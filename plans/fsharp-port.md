@@ -1,6 +1,6 @@
 # Porting Campfire to F#
 
-Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 unit 5.1, boot, wiring and the image, done 2026-10-06)
+Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, and 5.2, the account-side controllers, done 2026-10-06)
 
 ## Goal
 
@@ -89,6 +89,21 @@ findings are fixed.
   (presence, room, room messages, typing, and `Turbo::StreamsChannel` with its room guard), the presenters that map rows to
   view models, and the integrations (Web Push, webhooks, opengraph, network guard, QR, search word ranges). Numbers for this
   unit are in `bench/results/campfire-app-boot.md`.
+
+- *Unit 5.2 (the account-side controllers), 2026-10-06:* every controller of the account, session and user screens is ported
+  and routed (the rows that answered 501 are gone for them): first runs, session transfers, the PWA manifest and service
+  worker, accounts (edit, update, bots and their keys, custom styles, join codes, the logo, the people list), users (join, show,
+  avatar, ban, profile, sidebar, push subscriptions and test notifications), autocompletable users, the QR code (`Rqrcode`,
+  rqrcode_core's encoder byte for byte against the gem's vectors) and unfurl links, with `presenters/accounts.rs`,
+  `pagination.rs` and the writing half of `attachments.rs` (assign, destroy, analyze). Not account-side but needed by two of
+  them, `integrations/net.rs`'s resolver and `net/guard.rs` (the private network guard) are in `Integrations/`: push endpoint
+  validation and the unfurl URL check go through it. What is still the integrations unit's: fetching and parsing a page
+  for an unfurl (`Opengraph.unfurl` answers 204 for a URL the guard refuses, as the reference does, and raises for one it would
+  fetch) and delivering a Web Push (`WebPush.deliverTestNotification` raises; the layout still shows no VAPID key because the
+  pool isn't built). `reference-tools/campfire/controllers_a/replay.py` runs the account controllers against the reference and
+  the F# image (152 scenarios matched on the default seed, 15 on crowd, 11 on first_run; three differ by design, being token
+  checks); it found the one bug the Rust tests don't reach (a `?1` SQL parameter in the attachment writes, a 500 on every
+  upload). Numbers: `bench/results/campfire-app-account-controllers.md`.
 
 ### Requirements carried forward
 

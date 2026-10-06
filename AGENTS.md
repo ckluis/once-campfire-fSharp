@@ -145,6 +145,12 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   `config/routes.rb`): a row whose controller isn't ported answers 501 through `unported "controller#action"`, and porting
   it means writing `Controllers/<Name>.fs` before `Controllers.fs` and replacing that call in its rows. The tests
   boot the whole app over a copy of a parity seed (`Support.bootSeeded`).
+- `reference-tools/campfire/controllers_a/replay.py` runs the session, account and user controllers against the reference and
+  the candidate image, both on a seed with the clock frozen (inside colima, `PARITY_NET_DIR=/tmp/parity-net`):
+  `parity/bin/reference up --seed default --port 4311 --time 2026-03-02T16:00:00Z --freeze`, `parity/bin/candidate up --seed
+  default --port 4312 --time 2026-03-02T16:00:00Z --freeze`, then `reference-tools/campfire/controllers_a/replay.py
+  http://127.0.0.1:4311 http://127.0.0.1:4312 [--seed crowd|first_run]` (restart both servers per seed: it mutates). It masks
+  the differences the ports have by design and says so at the top; run it after changing an account, session or user controller.
 - Tests that need the parity seed (`parity/.seed/default`) must skip with a message when it isn't
   built; `CAMPFIRE_REQUIRE_SEED=1` turns the skip into a failure.
 - Rust helper builds (differentials, bench servers, loadgen, one-off comparisons) all use the shared
