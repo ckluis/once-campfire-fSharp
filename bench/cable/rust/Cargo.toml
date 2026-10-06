@@ -1,0 +1,19 @@
+[package]
+name = "cablebench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Its own workspace: this crate only borrows rust/crates/cable (unmodified) as a dependency.
+[workspace]
+
+[dependencies]
+campfire_cable = { path = "../../../rust/crates/cable" }
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
