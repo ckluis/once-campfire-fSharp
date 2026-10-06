@@ -243,7 +243,7 @@ def hero(d, cl, f):
         tiles = ''.join('<div class="ht">%s<span>%s</span></div>' % (a, b) for a, b in [
             (counter(latest, 2, '×'), 'of Rust, latest run'),
             (counter(cl['gain'], 1, '%', '+' if cl['gain'] >= 0 else ''), 'since tuning began'),
-            (counter(cl['rate'], 1, '%/h', '+' if cl['rate'] >= 0 else ''), 'average climb per hour'),
+            (counter(cl['changes'], 0, ''), 'code change%s to get here' % ('' if cl['changes'] == 1 else 's')),
             (counter(abs(cl['to_go']), 0, '%'), 'to go to match Rust' if cl['to_go'] > 0 else 'ahead of Rust')
             if abs(cl['to_go']) >= 0.5 else ('<span class="num-big"><b>Level</b></span>', 'with Rust, latest run'),
         ])

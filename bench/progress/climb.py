@@ -319,12 +319,13 @@ def climb():
         first, latest = start, kept[-1]
         gain = (latest[1] / first[1] - 1) * 100
         hours = (latest[0] - first[0]).total_seconds() / 3600
-        rate = gain / hours if hours > 0.05 else 0.0
+        # Code changes since the start: dots after it that carry app commits (not confirmations of the same code).
+        changes = len([p for p in kept if p[0] > first[0] and p[2].get("commits")])
         to_go = (1 / latest[1] - 1) * 100
         base = next((p for p in kept if p[2].get("unit") == "baseline"), None)
         steps = [(b[1] / a[1] - 1) * 100 for a, b in zip(kept, kept[1:])]
         best = max(range(len(steps)), key=lambda i: steps[i]) if steps else None
-        out.update(latest=latest[1], start=first[1], gain=gain, hours=hours, rate=rate, to_go=to_go,
+        out.update(latest=latest[1], start=first[1], gain=gain, hours=hours, changes=changes, to_go=to_go,
                    baseline=base[1] if base else None, kept_n=len(kept), dropped_n=len(pts) - len(kept),
                    tuning_runs=len([p for p in pts if p[0] > first[0]]),
                    best_jump=({"gain": steps[best], "change": kept[best + 1][2].get("change", ""), "ratio": kept[best + 1][1]}
