@@ -5,7 +5,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
-    <Compile Include="Tests.fs" />
+    <Compile Include="ConfigTests.fs" />
+    <Compile Include="UserAgentTests.fs" />
+    <Compile Include="PlatformTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.App/Campfire.App.fsproj" />

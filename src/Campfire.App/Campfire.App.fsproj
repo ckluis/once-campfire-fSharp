@@ -6,6 +6,17 @@
     <TieredPGO>true</TieredPGO>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Config.fs" />
+    <Compile Include="Concerns/UserAgent.fs" />
+    <Compile Include="Concerns/Platform.fs" />
+    <Compile Include="Channels/Identity.fs" />
+    <Compile Include="Channels/Revocation.fs" />
+    <Compile Include="Channels/Connection.fs" />
+    <Compile Include="Channels/ReadRooms.fs" />
+    <Compile Include="Channels/UnreadRooms.fs" />
+    <Compile Include="Channels/Broadcasts.fs" />
+    <Compile Include="Channels/Registry.fs" />
+    <Compile Include="Jobs.fs" />
     <Compile Include="Library.fs" />
   </ItemGroup>
   <ItemGroup>
@@ -22,5 +33,8 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Falco" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.App.Tests" />
   </ItemGroup>
 </Project>
