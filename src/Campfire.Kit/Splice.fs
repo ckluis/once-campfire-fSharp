@@ -269,6 +269,18 @@ type Fragment(bytes: byte[]) =
     member _.Memory: ReadOnlyMemory<byte> = ReadOnlyMemory<byte> bytes
     member _.Length = bytes.Length
 
+    /// What the fragment keeps alive besides its bytes: its SHA-256 and the pieces stored for the parts it
+    /// has followed (each with its glue), as the fragment cache counts them against its budget. Nothing
+    /// bounds them but the fragment's life (`PiecesPerFragment` bounds how many), which that cache ends.
+    member _.HeldBytes: int =
+        match known with
+        | null -> 0
+        | known ->
+            let mutable total = 32 + 64
+            for stored in known.Pieces do
+                total <- total + stored.Piece.Deflated.Length + stored.Glue.Length + 64
+            total
+
     member internal _.Known
         with get () = known
         and set (value: KnownFragment) = known <- value

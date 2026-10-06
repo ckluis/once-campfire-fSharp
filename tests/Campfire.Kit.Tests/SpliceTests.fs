@@ -80,6 +80,23 @@ let ``decodes to the body and reuses pieces`` () =
     Assert.True(same piece again[0], "the same page is the same stored pieces")
 
 [<Fact>]
+let ``a fragment reports what it keeps alive for the fragment cache's budget`` () =
+    let messages = [ for n in 0..9 -> message n ]
+    let fresh = messages[5]
+    Assert.Equal(0, fresh.HeldBytes)
+    let page = page "<html><head>layout</head><body>" messages "</body></html>"
+    page.Gzip 1234u |> ignore
+    let held = fresh.HeldBytes
+    let pieces = storedPieces fresh
+    // Its SHA-256 and each piece with its glue, not its own bytes.
+    Assert.True(held >= 32 + (pieces |> Array.sumBy (fun p -> p.Piece.Deflated.Length)), $"{held} bytes held")
+    Assert.True(held < fresh.Length, "the pieces are compressed")
+    // Spliced after another neighbour it gains a piece.
+    let other = Page.Empty.AddText("<p>").AddFragment(messages[0]).AddFragment(fresh).AddText "</p>"
+    other.Gzip 1234u |> ignore
+    Assert.True(fresh.HeldBytes > held)
+
+[<Fact>]
 let ``the plain body is the page`` () =
     let messages = [ for n in 900..909 -> message n ]
     let small = Fragment "<i>small</i>"
