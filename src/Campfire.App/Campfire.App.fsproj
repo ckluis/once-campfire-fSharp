@@ -73,6 +73,7 @@
     <Compile Include="Controllers/Rooms/Directs.fs" />
     <Compile Include="Controllers/Rooms/Involvements.fs" />
     <Compile Include="Controllers/Rooms/Refreshes.fs" />
+    <Compile Include="Controllers/Searches.fs" />
     <Compile Include="Controllers.fs" />
     <Compile Include="Boot.fs" />
     <Compile Include="Program.fs" />

@@ -23,6 +23,7 @@
     <Compile Include="AttachmentTests.fs" />
     <Compile Include="RoomsTests.fs" />
     <Compile Include="MessagesTests.fs" />
+    <Compile Include="SearchesTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="testdata/rqrcode.json" CopyToOutputDirectory="PreserveNewest" />
