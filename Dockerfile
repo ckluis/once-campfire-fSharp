@@ -166,6 +166,9 @@ LABEL org.opencontainers.image.description="${OCI_DESCRIPTION}"
 ARG OCI_SOURCE
 LABEL org.opencontainers.image.source="${OCI_SOURCE}"
 LABEL org.opencontainers.image.licenses="MIT"
+# The port's own commit (GIT_REVISION below is the reference's, which the app echoes in X-Rev for parity).
+ARG SOURCE_REVISION
+LABEL org.opencontainers.image.revision="${SOURCE_REVISION}"
 
 # Run and own only the runtime files as a non-root user, as the reference does.
 RUN groupadd --system --gid 1000 rails && \

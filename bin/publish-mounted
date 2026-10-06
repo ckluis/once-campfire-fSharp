@@ -29,4 +29,5 @@ docker run --rm -v "$SRC:/src" -v "$ROOT/reference:/src/reference:ro" -v campfir
     chmod -R a+rwX /src/out"
 rsync -a --delete "$SRC/out/" "$DIR/"
 echo "$(git -C "$ROOT" rev-parse --short HEAD) (dirty files under src/: $(git -C "$ROOT" status --porcelain -- src | wc -l)) at $(date -u +%FT%TZ)" > "$DIR/.built-from"
+git -C "$ROOT" rev-parse --short HEAD > "$DIR/REVISION"  # bench/lib/quicklog.py logs runs against the commit the build came from
 echo "published $(ls "$DIR" | wc -l) files to $DIR from $(git -C "$ROOT" rev-parse --short HEAD) (dirty files under src/: $(git -C "$ROOT" status --porcelain -- src | wc -l))"

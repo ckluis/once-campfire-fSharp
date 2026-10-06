@@ -111,12 +111,37 @@ def compare(directory):
     return bad
 
 
+def source_commit(build):
+    """The commit the measured build was made from, not whatever HEAD is when the run is logged (other commits,
+    such as the page's, land in between). Mounted builds: the REVISION file bin/publish-mounted writes. Image builds:
+    campfire-fsharp:app's org.opencontainers.image.revision label (SOURCE_REVISION). Otherwise HEAD."""
+    def run(*cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    if build == "mounted":
+        for d in (os.environ.get("MOUNTED_DIR", "/var/tmp/campfire-mounted"),):
+            path = os.path.join(d, "REVISION")
+            if os.path.exists(path):
+                with open(path) as f:
+                    rev = f.read().strip()
+                if rev:
+                    return rev[:7]
+    else:
+        # Not GIT_REVISION: that is the reference's pinned commit, which the app echoes for parity.
+        rev = run("docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.revision"}}', "campfire-fsharp:app")
+        if rev and rev != "<no value>":
+            return rev[:7]
+    return run("git", "-C", ROOT, "rev-parse", "--short", "HEAD")
+
+
 def log(args):
     mine = cells(load(args.dir, "fsharp"))
     workloads = {}
     for (w, c), m in mine.items():
         workloads.setdefault(w, {})[f"c{c}"] = {"rps": round(med(m["rps"]), 1), "cpu_us": round(med(m["cpu"]), 1) if m["cpu"] else None, "reps": len(m["rps"])}
-    commit = args.commit or subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    commit = args.commit or source_commit(args.build)
     entry = {"time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "unit": args.unit, "tier": args.tier, "change": args.change,
              "commit": commit, "build": args.build, "kept": args.kept == "true", "workloads": workloads}
     with open(LOG, "a") as f:
