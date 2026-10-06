@@ -80,7 +80,7 @@
     <Compile Include="Templates/Rooms/Closeds/New.fs" />
     <Compile Include="Templates/Rooms/Directs/Edit.fs" />
     <Compile Include="Templates/Rooms/Directs/New.fs" />
-    <Compile Include="Templates/Rooms/Refreshes/Show.fs" />
+    <Compile Include="Templates/Rooms/Refreshes/ShowTurboStream.fs" />
     <Compile Include="Templates/Searches/_Recents.fs" />
     <Compile Include="Templates/Searches/Index.fs" />
     <Compile Include="Templates/Autocompletable/Users/_PromptItem.fs" />

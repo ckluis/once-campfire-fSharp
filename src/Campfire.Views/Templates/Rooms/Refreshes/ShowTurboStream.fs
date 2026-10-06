@@ -2,7 +2,7 @@
 /// `rooms/refreshes/show.turbo_stream.erb`, byte for byte as Erubi renders it: the append (when there are new
 /// messages), then the blank line between the two blocks (so an empty refresh is "\n", which Rack::ETag digests),
 /// then one indented line per replace.
-module Campfire.Views.Templates.Rooms.Refreshes.Show
+module Campfire.Views.Templates.Rooms.Refreshes.ShowTurboStream
 
 open Campfire.Views
 open Campfire.Views.Messages

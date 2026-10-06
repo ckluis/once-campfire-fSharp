@@ -149,7 +149,7 @@ let private run (op: string) (args: JsonElement) (ctx: ViewContext) : Answer =
             { refresh with
                 NewMessages = mixed ctx refresh.NewMessages args
                 UpdatedMessages = mixed ctx refresh.UpdatedMessages args }
-        recordedFragmentAnswer (fun w -> Templates.Rooms.Refreshes.Show.render w ctx refresh)
+        recordedFragmentAnswer (fun w -> Templates.Rooms.Refreshes.ShowTurboStream.render w ctx refresh)
     | "rooms/opens/new" ->
         let form = openFormView (get args "form")
         pageAnswer

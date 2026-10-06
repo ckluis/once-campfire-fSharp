@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Lists the #[test]s of rust/crates/views that have no F# counterpart in tests/Campfire.Views.Tests, and the
+templates of rust/crates/views/templates that have no F# module under src/Campfire.Views/Templates. A test
+counterpart is a [<Fact>] whose double-backtick name is the Rust name with spaces for underscores (apostrophes
+dropped); a template's is the file at the same relative path (a leading "_" kept, each word capitalized,
+"index.turbo_stream.html" as IndexTurboStream, "show.html" under a directory "show/" as ShowPage's namesake).
+Exits 1 if anything is missing.
+
+  bin/views-test-parity
+"""
+import re
+import sys
+from pathlib import Path
+
+root = Path(__file__).resolve().parent.parent
+crate = root / "rust/crates/views"
+
+rust_tests = []
+for path in sorted(list((crate / "src").rglob("*.rs")) + list((crate / "tests").rglob("*.rs"))):
+    lines = path.read_text().splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "#[test]":
+            name = re.search(r"fn (\w+)", lines[i + 1]).group(1)
+            rust_tests.append((str(path.relative_to(crate)), name))
+
+fsharp_names = set()
+for path in (root / "tests/Campfire.Views.Tests").glob("*.fs"):
+    for name in re.findall(r"``([^`]+)``", path.read_text()):
+        fsharp_names.add(re.sub(r"\s+", "_", name.replace("'", "")).lower())
+
+missing_tests = [(f, n) for f, n in rust_tests if n not in fsharp_names]
+
+
+def camel(word):
+    return "".join(part[:1].upper() + part[1:] for part in word.split("_"))
+
+
+def module_path(template):
+    parts = template.split("/")
+    out = []
+    for i, part in enumerate(parts):
+        base = part.split(".")[0] if i == len(parts) - 1 else part
+        out.append(("_" if base.startswith("_") else "") + camel(base.lstrip("_")))
+    if parts[-1].split(".", 1)[1].startswith("turbo_stream"):
+        out[-1] += "TurboStream"
+    return "/".join(out) + ".fs"
+
+
+templates_dir = crate / "templates"
+fsharp_dir = root / "src/Campfire.Views/Templates"
+templates = sorted(str(p.relative_to(templates_dir)) for p in templates_dir.rglob("*") if p.is_file())
+missing_templates = [t for t in templates if not (fsharp_dir / module_path(t)).exists()]
+
+print(f"{len(rust_tests)} Rust tests, {len(rust_tests) - len(missing_tests)} with an F# counterpart")
+for f, n in missing_tests:
+    print(f"  no F# test for {f}: {n}")
+print(f"{len(templates)} Rust templates, {len(templates) - len(missing_templates)} with an F# module")
+for t in missing_templates:
+    print(f"  no F# module for {t}")
+sys.exit(1 if missing_tests or missing_templates else 0)

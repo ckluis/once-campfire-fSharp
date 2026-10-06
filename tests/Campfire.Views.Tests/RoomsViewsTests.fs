@@ -104,4 +104,4 @@ let ``involvement`` () =
 let ``refresh stream`` () =
     let g = golden "rooms_refreshes_show"
     let refresh = refreshView g.Input
-    g.AssertDom(Render.text (fun w -> Rooms.Refreshes.Show.render w g.Context refresh))
+    g.AssertDom(Render.text (fun w -> Rooms.Refreshes.ShowTurboStream.render w g.Context refresh))

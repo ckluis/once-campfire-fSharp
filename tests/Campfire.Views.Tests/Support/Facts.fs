@@ -84,7 +84,7 @@ let context (name: string) (request: Request) : ViewContext =
       Account =
         { Name = defaultArg (str (get account "name")) ""
           LogoUrl = defaultArg (str (get account "logo_path")) "/account/logo"
-          HasLogo = account.GetProperty("has_logo").ValueKind = JsonValueKind.True }
+          HasLogo = (get account "has_logo").ValueKind = JsonValueKind.True }
       FlashNotice = request.FlashNotice
       FlashAlert = request.FlashAlert
       Platform = platform (nonNull (case.GetProperty("ua").GetString()))

@@ -56,7 +56,12 @@ let ``the views render as the rust views did`` () =
           "messages/boosts/new"; "rooms/show"; "rooms/involvements/show"; "rooms/refreshes/show"; "rooms/opens/new"
           "rooms/opens/edit"; "rooms/closeds/new"; "rooms/closeds/edit"; "rooms/directs/new"; "rooms/directs/edit"
           "rooms/layouts/_form"; "searches/index"; "autocompletable/users/index"; "autocompletable/users/_prompt_item"
-          "users/sidebars/show" ] do
+          "users/sidebars/show"; "accounts/edit"; "accounts/users/_user"; "accounts/users/_next_page_container"
+          "accounts/users/index_turbo_stream"; "accounts/bots/_bot"; "accounts/bots/_form"; "accounts/bots/index"; "accounts/bots/new"
+          "accounts/bots/edit"; "accounts/custom_styles/edit"; "first_runs/show"; "sessions/new"; "sessions/incompatible_browser"
+          "sessions/transfers/show"; "users/new"; "users/show"; "users/_ban_button"; "users/profiles/show"
+          "users/profiles/_membership"; "users/profiles/_transfer"; "users/push_subscriptions/index"
+          "users/push_subscriptions/_push_subscription"; "users/avatars/show"; "pwa/manifest"; "pwa/service_worker" ] do
         Assert.True(counts.ContainsKey op, $"no {op} case in differential.jsonl")
     let report = String.Join("\n", failures |> Seq.truncate 10)
     Assert.True(failures.Count = 0, $"{failures.Count} of {replayed} differ:\n{report}")
