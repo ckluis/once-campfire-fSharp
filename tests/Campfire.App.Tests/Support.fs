@@ -207,6 +207,20 @@ type Test(booted: Booted, dir: string, host: Host, logs: CapturingLoggers) =
     /// The request to the booted app's whole pipeline.
     member _.Send(req: Req) : Task<Reply> = host.Send req
 
+    /// The seed's `labels.json` (what its fixtures' names stand for: `emails.david`, `users.kevin`, ...), if
+    /// the app was booted over one.
+    member val Labels: JsonElement option = None with get, set
+
+    /// A label of the seed as the text a URL or form takes: its string, or the number's digits.
+    member this.Label(key: string) : string =
+        match this.Labels with
+        | None -> failwith "this app was not booted over a seed"
+        | Some labels ->
+            let value = labels.GetProperty key
+            match value.ValueKind with
+            | JsonValueKind.String -> str value
+            | _ -> value.GetRawText()
+
     interface IAsyncDisposable with
         member _.DisposeAsync() =
             ValueTask(
@@ -269,7 +283,10 @@ let bootSeeded (name: string) : Task<Test> =
                 if File.Exists from then File.Copy(from, Path.Combine(dir, "db", file))
             let storage = Path.Combine(seed, "storage")
             if Directory.Exists storage then copyDir storage (Path.Combine(dir, "files"))
-            return! start (configFor dir []) dir
+            let! test = start (configFor dir []) dir
+            let labels = Path.Combine(seed, "labels.json")
+            if File.Exists labels then test.Labels <- Some((JsonDocument.Parse(File.ReadAllText labels)).RootElement.Clone())
+            return test
     }
 
 /// An app booted over an empty storage directory (a fresh install's database).
@@ -295,3 +312,142 @@ let sessionVectors () : SessionVector list * string list * string =
     let blobs = [ for b in root.GetProperty("blobs").EnumerateArray() -> str (b.GetProperty "redirect_path") ]
     sessions, blobs, str (root.GetProperty("forged").GetProperty "cookie_header")
 
+
+// --- Port of controllers/presenters/test_support.rs --------------------------------------------------------------
+//
+// Request-level support for the controllers' tests: the whole app over a private copy of the
+// reference-built `default` parity seed, signed in with a Rails-issued session cookie
+// (`vectors/campfire_sessions.json`), with a tiny cookie jar and CSRF token handling.
+//
+// `TestApp::boot` is `bootSeeded "default"`. The Rust `Reply::frames` (how many data frames a body came in)
+// can't be seen through a raw HTTP/1.1 client over a socket, so there is no counterpart.
+
+let DAVID = 127326141L
+let JASON = 149087659L
+let KEVIN = 712064548L
+let BENDER = 394959859L
+let BENDER_KEY = "394959859-BenderBot123"
+/// Rooms::Closed "All Talk" (David, Jason, Bender): 131 messages.
+let ALL_TALK = 486777696L
+/// Rooms::Open "HQ" (David can't see messages; no messages).
+let HQ = 201306877L
+/// Rooms::Closed "Quiet Corner", created by Kevin, David a member.
+let QUIET_CORNER = 699448326L
+/// A Rooms::Direct between David and Jason.
+let DIRECT_DAVID_JASON = 186869642L
+/// Kevin and Bender's direct room: David isn't in it.
+let DIRECT_KEVIN_BENDER = 340026324L
+
+let private chrome =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+
+/// David's Rails-issued `session_token` cookie header.
+let davidCookie () : string =
+    let sessions, _, _ = sessionVectors ()
+    (sessions |> List.find (fun s -> s.UserName = "David")).CookieHeader
+
+/// `Reply`'s helpers in `test_support.rs`.
+type Reply with
+    member this.Location: string option = this.Header "location"
+    member this.ContentType: string option = this.Header "content-type"
+
+    member this.Json: JsonDocument = JsonDocument.Parse this.Body
+
+    member this.SetCookies: string list = this.HeaderValues "set-cookie"
+
+/// `Req::new(method, path).form(...)`: a form post's body, URL-encoded.
+let formBody (pairs: (string * string) list) : string =
+    pairs |> List.map (fun (k, v) -> $"{Campfire.Ruby.Ruby.cgiEscape k}={Campfire.Ruby.Ruby.cgiEscape v}") |> String.concat "&"
+
+/// `Req::multipart`: a body with text fields and one file field (name, filename, content type, data).
+let multipartReq (req: Req) (fields: (string * string) list) (name: string, filename: string, contentType: string, data: byte[]) : Req =
+    let boundary = "----campfiretestboundary"
+    use body = new MemoryStream()
+    let write (text: string) = body.Write(Encoding.UTF8.GetBytes text)
+    for (fieldName, value) in fields do
+        write $"--{boundary}\r\nContent-Disposition: form-data; name=\"{fieldName}\"\r\n\r\n{value}\r\n"
+    write
+        $"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {contentType}\r\n\r\n"
+    body.Write data
+    write $"\r\n--{boundary}--\r\n"
+    { req.With("content-type", $"multipart/form-data; boundary={boundary}") with Body = Some(body.ToArray()) }
+
+/// A client that keeps cookies between requests, with a remote IP of its own (the sign-in rate limit is per IP).
+type Browser(test: Test, ip: string option) =
+    let cookies = SortedDictionary<string, string>(StringComparer.Ordinal)
+
+    member _.Test = test
+
+    /// Sets a cookie as a response would have (the value as it goes in the header).
+    member _.SetCookie(name: string, value: string) : unit = cookies[name] <- value
+
+    member _.Cookie(name: string) : string option =
+        match cookies.TryGetValue name with
+        | true, value -> Some value
+        | _ -> None
+
+    member _.AbsorbCookieHeader(header: string) : unit =
+        for pair in header.Split ';' do
+            match pair.Trim().IndexOf '=' with
+            | -1 -> ()
+            | at ->
+                let pair = pair.Trim()
+                cookies[pair.Substring(0, at)] <- pair.Substring(at + 1)
+
+    member private _.AbsorbSetCookies(reply: Reply) : unit =
+        for cookie in reply.HeaderValues "set-cookie" do
+            let pair = cookie.Split(';')[0]
+            match pair.IndexOf '=' with
+            | -1 -> ()
+            | at ->
+                let name, value = pair.Substring(0, at), pair.Substring(at + 1)
+                let lower = cookie.ToLowerInvariant()
+                if value = "" || lower.Contains "max-age=0" || lower.Contains "1970" then cookies.Remove name |> ignore
+                else cookies[name] <- value
+
+    member this.Send(req: Req) : Task<Reply> =
+        task {
+            let has (name: string) = req.Headers |> List.exists (fun (k, _) -> k.Equals(name, StringComparison.OrdinalIgnoreCase))
+            let mutable r = req
+            if not (has "user-agent") then r <- r.With("user-agent", chrome)
+            if not (has "accept") then r <- r.With("accept", "text/html,application/xhtml+xml")
+            match ip with
+            | Some ip -> r <- r.With("x-forwarded-for", ip)
+            | None -> ()
+            if cookies.Count > 0 then
+                r <- r.With("cookie", cookies |> Seq.map (fun (KeyValue(k, v)) -> $"{k}={v}") |> String.concat "; ")
+            let! reply = test.Send r
+            this.AbsorbSetCookies reply
+            return reply
+        }
+
+    member this.Get(path: string) : Task<Reply> = this.Send(get path)
+
+    /// A write as the app's own pages make it: same-origin, by `Sec-Fetch-Site`.
+    member this.Write(req: Req) : Task<Reply> = this.Send(req.With("sec-fetch-site", "same-origin"))
+
+    /// A form post, with `_method` for the other verbs (what `button_to` and `form_with` send).
+    member this.Form(meth: string, path: string, fields: (string * string) list) : Task<Reply> =
+        let pairs = (if meth <> "post" then [ "_method", meth ] else []) @ fields
+        this.Write((request "POST" path).Form(formBody pairs))
+
+    /// Signs in through the sign-in page, as a browser does.
+    member this.SignIn(email: string) : Task<unit> =
+        task {
+            let! page = this.Get "/session/new"
+            Assert.True((page.Status = 200), page.Text)
+            let! reply = this.Form("post", "/session", [ "email_address", email; "password", "secret123456" ])
+            Assert.True((reply.Status = 302), $"sign in as {email}: {reply.Text}")
+        }
+
+/// A browser with its own remote IP.
+let browser (test: Test) (ip: string) : Browser = Browser(test, Some ip)
+
+/// `TestApp::david`: a browser signed in as David by a Rails-issued session cookie.
+let david (test: Test) : Browser =
+    let b = Browser(test, None)
+    b.AbsorbCookieHeader(davidCookie ())
+    b
+
+/// `TestApp::anonymous`
+let anonymous (test: Test) : Browser = Browser(test, None)

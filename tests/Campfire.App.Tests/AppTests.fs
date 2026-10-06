@@ -7,10 +7,8 @@
 // `vectors/campfire_sessions.json` holds session cookies *issued by Rails* for the seed's sessions
 // (`reference-tools/campfire/session_cookies.rb`).
 //
-// Not ported yet, because the controllers they drive aren't (the 501s of the route table): the parts of
-// `the_application_chain_blocks_banned_ips_forgeries_and_old_browsers` that go through `/webmanifest.json`,
-// `/service-worker.js` (pwa) and `/account/logo` (accounts/logos), and `concurrent_message_posts_all_complete`
-// (messages#create). Their work stays with the controllers' unit.
+// Not ported yet, because the controller it drives isn't (the 501s of the route table):
+// `concurrent_message_posts_all_complete` (messages#create), with the messages controllers.
 module Campfire.App.Tests.AppTests
 
 open System
@@ -237,9 +235,12 @@ let ``the application chain blocks banned ips forgeries and old browsers`` () =
         Assert.NotEqual<string>(sessions[0].UserName, oldBrowser.Text)
 
         // The incompatible-browser page is an explicit `render template:`: HTML whatever the format.
-        for (path, accept) in [ "/session/new", "application/json" ] do
+        for (path, accept) in [ "/webmanifest.json", "*/*"; "/service-worker.js", "*/*"; "/session/new", "application/json" ] do
             let! blocked = test.Send((get path).With("user-agent", outdated).With("accept", accept))
             Assert.True(((blocked.Status, blocked.Header "content-type") = (200, Some "text/html; charset=utf-8")), $"{path} {accept}")
+        // In a Live controller (`include ActiveStorage::Streaming`) Rack::ETag can't digest the body.
+        let! logo = test.Send((get "/account/logo").With("user-agent", outdated))
+        Assert.Equal((200, Some "no-cache", None), (logo.Status, logo.Header "cache-control", logo.Header "etag"))
     }
 
 [<Fact>]

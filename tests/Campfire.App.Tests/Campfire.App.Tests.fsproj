@@ -14,6 +14,14 @@
     <Compile Include="JobsTests.fs" />
     <Compile Include="MiscTests.fs" />
     <Compile Include="FragmentGlueTests.fs" />
+    <Compile Include="PaginationTests.fs" />
+    <Compile Include="GuardTests.fs" />
+    <Compile Include="RqrcodeTests.fs" />
+    <Compile Include="ControllerTests.fs" />
+    <Compile Include="PresenterAccountsTests.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="testdata/rqrcode.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Campfire.App/Campfire.App.fsproj" />
