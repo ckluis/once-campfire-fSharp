@@ -45,7 +45,7 @@ let pageAnswer (args: JsonElement) (render: Out -> unit) (head: Out -> unit) (co
     let frame = bool (get args "frame")
     let once () =
         let plain = Render.text render
-        let recorded = if frame then Layouts.frame head content else Render.page 0 render
+        let recorded = if frame then Layouts.frame (RenderSize()) head content else Render.page 0 render
         plain, recorded
     let coldPlain, cold = once ()
     let plain, recorded = once ()

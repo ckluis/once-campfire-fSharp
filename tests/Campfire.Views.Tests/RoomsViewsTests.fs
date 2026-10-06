@@ -33,7 +33,7 @@ let ``show recorded keeps every message as a fragment`` () =
             Assert.Equal(plain, recorded.ToString())
             Assert.Equal(show.Messages.Length, recorded.Fragments.Length)
 
-            let framed = Layouts.frame head content
+            let framed = Layouts.frame (RenderSize()) head content
             let plainFrame =
                 Render.text (fun w ->
                     Layouts.TurboRails.Frame.render w (fun w -> w.Raw(Render.text head)) (fun w -> w.Raw(Render.text content)))

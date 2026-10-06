@@ -103,8 +103,19 @@ let ``each call site has its own size`` () =
 let ``the turbo frame layout around a page keeps the pages fragments`` () =
     let items = items ()
     let head (w: Out) = w.Raw "<title>t</title>"
-    let framed = Layouts.frame head (list items "")
+    let framed = Layouts.frame (RenderSize()) head (list items "")
     let plain = Render.text (fun w -> Templates.Layouts.TurboRails.Frame.render w head (list items ""))
     Assert.Equal(plain, framed.ToString())
     Assert.Equal(2, framed.Fragments.Length)
     Assert.StartsWith("<html>\n  <head>\n    <title>t</title>\n  </head>\n  <body>\n    <ul>", framed.ToString())
+
+[<Fact>]
+let ``the turbo frame layout sizes the content from the pages last render`` () =
+    let head (w: Out) = w.Raw "<title>t</title>"
+    let big (w: Out) = w.Raw(String('x', 50_000))
+    let size = RenderSize()
+    Assert.Equal(0, size.Capacity 0)
+    let first = Layouts.frame size head big
+    // The next frame of this page starts from what the last one took (an eighth more), not from nothing.
+    Assert.Equal(50_000 + 50_000 / 8, size.Capacity 0)
+    Assert.Equal(first.ToString(), (Layouts.frame size head big).ToString())

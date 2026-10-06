@@ -1,7 +1,7 @@
 // Port of rust/crates/views/templates/rooms/show.html (reference/app/views/rooms/show.html.erb)
 /// `rooms/show.html.erb`, with `MessagesHelper#message_area_tag` and `#messages_tag`: the room page. A page module
 /// exposes its regions (`head`, `nav`, `sidebar`, `content`, `footer`) as functions of the writer, which `render` hands
-/// to the application layout and `Layouts.frame` (with `head` and `content`) to the Turbo-Frame layout.
+/// to the application layout and `Layouts.frame` (with the page's `RenderSize`, `head` and `content`) to the Turbo-Frame layout.
 ///
 /// The module is `ShowPage`, not `Show`: `rooms/show/` holds the partials (`Templates/Rooms/Show/_Nav.fs`...), and a
 /// module and a namespace of one name can't both be in an assembly.

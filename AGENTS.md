@@ -115,7 +115,7 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   conditions. The result is a starting point; compare the module with Rust's through the differential, and with the Rails golden
   renders through `ParityATests`-style DOM tests (`Campfire.Views.Tests/Support`; `GoldenB` for the messages, rooms and search
   goldens). A page module exposes its regions (`head`, `nav`, `content`, `footer`, `sidebar`) as functions of the writer, which
-  `render` hands to the layout and `Layouts.frame` (`head` and `content`) to the Turbo-Frame layout. A module and a namespace of
+  `render` hands to the layout and `Layouts.frame` (a `RenderSize` the page module keeps, `head` and `content`) to the Turbo-Frame layout. A module and a namespace of
   one name can't both be in an assembly, so `rooms/show.html` is `Templates/Rooms/Show.fs` as module `ShowPage`, beside the
   `rooms/show/` partials' namespace.
 - `Campfire.Kit`'s front server tests (`FrontTests`, `FrontAcmeIntegrationTests`) open real sockets on loopback and take

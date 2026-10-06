@@ -182,7 +182,7 @@ let ``users sidebars show`` () =
     let ctx = context name Request.none
     let page = sidebar name
     let framed =
-        Layouts.frame Templates.Users.Sidebars.Show.head (fun w -> Templates.Users.Sidebars.Show.content w ctx page)
+        Layouts.frame (RenderSize()) Templates.Users.Sidebars.Show.head (fun w -> Templates.Users.Sidebars.Show.content w ctx page)
     assertParity name "html" (framed.ToString())
 
 [<Fact>]
