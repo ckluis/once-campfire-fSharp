@@ -42,26 +42,35 @@ let ``the views render as the rust views did`` () =
                 if fragments <> theirs then failures.Add $"{op}: fragments {fragments} against rust's {theirs}"
             | _ -> ()
     // The sample covers every kind of case, so that a case dropped from the file fails.
-    for op in
-        [ "layouts/application_wrapper"; "layouts/_lightbox"; "layouts/turbo_rails/frame"; "recorded/page"; "accounts/_help_contact"
-          "accounts/_invite"; "pwa/_install_instructions"; "pwa/_browser_settings"; "pwa/_system_settings"; "users/_mention"
-          "users/autocompletables/_template"; "users/sidebars/rooms/_direct"; "users/sidebars/rooms/_shared"
-          "users/sidebars/rooms/_direct_placeholder"; "users/direct_room"; "welcome/show"; "helpers/tag"; "helpers/form"; "helpers/button"; "helpers/link"
-          "helpers/image_tag"; "helpers/application"; "helpers/users"; "helpers/rooms"; "helpers/translations"; "helpers/url"
-          "helpers/turbo"; "fragment_cache/keys"; "fragment_cache/script"; "messages/presentation"; "messages/epoch_ms"
-          "messages/ruby_number"; "messages/json_by_bots_index"; "helpers/application:to_lowercase"; "messages/_message"
-          "messages/message_cached"; "messages/_actions"; "messages/_presentation"; "messages/_unrenderable"; "messages/_template"
-          "messages/index"; "messages/show"; "messages/edit"; "messages/create_turbo_stream"; "messages/destroy_turbo_stream"
-          "messages/room_not_found"; "messages/boosts/_boost"; "messages/boosts/_boosts"; "messages/boosts/index"
-          "messages/boosts/new"; "rooms/show"; "rooms/involvements/show"; "rooms/refreshes/show"; "rooms/opens/new"
-          "rooms/opens/edit"; "rooms/closeds/new"; "rooms/closeds/edit"; "rooms/directs/new"; "rooms/directs/edit"
-          "rooms/layouts/_form"; "searches/index"; "autocompletable/users/index"; "autocompletable/users/_prompt_item"
-          "users/sidebars/show"; "accounts/edit"; "accounts/users/_user"; "accounts/users/_next_page_container"
-          "accounts/users/index_turbo_stream"; "accounts/bots/_bot"; "accounts/bots/_form"; "accounts/bots/index"; "accounts/bots/new"
-          "accounts/bots/edit"; "accounts/custom_styles/edit"; "first_runs/show"; "sessions/new"; "sessions/incompatible_browser"
-          "sessions/transfers/show"; "users/new"; "users/show"; "users/_ban_button"; "users/profiles/show"
-          "users/profiles/_membership"; "users/profiles/_transfer"; "users/push_subscriptions/index"
-          "users/push_subscriptions/_push_subscription"; "users/avatars/show"; "pwa/manifest"; "pwa/service_worker" ] do
+    let required =
+        [ "layouts/application_wrapper"; "layouts/_lightbox"; "layouts/turbo_rails/frame"; "recorded/page";
+          "accounts/_help_contact"; "accounts/_invite"; "pwa/_install_instructions"; "pwa/_browser_settings";
+          "pwa/_system_settings"; "users/_mention"; "users/autocompletables/_template"; "users/sidebars/rooms/_direct";
+          "users/sidebars/rooms/_shared"; "users/sidebars/rooms/_direct_placeholder"; "users/direct_room"; "welcome/show";
+          "helpers/tag"; "helpers/form"; "helpers/button"; "helpers/link"; "helpers/image_tag"; "helpers/application";
+          "helpers/users"; "helpers/rooms"; "helpers/translations"; "helpers/url"; "helpers/turbo"; "fragment_cache/keys";
+          "fragment_cache/script"; "messages/presentation"; "messages/epoch_ms"; "messages/ruby_number";
+          "messages/json_by_bots_index"; "helpers/application:to_lowercase"; "messages/_message"; "messages/message_cached";
+          "messages/_actions"; "messages/_presentation"; "messages/_unrenderable"; "messages/_template"; "messages/index";
+          "messages/show"; "messages/edit"; "messages/create_turbo_stream"; "messages/destroy_turbo_stream";
+          "messages/room_not_found"; "messages/boosts/_boost"; "messages/boosts/_boosts"; "messages/boosts/index";
+          "messages/boosts/new"; "rooms/show"; "rooms/involvements/show"; "rooms/refreshes/show"; "rooms/opens/new";
+          "rooms/opens/edit"; "rooms/closeds/new"; "rooms/closeds/edit"; "rooms/directs/new"; "rooms/directs/edit";
+          "rooms/layouts/_form"; "searches/index"; "autocompletable/users/index"; "autocompletable/users/_prompt_item";
+          "users/sidebars/show"; "accounts/edit"; "accounts/users/_user"; "accounts/users/_next_page_container";
+          "accounts/users/index_turbo_stream"; "accounts/bots/_bot"; "accounts/bots/_form"; "accounts/bots/index";
+          "accounts/bots/new"; "accounts/bots/edit"; "accounts/custom_styles/edit"; "first_runs/show"; "sessions/new";
+          "sessions/incompatible_browser"; "sessions/transfers/show"; "users/new"; "users/show"; "users/_ban_button";
+          "users/profiles/show"; "users/profiles/_membership"; "users/profiles/_transfer"; "users/push_subscriptions/index";
+          "users/push_subscriptions/_push_subscription"; "users/avatars/show"; "pwa/manifest"; "pwa/service_worker";
+          "autocompletable/users_index_json"; "helpers/asset_path"; "messages/iso8601"; "messages/json_boosts_by_bots_show";
+          "messages/json_by_bots_show"; "messages/json_time"; "rooms/button_to_delete_room"; "rooms/mention_prompt_src";
+          "rooms/room_display_name"; "searches/search_path" ]
+    for op in required do
         Assert.True(counts.ContainsKey op, $"no {op} case in differential.jsonl")
+    // And the list covers the sample, so an operation added to the generator is added here too.
+    let listed = Collections.Generic.HashSet<string>(required)
+    for op in counts.Keys do
+        Assert.True(listed.Contains op, $"{op} is in differential.jsonl but not in the list of operations the sample must cover")
     let report = String.Join("\n", failures |> Seq.truncate 10)
     Assert.True(failures.Count = 0, $"{failures.Count} of {replayed} differ:\n{report}")
