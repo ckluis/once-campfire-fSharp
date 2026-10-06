@@ -177,3 +177,13 @@ Findings of a phase's verifier that a later phase has to meet. Each is a gate of
   than Rust on plain-frame Cable bursts, lone broadcasts, idle CPU and memory per client, and on the front's
   signed-cookie page, 100 KB identity page and 20 KB asset cache hit. They are gates, not accepted costs.
 
+
+## Process changes
+
+- **2026-10-06, once tuning began (Chris).** Rust is a fixed target during tuning: incremental runs measure F# alone
+  against the stored Rust numbers in `bench/results/phase7-start/`, and Rust and Rails are re-measured only at the
+  re-baseline that closes an area. Iteration has three tiers: (1) seconds, in-process A/B micro-benchmarks and the
+  affected tests (SageFs optional); (2) minutes, a published build mounted into the container, F# only, on the
+  workloads the change touches; (3) once per unit, the rebuilt image, `bench/quick` F#-only on all five workloads,
+  `bin/verify` and the differentials. Every tier 2 and 3 run is appended to `bench/results/phase7-log.jsonl`, which
+  `bench/progress/build.py` turns into the progress dashboard.

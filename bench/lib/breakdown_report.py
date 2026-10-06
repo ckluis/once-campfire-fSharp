@@ -203,6 +203,15 @@ def perf_tables(d):
         return
     routes = [r for r in ROUTES if ("fsharp", r) in data and ("rust", r) in data]
     is_scaled = all("unprofiled_us_per_request" in x for x in data.values())
+    hosts = {}
+    for f in glob.glob(os.path.join(d, "host-*-*.json")):
+        app, route = os.path.basename(f)[len("host-"):].split("-", 1)
+        h = json.load(open(f))
+        hosts[(app, route.rsplit("-c", 1)[0])] = max(h["after_unprofiled_window"]["ratio"], h["after_perf_window"]["ratio"])
+    if hosts:
+        noisy = sorted(f"{a} {r} ({v:.2f})" for (a, r), v in hosts.items() if v > 1.10)
+        print(f"Host CPU probe after the unprofiled and the perf window of each route (1.00 = a quiet host, above 1.10 the numbers overlap noise from "
+              f"outside): highest {max(hosts.values()):.2f}; " + (("**above 1.10 for: " + ", ".join(noisy) + "**") if noisy else "none above 1.10") + ".\n")
     if is_scaled:
         print("Every µs figure below is the share perf measured times the unprofiled CPU per request of the same process, route and "
               "concentration (cgroup cpu.stat of an unprofiled window just before the perf window), so the columns add up to the "
@@ -265,14 +274,14 @@ def perf_tables(d):
             print(f"| {k} | " + " | ".join(f"{data[('fsharp', r)]['clr_us_scaled'].get(k, 0):.1f}" for r in clr_routes) + " |")
 
     print("\n#### CPU per request by resource, Rust against F# (µs/req; the leaf's own object, whoever called it)\n")
-    names = ["kernel", "SQLite engine", "crypto: OpenSSL (F#) / SHA, HMAC, AES crates (Rust)", "memory: CLR runtime, GC, JIT (F#) / allocator (Rust)", "libc (mutexes, memcpy, other)", "managed code (F#) / Rust code"]
+    names = ["kernel", "SQLite engine", "crypto: OpenSSL (F#) / SHA, HMAC, AES crates (Rust)", "CLR runtime: GC, allocation, JIT, locks, spinning (F#) / jemalloc (Rust)", "libc (mutexes, memcpy, other)", "managed code (F#) / Rust code"]
 
     def res(app, x, name):
         t = x["resource_us"]
         if name == "kernel": return t.get("kernel", 0)
         if name == "SQLite engine": return t.get("SQLite engine", 0)
         if name.startswith("crypto"): return t.get("OpenSSL", 0) + t.get("SHA/HMAC/AES (Rust crates)", 0)
-        if name.startswith("memory"): return t.get("CLR runtime (GC, JIT, type system)", 0) + t.get("allocator (jemalloc, libc malloc)", 0)
+        if name.startswith("CLR runtime"): return t.get("CLR runtime (GC, JIT, type system)", 0) + t.get("allocator (jemalloc, libc malloc)", 0)
         if name.startswith("libc"): return t.get("libc (malloc, mutexes, memcpy)", 0) + t.get("libc (mutexes, memcpy, other)", 0) + t.get("System.Native shim", 0)
         return t.get("managed code (JIT and precompiled)", 0) + t.get("Rust code (app, hyper, tokio, std)", 0)
     for x in data.values():
@@ -323,8 +332,10 @@ def perf_tables(d):
 def main():
     argv = sys.argv[1:]
     d = argv[0]
-    print("### CPU per request (cgroup cpu.stat of the container, unprofiled; median [min–max] over reps)\n")
-    cpu_table(load_cpu(d))
+    cpu_runs = load_cpu(d)
+    if cpu_runs:
+        print("### CPU per request (cgroup cpu.stat of the container, unprofiled; median [min–max] over reps)\n")
+        cpu_table(cpu_runs)
     profile_tables(d)
     if "--identity" in argv:
         print("\n### Identity bodies (Accept-Encoding: identity), CPU per request\n")

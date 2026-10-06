@@ -160,13 +160,18 @@ perf_record_route() {
   local route=$1 app=$2; route_args "$route"; local a=("${ROUTE_ARGS[@]}")
   warm_up "$COOKIE" "$CONC" "${a[@]}" >/dev/null
   lgc "$CG" http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration "$SECS" > "$OUT/cpu-$app-$route-c$CONC.json"
+  local probe_unprofiled; probe_unprofiled=$(host_probe)   # was the host quiet during the unprofiled window? (bench/lib/hostprobe.py)
   rm -f "$DIAG_DIR/perf-$route.data"
   lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration $((SECS + 6)) > "$DIAG_DIR/lg-$route.json" &
   local lgpid=$!
   sleep 2
   sudo perf record -F 999 -g -p "$PERF_PID" -o "$DIAG_DIR/perf-$route.data" -- sleep "$SECS" >/dev/null 2>&1
   wait "$lgpid"
-  log "perf $app $route: recorded; unprofiled $(python3 -c 'import json,sys; c=json.load(open(sys.argv[1]))["cost"]; print(c["server_cpu_us_per_req"], "us/req,", c["server_cores_busy"], "cores")' "$OUT/cpu-$app-$route-c$CONC.json")"
+  python3 - "$OUT/host-$app-$route-c$CONC.json" "$probe_unprofiled" "$(host_probe)" <<'PY'
+import json, sys
+json.dump({"after_unprofiled_window": json.loads(sys.argv[2]), "after_perf_window": json.loads(sys.argv[3])}, open(sys.argv[1], "w"))
+PY
+  log "perf $app $route: recorded; host probe after the unprofiled / perf windows: $(python3 -c 'import json,sys; h=json.load(open(sys.argv[1])); print(h["after_unprofiled_window"]["ratio"], "/", h["after_perf_window"]["ratio"])' "$OUT/host-$app-$route-c$CONC.json"); unprofiled $(python3 -c 'import json,sys; c=json.load(open(sys.argv[1]))["cost"]; print(c["server_cpu_us_per_req"], "us/req,", c["server_cores_busy"], "cores")' "$OUT/cpu-$app-$route-c$CONC.json")"
 }
 
 perf_report_route() {
