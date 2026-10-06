@@ -21,6 +21,7 @@
     <Compile Include="ControllerTests.fs" />
     <Compile Include="PresenterAccountsTests.fs" />
     <Compile Include="AttachmentTests.fs" />
+    <Compile Include="RoomsTests.fs" />
     <Compile Include="MessagesTests.fs" />
   </ItemGroup>
   <ItemGroup>

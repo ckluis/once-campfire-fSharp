@@ -67,6 +67,12 @@
     <Compile Include="Controllers/Messages/Boosts.fs" />
     <Compile Include="Controllers/Messages/ByBots.fs" />
     <Compile Include="Controllers/Messages/BoostsByBots.fs" />
+    <Compile Include="Controllers/Rooms.fs" />
+    <Compile Include="Controllers/Rooms/Opens.fs" />
+    <Compile Include="Controllers/Rooms/Closeds.fs" />
+    <Compile Include="Controllers/Rooms/Directs.fs" />
+    <Compile Include="Controllers/Rooms/Involvements.fs" />
+    <Compile Include="Controllers/Rooms/Refreshes.fs" />
     <Compile Include="Controllers.fs" />
     <Compile Include="Boot.fs" />
     <Compile Include="Program.fs" />
