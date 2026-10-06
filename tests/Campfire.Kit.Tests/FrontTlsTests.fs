@@ -1,9 +1,8 @@
 // Port of the #[cfg(test)] module in rust/crates/kit/src/front/tls.rs
 //
-// Not ported: `returning_clients_resume_their_sessions_by_ticket`. It reads a client's `handshake_kind`
-// (full or resumed) from rustls; `SslStream` doesn't say whether a handshake resumed a session, so there
-// is nothing to assert it with. Kestrel on Linux (OpenSSL) issues TLS 1.3 session tickets by default,
-// and nothing in this code turns them off.
+// `returning_clients_resume_their_sessions_by_ticket` is in FrontAcmeIntegrationTests.fs: `SslStream` doesn't
+// report whether a handshake resumed a session, so it runs `openssl s_client` against the front server
+// and reads "Reused" (on Linux, where Kestrel issues tickets; `bin/linux-tests Kit` runs it there).
 module Campfire.Kit.Tests.FrontTlsTests
 
 open System

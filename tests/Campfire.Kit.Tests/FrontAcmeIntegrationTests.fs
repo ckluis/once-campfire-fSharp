@@ -243,3 +243,74 @@ let ``a certificate is obtained from pebble when there is one`` () =
             Assert.Contains("Pebble", issuer)
             do! server.Stop()
     }
+
+/// `openssl s_client` against `port` with SNI `domain`, sending a request so that the server answers and
+/// closes (a TLS 1.3 client only reads its session tickets after the handshake). `session` is the file
+/// the session is saved to or, with `resume`, read from. Returns what s_client printed, or None when
+/// there is no openssl to run.
+let private sClient (port: int) (domain: string) (session: string) (resume: bool) : Task<string option> =
+    task {
+        let info = Diagnostics.ProcessStartInfo("openssl", RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true)
+        for argument in [ "s_client"; "-ign_eof"; "-connect"; $"127.0.0.1:{port}"; "-servername"; domain; (if resume then "-sess_in" else "-sess_out"); session ] do
+            info.ArgumentList.Add argument
+        let started =
+            try
+                Option.ofObj (Diagnostics.Process.Start info)
+            with :? ComponentModel.Win32Exception ->
+                None
+        match started with
+        | None -> return None
+        | Some proc ->
+            use proc = proc
+            do! proc.StandardInput.WriteAsync $"GET /headers HTTP/1.1\r\nHost: {domain}\r\nConnection: close\r\n\r\n"
+            proc.StandardInput.Close()
+            use timeout = new Threading.CancellationTokenSource(TimeSpan.FromSeconds 30.0)
+            let output = proc.StandardOutput.ReadToEndAsync timeout.Token
+            let errors = proc.StandardError.ReadToEndAsync timeout.Token
+            do! proc.WaitForExitAsync timeout.Token
+            let! output = output
+            let! errors = errors
+            return Some(output + errors)
+    }
+
+/// Port of `returning_clients_resume_their_sessions_by_ticket` in rust/crates/kit/src/front/tls.rs. rustls
+/// reports a handshake's kind; `SslStream` doesn't, so the client here is `openssl s_client`, which prints
+/// `Reused` for a resumed session and `New` for a full handshake. Kestrel's server side issues TLS 1.3
+/// tickets through OpenSSL on Linux, where the front runs; on macOS `SslStream` issues none, so the test
+/// skips there (`bin/linux-tests Kit` runs it in the toolchain container).
+[<Fact>]
+let ``returning clients resume their sessions by ticket`` () =
+    task {
+        if not (OperatingSystem.IsLinux()) then
+            Assert.Skip "SslStream issues no session tickets outside Linux; run it with bin/linux-tests Kit"
+        let storage = tempDir ()
+        let domain = "campfire.test"
+        let chain, key = FrontAcmeTests.selfSigned [ domain ]
+        File.WriteAllText(Path.Combine(storage, domain), AcmeFiles.cacheEntry key chain)
+        let acme =
+            { DirectoryUrl = "https://acme.invalid/directory"
+              ExternalAccount = ValueNone
+              StoragePath = storage
+              Domains = [ domain ]
+              ChallengeTypes = []
+              DirectoryRoot = ValueNone }
+        let http, https = freePort (), freePort ()
+        let! server = startTls [] acme http https
+        try
+            let session = Path.Combine(storage, "session.pem")
+            match! sClient https domain session false with
+            | None -> eprintfn "skipped: openssl isn't installed"
+            | Some first ->
+                Assert.True(File.Exists session, "the first connection was issued a session: " + first)
+                Assert.Contains("New, ", first)
+                // A handful of other clients come between, as in the Rust test (which pushes the session
+                // out of rustls's cache): what resumes it is the ticket, not a server-side cache entry.
+                for n in 1..20 do
+                    let! _ = sClient https domain (Path.Combine(storage, $"other{n}.pem")) false
+                    ()
+                match! sClient https domain session true with
+                | Some second -> Assert.Contains("Reused, ", second)
+                | None -> failwith "openssl vanished"
+        finally
+            server.Stop().Wait()
+    }

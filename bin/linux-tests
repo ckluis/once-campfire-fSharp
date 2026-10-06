@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Runs a test project on Linux, in Dockerfile.toolchain (the .NET SDK on Debian, in colima), for the
+# tests that skip on macOS because the platform's TLS stack differs: front TLS session resumption by
+# ticket, for one (`FrontAcmeIntegrationTests`).
+#
+#   bin/linux-tests Kit                                   all of Campfire.Kit.Tests
+#   bin/linux-tests Kit --filter-method "*resume*"        extra arguments go to dotnet test
+#
+# Build output goes outside the repository (--artifacts-path), so it can't clash with the host's obj/ and bin/.
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ "$(uname)" = Darwin ]; then
+  exec colima ssh -- bash -c "cd '$root' && bin/linux-tests $(printf '%q ' "$@")"
+fi
+
+[ $# -ge 1 ] || { echo "usage: bin/linux-tests <Project> [dotnet test arguments]" >&2; exit 2; }
+project="$1"; shift
+image="${IMAGE:-campfire-fsharp-toolchain}"
+cd "$root"
+docker build --tag "$image" - < Dockerfile.toolchain
+exec docker run --rm \
+  --volume "$root:/src:ro" \
+  --volume campfire-fsharp-nuget:/nuget \
+  --env NUGET_PACKAGES=/nuget \
+  --env CAMPFIRE_ROOT=/src \
+  "$image" \
+  dotnet test --project "tests/Campfire.$project.Tests" -c Release --artifacts-path /artifacts "$@"

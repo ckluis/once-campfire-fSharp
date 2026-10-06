@@ -96,6 +96,8 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   names its `pebble.minica.pem` (the recipe is at the top of `FrontAcmeIntegrationTests.fs`; in colima, give Pebble
   `--add-host campfire.test:192.168.5.2`, the VM's name for the Mac, and `docker cp` the root into `target/`).
   `bench/front/run` measures the front server against Rust's; run it after changing `Front/` or `Splice.fs`.
+  The TLS session-resumption test needs Linux (Kestrel issues no session tickets through macOS's TLS stack, so it skips
+  there) and `openssl`; `bin/linux-tests Kit` runs `Campfire.Kit.Tests` in `Dockerfile.toolchain` inside colima.
 - `bench/cable/run` measures fan-out to 1,000 local subscribers against `campfire_cable` (needs python3 and mise, like
   `bench/kit/run`); `FanOutTests` measures the same in process, without Kestrel. Run both after changing `Pubsub.fs`,
   `Connection.fs` or `Socket.fs`; the results and what they say of the host's settings are in `bench/results/cable-fanout.md`.
