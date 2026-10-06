@@ -30,7 +30,7 @@ let render (w: Out) (ctx: ViewContext) (membership: SidebarDirect) : unit =
         membership.RoomId
         (Tag.attrs()
             .Class(membership.ClassNames)
-            .Id(Turbo.domId "rooms_direct" membership.RoomId (Some "list"))
+            .Id(Turbo.domIdValue "rooms_direct" membership.RoomId (Some "list"))
             .Data("sorted_list_number", membership.UpdatedAtEpoch))
         (fun w ->
             w.Lit t1

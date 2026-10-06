@@ -11,6 +11,24 @@ open Campfire.Views.Helpers.Tag
 let private renderOf (attrs: Attrs) : string = Render.text (fun w -> renderAttrs w attrs)
 
 [<Fact>]
+let ``a numbered value renders as its text and number, and data and aria names are made once`` () =
+    let numbered = Tag.attrs().Id(Turbo.domIdValue "rooms_open" 42L (Some "list")).Style(Numbered("view-transition-name: avatar-", 7L))
+    let strings = Tag.attrs().Id(Turbo.domId "rooms_open" 42L (Some "list")).Style("view-transition-name: avatar-" + string 7L)
+    Assert.Equal(" id=\"list_rooms_open_42\" style=\"view-transition-name: avatar-7\"", renderOf numbered)
+    Assert.Equal(renderOf strings, renderOf numbered)
+    Assert.Equal(" id=\"user_5\"", renderOf (Tag.attrs().Id(Turbo.domIdValue "user" 5L None)))
+    Assert.Equal("_user_5", Turbo.domId "user" 5L (Some ""))
+    Assert.Equal("user_5", Turbo.domId "user" 5L None)
+    Assert.Equal("role_user_-3", Render.text (fun w -> Turbo.writeDomId w "user" -3L (Some "role")))
+    Assert.Equal("list_rooms_open_42", numbered.GetStr("id").Value)
+    // No string per call: the same name object comes back.
+    let first = Tag.attrs().Data("turbo_frame", "_top").NameAt 0
+    let second = Tag.attrs().Data("turbo_frame", "_top").NameAt 0
+    Assert.Equal("data-turbo-frame", first)
+    Assert.Same(first, second)
+    Assert.Same(Tag.attrs().Aria("labelled_by", "x").NameAt 0, Tag.attrs().Aria("labelled_by", true).NameAt 0)
+
+[<Fact>]
 let ``renders attributes in order with rails value rules`` () =
     let attrs =
         Tag.attrs()

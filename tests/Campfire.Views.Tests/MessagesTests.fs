@@ -16,6 +16,29 @@ let ``epoch truncates through a float like ruby`` () =
     Assert.Equal(1790425426483L, epochMs (time "2026-09-26T12:23:46.483521Z"))
     Assert.Equal(1790421826000L, epochMs (time "2026-09-26T11:23:46Z"))
 
+/// `epochMs` is arithmetic; `epochMsViaText` is the decimal string parsed as a double, which is what
+/// `Time#to_f` is. They must agree on every timestamp, including the ones a float rounds either way.
+[<Fact>]
+let ``epoch by integer arithmetic is the float of the decimal string`` () =
+    let epochTicks = System.DateTimeOffset.UnixEpoch.UtcTicks
+    let ofTicks (ticks: int64) = System.DateTimeOffset(epochTicks + ticks, System.TimeSpan.Zero)
+    let random = System.Random 20261005
+    let check (ticks: int64) =
+        let stamp = ofTicks ticks
+        Assert.True(epochMsViaText stamp = epochMs stamp, $"{ticks} ticks after the epoch: {epochMs stamp} against {epochMsViaText stamp}")
+    // The edges: the epoch, one tick, a millisecond either side of a second, today and the far future.
+    for ticks in [ 0L; 1L; 9_999L; 10_000L; 10_001L; 9_999_999L; 10_000_000L; 10_000_001L; 17_904_254_264_835_210L; 2_534_023_007_999_999_999L ] do
+        check ticks
+    // Whole milliseconds, which the float scaling can truncate down by one.
+    for _ in 1..20_000 do
+        check (random.NextInt64(0L, 40_000_000_000_000L) * 10_000L)
+    // Anything at 100 ns, across the range up to year 9999.
+    for _ in 1..20_000 do
+        check (random.NextInt64(0L, 2_534_023_007_999_999_999L))
+    // And before 1970, which keeps the string path.
+    for _ in 1..200 do
+        check (-random.NextInt64(1L, 1_000_000_000_000_000L))
+
 [<Fact>]
 let ``formats numbers like ruby`` () =
     Assert.Equal("600.0", Float(600.0).ToString())

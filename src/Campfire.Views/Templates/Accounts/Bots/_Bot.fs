@@ -39,7 +39,7 @@ let render (w: Out) (ctx: ViewContext) (bot: Bot) : unit =
     Filters.linkTo
         w
         (Routes.editAccountBot bot.User.Id)
-        (Tag.attrs().Class("btn flex-item-justify-end").Style("view-transition-name: chat-bot-" + string bot.User.Id))
+        (Tag.attrs().Class("btn flex-item-justify-end").Style(Tag.Numbered("view-transition-name: chat-bot-", bot.User.Id)))
         (fun w ->
             w.Lit t3
             Assets.imageTag w ctx "pencil.svg" (Tag.attrs().AriaHidden().Size(20))

@@ -33,7 +33,28 @@ let customStylesTag (w: Out) (ctx: ViewContext) : unit =
     | Some styles -> contentTag w "style" (attrs().Data("turbo_track", "reload")) styles
     | None -> ()
 
+let private adminClass = Utf8.lit "admin"
+let private accountLogoClass = Utf8.lit "account-has-logo"
+
 /// `body_classes`: `[ @body_class, admin_body_class, account_logo_body_class ].compact.join(" ")`.
+/// Written escaped, straight into the buffer, as the template's `{{ }}` would.
+let writeBodyClasses (w: Out) (ctx: ViewContext) (bodyClass: string option) : unit =
+    let mutable any = false
+    match bodyClass with
+    | Some bodyClass ->
+        w.Text bodyClass
+        any <- true
+    | None -> ()
+    if ctx.CanAdminister then
+        if any then w.Byte(byte ' ')
+        w.Lit adminClass
+        any <- true
+    if ctx.Account.HasLogo then
+        if any then w.Byte(byte ' ')
+        w.Lit accountLogoClass
+
+/// `body_classes` as the helper returns it, a string the template escapes (tests and tools; the layout
+/// writes it with `writeBodyClasses`).
 let bodyClasses (ctx: ViewContext) (bodyClass: string option) : string =
     let admin = if ctx.CanAdminister then Some "admin" else None
     let logo = if ctx.Account.HasLogo then Some "account-has-logo" else None

@@ -10,6 +10,10 @@ open Campfire.Views.Helpers.Tag
 let turboFrameOptions (id: string) (src: string option) (target: string option) (attributes: Attrs) : Attrs =
     attributes.Attr("id", id).AttrOpt("src", src).AttrOpt("target", target)
 
+/// `turboFrameOptions` for an id that is an attribute value (see `domIdValue`).
+let turboFrameOptionsValue (id: AttrValue) (src: string option) (target: string option) (attributes: Attrs) : Attrs =
+    attributes.Attr("id", id).AttrOpt("src", src).AttrOpt("target", target)
+
 /// `turbo_stream_from(*streamables)`. The signed stream name comes from the caller
 /// (`Turbo::StreamsChannel.signed_stream_name`).
 let turboStreamFrom (w: Out) (signedStreamName: string) : unit =
@@ -19,8 +23,40 @@ let turboStreamFrom (w: Out) (signedStreamName: string) : unit =
 let turboPageRequiresReloadTag (w: Out) : unit =
     builderTag w "meta" (attrs().Name("turbo-visit-control").Attr("content", "reload"))
 
-/// `dom_id(record, prefix)`: "prefix_model_id".
-let domId (model: string) (id: 'a) (prefix: string option) : string =
+/// `"prefix_model_"` (or `"model_"`), made once per distinct pair: the pairs are a template's literal
+/// prefix and a model's param key, so the tables are as small as the templates are.
+let private prefixed =
+    System.Collections.Concurrent.ConcurrentDictionary<struct (string * string), string>()
+
+let private unprefixed = System.Collections.Concurrent.ConcurrentDictionary<string, string>()
+
+let private domPrefix (model: string) (prefix: string option) : string =
+    // No prefix is not the empty prefix: `dom_id(x, "")` is "_x_1", `dom_id(x)` is "x_1".
     match prefix with
-    | Some prefix -> $"{prefix}_{model}_{id}"
-    | None -> $"{model}_{id}"
+    | Some prefix ->
+        let key = struct (prefix, model)
+        match prefixed.TryGetValue key with
+        | true, found -> found
+        | _ ->
+            let made = $"{prefix}_{model}_"
+            prefixed[key] <- made
+            made
+    | None ->
+        match unprefixed.TryGetValue model with
+        | true, found -> found
+        | _ ->
+            let made = $"{model}_"
+            unprefixed[model] <- made
+            made
+
+/// `dom_id(record, prefix)` as an attribute value: "prefix_model_id", written by the tag with the id
+/// formatted straight into the buffer, so no string is made for it.
+let domIdValue (model: string) (id: int64) (prefix: string option) : AttrValue = Numbered(domPrefix model prefix, id)
+
+/// `dom_id(record, prefix)`: "prefix_model_id".
+let domId (model: string) (id: 'a) (prefix: string option) : string = domPrefix model prefix + string id
+
+/// `dom_id(record, prefix)` written into a template, with no string made for it.
+let writeDomId (w: Out) (model: string) (id: int64) (prefix: string option) : unit =
+    w.Raw(domPrefix model prefix)
+    w.Int id

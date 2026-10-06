@@ -34,3 +34,39 @@ Reading it:
 - The room page's warm 51 KB is what is left once the messages are fragments: the recorded page's exact-size text copy
   (11 KB), the layout's and the helpers' attribute lists, the strings of the page's few URLs and the closures of the
   layout's regions. No string is made for a message. Where it all goes was not profiled (Phase 7).
+
+## After the Phase 4 verifier's findings
+
+The verifier noted that the hot paths still made strings and per-tag objects the performance rules rule out. What was
+cheap to fix without profiling was fixed, with a test or differential case each:
+
+- `data-` and `aria-` attribute names are made once per distinct key (an interned table; the keys are templates'
+  literals), not by `"data-" + key.Replace(...)` on every call.
+- `dom_id` for an attribute (`Turbo.domIdValue`) and `"view-transition-name: avatar-#{id}"` are an `AttrValue.Numbered`,
+  a literal prefix and an integer the tag formats straight into the buffer (`w.Int`); `Turbo.writeDomId` does the same
+  for a template's text. The `"prefix_model_"` part is cached per pair.
+- `body_classes` is written into the layout (`Application.writeBodyClasses`), not joined from a list.
+- `epochMs` is integer arithmetic (the nearest double to `nanos / 1e9` by `UInt128` division and a round-half-even
+  step), no decimal string parsed back; a test checks it against the string version on 40,000 timestamps, whole
+  milliseconds included, and the differential's `messages/epoch_ms` cases compare it with Rust.
+- `Layouts.frame` takes the page's `RenderSize`, so a Turbo-Frame render of a room page starts from the size of the last
+  one (Rust's `C::SIZE_HINT`), not from 4 KB doubled; the layout's own render adds the head and a 512-byte allowance.
+
+Same machine and method as above (the middle of three runs; Rust unchanged: warm room page 12,866 ns, messages page
+5,611 ns, cold 190,953 and 183,074):
+
+| Page | F# (ns) | F# / Rust | F# bytes allocated | before |
+|---|---|---|---|---|
+| room page, fragment cache warm | 10,540 | 0.82 | 50,792 | 51,408 |
+| messages page, cache warm | 3,439 | 0.61 | 2,928 | 2,928 |
+| room page, cache cold | 149,273 | 0.78 | 682,576 | 695,672 |
+| messages page, cache cold | 144,697 | 0.79 | 634,712 | 647,192 |
+
+Times are within the runs' noise of the table above (the cold rows read a few percent slower this time, Rust's did too);
+the allocation fell by 616 bytes a warm room page and about 13 KB a cold one (the 13 KB over 40 messages is most likely the
+`data-`/`aria-` names and message ids that are no longer built per tag).
+
+Not done, because the whole-app baseline after Phase 5 decides what is worth it: a warm room page still allocates 50 KB,
+most of it (not profiled) the `Attrs` of its tags (an object and two arrays each, an `AttrValue voption` of a few words per
+entry), and the route paths and `ctx.Asset` results are still strings, as `Campfire.Routes` returns them (a Phase 1
+type, shared with the controllers). Pooling or slimming `Attrs`, and writer-form route helpers, are the next steps.

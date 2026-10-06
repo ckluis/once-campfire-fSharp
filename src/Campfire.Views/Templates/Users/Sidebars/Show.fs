@@ -75,7 +75,7 @@ let content (w: Out) (ctx: ViewContext) (sidebar: SidebarShow) : unit =
                 w
                 ctx
                 sidebar.CurrentUser.AvatarPath
-                (Tag.attrs().Size(48).AriaHidden().Style("view-transition-name: avatar-" + string sidebar.CurrentUser.Id))
+                (Tag.attrs().Size(48).AriaHidden().Style(Tag.Numbered("view-transition-name: avatar-", sidebar.CurrentUser.Id)))
             w.Lit t17)
         w.Lit t18
         Filters.linkTo w (Routes.editAccount ()) (Tag.attrs().Class("btn align-center gap txt-reversed sidebar__tool")) (fun w ->

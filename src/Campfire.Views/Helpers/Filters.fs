@@ -41,6 +41,16 @@ let inline turboFrameTag (w: Out) (id: string) (options: Attrs) ([<InlineIfLambd
         | ValueNone -> None
     contentTagBlock w "turbo-frame" (turboFrameOptions id (asOption src) (asOption target) options) content
 
+/// `turboFrameTag` with an id that is an attribute value (`Turbo.domIdValue`): no string is made for it.
+let inline turboFrameTagValue (w: Out) (id: AttrValue) (options: Attrs) ([<InlineIfLambda>] content: Out -> unit) : unit =
+    let src = options.Remove "src"
+    let target = options.Remove "target"
+    let asOption (value: AttrValue voption) =
+        match value with
+        | ValueSome v -> Some v.AsString
+        | ValueNone -> None
+    contentTagBlock w "turbo-frame" (turboFrameOptionsValue id (asOption src) (asOption target) options) content
+
 /// `sidebar_turbo_frame_tag do ... end` (the block form never passes `src:`).
 let inline sidebarTurboFrameTag (w: Out) ([<InlineIfLambda>] content: Out -> unit) : unit =
     UsersHelper.sidebarTurboFrameTag w None content

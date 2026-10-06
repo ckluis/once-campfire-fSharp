@@ -43,6 +43,10 @@ type AttrValue =
     | Bool of flag: bool
     /// An integer, which Rails prints with `to_s`.
     | Int of number: int64
+    /// `text` followed by an integer, written without making the string (`dom_id`, `"avatar-#{id}"`).
+    /// `text` is a literal or a cached prefix of the template's own, so it is written as it is, unescaped:
+    /// never user text.
+    | Numbered of text: string * number: int64
 
     /// The value as Ruby's `to_s` prints it.
     member this.AsString: string =
@@ -52,10 +56,29 @@ type AttrValue =
         | Bool true -> "true"
         | Bool false -> "false"
         | Int number -> number.ToString(Globalization.CultureInfo.InvariantCulture)
+        | Numbered(text, number) -> text + number.ToString(Globalization.CultureInfo.InvariantCulture)
 
 /// `Value`'s conversions from the types templates pass.
 module AttrValue =
     let ofHtml (html: Html) : AttrValue = Safe(html.ToString())
+
+/// `"data-" + key.dasherize` and `"aria-" + key.dasherize`, made once per distinct key: the keys are
+/// the literals of templates, so the tables stay as small as the templates are and no request makes
+/// a name.
+module private AttrNames =
+    let private data = System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal)
+    let private aria = System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal)
+
+    let private name (table: System.Collections.Concurrent.ConcurrentDictionary<string, string>) (prefix: string) (key: string) : string =
+        match table.TryGetValue key with
+        | true, found -> found
+        | _ ->
+            let made = String.Intern(prefix + key.Replace('_', '-'))
+            table[key] <- made
+            made
+
+    let dataName (key: string) : string = name data "data-" key
+    let ariaName (key: string) : string = name aria "aria-" key
 
 let private eqQuote = Utf8.lit "=\""
 let private quot = Utf8.lit "&quot;"
@@ -118,12 +141,12 @@ type Attrs(capacity: int) =
         this
 
     /// `data: { key: value }`: `data-key` with underscores dashed.
-    member this.Data(key: string, value: AttrValue) : Attrs = this.Attr("data-" + key.Replace('_', '-'), value)
+    member this.Data(key: string, value: AttrValue) : Attrs = this.Attr(AttrNames.dataName key, value)
     member this.Data(key: string, value: string) : Attrs = this.Data(key, Text value)
     member this.Data(key: string, value: bool) : Attrs = this.Data(key, Bool value)
     member this.Data(key: string, value: int) : Attrs = this.Data(key, Int(int64 value))
 
-    member this.Aria(key: string, value: AttrValue) : Attrs = this.Attr("aria-" + key.Replace('_', '-'), value)
+    member this.Aria(key: string, value: AttrValue) : Attrs = this.Attr(AttrNames.ariaName key, value)
     member this.Aria(key: string, value: string) : Attrs = this.Aria(key, Text value)
     member this.Aria(key: string, value: bool) : Attrs = this.Aria(key, Bool value)
 
@@ -132,7 +155,9 @@ type Attrs(capacity: int) =
 
     member this.Class(value: string) : Attrs = this.Attr("class", value)
     member this.Id(value: string) : Attrs = this.Attr("id", value)
+    member this.Id(value: AttrValue) : Attrs = this.Attr("id", value)
     member this.Style(value: string) : Attrs = this.Attr("style", value)
+    member this.Style(value: AttrValue) : Attrs = this.Attr("style", value)
     member this.Title(value: string) : Attrs = this.Attr("title", value)
     member this.Alt(value: string) : Attrs = this.Attr("alt", value)
     member this.Role(value: string) : Attrs = this.Attr("role", value)
@@ -242,10 +267,18 @@ let private renderAttr (w: Out) (name: string) (value: AttrValue) : unit =
             start ()
             w.Raw name
             w.Byte(byte '"')
-    | Bool _
-    | Int _ ->
+    | Bool _ ->
         start ()
         w.Raw value.AsString
+        w.Byte(byte '"')
+    | Int number ->
+        start ()
+        w.Int number
+        w.Byte(byte '"')
+    | Numbered(text, number) ->
+        start ()
+        w.Raw text
+        w.Int number
         w.Byte(byte '"')
     | Text text ->
         start ()

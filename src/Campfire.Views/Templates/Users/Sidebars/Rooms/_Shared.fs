@@ -14,7 +14,7 @@ let render (w: Out) (room: SidebarRoom) : unit =
         w
         room.Id
         (Tag.attrs()
-            .Id(Turbo.domId room.ParamKey room.Id (Some "list"))
+            .Id(Turbo.domIdValue room.ParamKey room.Id (Some "list"))
             .Data("sorted_list_name", room.Name)
             .Style("--column-gap: 0.5em")
             .Class(room.ClassNames))

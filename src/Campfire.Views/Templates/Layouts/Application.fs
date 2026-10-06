@@ -75,7 +75,7 @@ let render
     w.Lit t11
     head w
     w.Lit t12
-    w.Text(Application.bodyClasses ctx bodyClass)
+    Application.writeBodyClasses w ctx bodyClass
     w.Lit t13
     nav w
     w.Lit t14

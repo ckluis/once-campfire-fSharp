@@ -14,13 +14,11 @@ let private epochTicks = DateTimeOffset.UnixEpoch.UtcTicks
 let iso8601 (time: Timestamp) : string =
     time.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture)
 
-/// `time.to_fs(:epoch)`, defined in `reference/config/initializers/time_formats.rb` as
-/// `(time.to_f * 1000).to_i`. The float round trip is deliberate: it truncates some
-/// millisecond values down by one, and the client compares these numbers.
-let epochMs (time: Timestamp) : int64 =
-    // `Time#to_f` is the nearest double to the exact rational, which parsing the decimal
-    // representation gives us. A timestamp is whole seconds and a sub-second part of the same
-    // sign (jiff's representation), at 100 ns here.
+/// `Time#to_f` before `epochMs` scales it: the nearest double to the exact rational, which parsing the
+/// decimal representation gives us. The reference `epochMs` is checked against, and the path for a time
+/// before 1970 (a timestamp is whole seconds and a sub-second part of the same sign, as jiff has it, at
+/// 100 ns here).
+let epochMsViaText (time: Timestamp) : int64 =
     let sinceEpoch = time.UtcTicks - epochTicks
     let seconds = sinceEpoch / 10_000_000L
     let nanos = int ((sinceEpoch % 10_000_000L) * 100L)
@@ -37,6 +35,41 @@ let epochMs (time: Timestamp) : int64 =
         | true, value when not (decimalText.Contains(".-")) -> value
         | _ -> float seconds
     int64 (toF * 1000.0)
+
+/// The double nearest `nanos / 1e9` (ties to even), by integer arithmetic: the 53-bit quotient of
+/// `nanos * 2^k / 1e9` and its remainder decide the rounding, so no string is made and nothing is parsed.
+let private secondsAsDouble (nanos: UInt128) : float =
+    if nanos = UInt128.Zero then
+        0.0
+    else
+        let divisor = UInt128.op_Implicit 1_000_000_000UL
+        let low = UInt128.op_Implicit (1UL <<< 52)
+        let high = UInt128.op_Implicit (1UL <<< 53)
+        let bits = 128 - int (UInt128.LeadingZeroCount nanos)
+        // The quotient is about `bits - 30` bits long; settle on the shift that makes it 53.
+        let mutable shift = 53 - (bits - 30)
+        let mutable quotient = (nanos <<< shift) / divisor
+        while quotient >= high do
+            shift <- shift - 1
+            quotient <- (nanos <<< shift) / divisor
+        while quotient < low do
+            shift <- shift + 1
+            quotient <- (nanos <<< shift) / divisor
+        let remainder = (nanos <<< shift) - quotient * divisor
+        let twice = remainder <<< 1
+        if twice > divisor || (twice = divisor && (quotient &&& UInt128.One) <> UInt128.Zero) then
+            quotient <- quotient + UInt128.One
+        Math.ScaleB(float (uint64 quotient), -shift)
+
+/// `time.to_fs(:epoch)`, defined in `reference/config/initializers/time_formats.rb` as
+/// `(time.to_f * 1000).to_i`. The float round trip is deliberate: it truncates some
+/// millisecond values down by one, and the client compares these numbers.
+let epochMs (time: Timestamp) : int64 =
+    let sinceEpoch = time.UtcTicks - epochTicks
+    if sinceEpoch < 0L then
+        epochMsViaText time
+    else
+        int64 (secondsAsDouble (UInt128.op_Implicit (uint64 sinceEpoch) * UInt128.op_Implicit 100UL) * 1000.0)
 
 /// `time.as_json` with Active Support's default precision: `2026-09-26T12:26:46.848Z`.
 let jsonTime (time: Timestamp) : string =

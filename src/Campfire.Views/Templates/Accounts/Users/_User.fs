@@ -45,7 +45,7 @@ let render (w: Out) (ctx: ViewContext) (user: UserSummary) : unit =
             w.Lit t5
             Filters.formWith w form (fun w ->
                 w.Lit t6
-                w.Text(Turbo.domId "user" user.Id (Some "role"))
+                Turbo.writeDomId w "user" user.Id (Some "role")
                 w.Lit t7
                 if user.Administrator then
                     w.Lit t8
@@ -57,7 +57,7 @@ let render (w: Out) (ctx: ViewContext) (user: UserSummary) : unit =
                 form.CheckBox(
                     w,
                     "role",
-                    Tag.attrs().Data("action", "form#submit").Hidden().Id(Turbo.domId "user" user.Id (Some "role")).Disabled(ctx.IsCurrentUser user.Id),
+                    Tag.attrs().Data("action", "form#submit").Hidden().Id(Turbo.domIdValue "user" user.Id (Some "role")).Disabled(ctx.IsCurrentUser user.Id),
                     "administrator",
                     "member",
                     Role.asStr user.Role

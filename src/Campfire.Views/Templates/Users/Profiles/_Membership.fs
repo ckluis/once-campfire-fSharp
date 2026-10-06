@@ -26,7 +26,7 @@ let render (w: Out) (ctx: ViewContext) (membership: ProfileMembership) : unit =
             w.Text membership.RoomDisplayName
             w.Lit t2)
     w.Lit t3
-    Filters.turboFrameTag w (Turbo.domId membership.RoomParamKey membership.RoomId (Some "involvement")) (Tag.attrs()) (fun w ->
+    Filters.turboFrameTagValue w (Turbo.domIdValue membership.RoomParamKey membership.RoomId (Some "involvement")) (Tag.attrs()) (fun w ->
         w.Lit t4
         RoomsHelper.buttonToChangeInvolvement w ctx membership.InvolvementRoom membership.Involvement
         w.Lit t5)
