@@ -113,7 +113,33 @@ def describe(rows):
 
 
 def versions(rows):
-    return [r for r in rows if r.get("version")]
+    """The dots. Consecutive kept runs logged with the same commit measured the same build (or a control of
+    the old build first, then the change), so they merge into one dot: later measurements override earlier
+    ones on the same workload, different workloads combine, and the label is the run that measured the most."""
+    out, i = [], 0
+    while i < len(rows):
+        r = rows[i]
+        group = [r]
+        while (not r.get("description") and r.get("commit") and r.get("kept", True) and i + 1 < len(rows)
+               and rows[i + 1].get("commit") == r.get("commit") and rows[i + 1].get("kept", True)):
+            i += 1
+            group.append(rows[i])
+        i += 1
+        if not any(g.get("version") for g in group):
+            continue
+        if len(group) == 1:
+            out.append(r)
+            continue
+        merged_w = {}
+        for g in group:
+            for w, cs in g.get("workloads", {}).items():
+                merged_w.setdefault(w, {}).update({c: dict(v) for c, v in cs.items()})
+        label = max(enumerate(group), key=lambda iv: (len(iv[1].get("workloads", {})), iv[0]))[1]
+        m = dict(label, workloads=merged_w, version=True,
+                 commits=next((g.get("commits") for g in group if g.get("commits")), []),
+                 time=group[-1].get("time", label.get("time")))
+        out.append(m)
+    return out
 
 
 def when(r):
