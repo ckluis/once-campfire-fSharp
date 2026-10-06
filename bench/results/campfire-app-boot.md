@@ -17,6 +17,10 @@ until `GET /up` first answers 200 (polled every 50 ms), then the container's mem
 | Image, content size | 113 MB | 70 MB |
 | Image, on disk | 419 MB | 267 MB |
 
+ReadyToRun (`--build-arg READY_TO_RUN=false` publishes the IL alone) against IL only, three runs each, alternating, on a
+busier host than the table's: first `/up` 207, 281, 303 ms against 287, 288, 298 ms; idle memory 26.2-26.4 MiB against
+31.1 MiB. It is worth about 5 MiB and a few tens of milliseconds, not the factor of two the JIT's reputation promises.
+
 The F# image is self-contained (the ~70 MB runtime, ReadyToRun-compiled app assemblies; see the `Dockerfile` header for
 why). The route table (177 regexes, `RegexOptions.Compiled`) builds in about 10 ms on first use; the rest of the 70-80 ms
 over Rust is the runtime starting and the first requests' JIT (the image is ReadyToRun-compiled). Not tuned.

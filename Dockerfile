@@ -23,9 +23,11 @@
 #     ffmpeg libraries are installed on the same base, and nothing but ca-certificates is added for .NET
 #     (globalization is invariant, so no ICU);
 #   * it costs about 70 MB of image over framework-dependent, which the media libraries dwarf anyway.
-# ReadyToRun-compiles the app's own assemblies, which halves the time to the first request (the JIT otherwise
-# compiles the route table, the templates and SQLite's bindings on it) and costs nothing once tiering has
-# recompiled what is hot. Not trimmed: ASP.NET Core and the kit's Falco endpoints use reflection.
+# ReadyToRun-compiles the app's assemblies (FSharp.Core and the ASP.NET Core framework included), which takes
+# 5 MiB off the idle process and tens of milliseconds off the time to the first request (the JIT otherwise
+# compiles the route table, the templates and SQLite's bindings on it; bench/results/campfire-app-boot.md has
+# the numbers), and costs nothing once tiering has recompiled what is hot. Not trimmed: ASP.NET Core and
+# Falco use reflection.
 
 ARG DOTNET_VERSION=10.0.401
 ARG DEBIAN_RELEASE=trixie
@@ -112,6 +114,8 @@ ENV DOTNET_ROOT=/opt/dotnet \
     DOTNET_NOLOGO=1 \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 ARG TARGETARCH
+# --build-arg READY_TO_RUN=false publishes the IL alone (to measure what ReadyToRun buys).
+ARG READY_TO_RUN=true
 
 WORKDIR /src
 COPY global.json Directory.Build.props Directory.Packages.props ./
@@ -126,7 +130,7 @@ RUN --mount=type=cache,id=campfire-fsharp-nuget,target=/root/.nuget/packages \
     esac && \
     dotnet build src/Campfire.Assets.Build/Campfire.Assets.Build.fsproj -c Release && \
     dotnet publish src/Campfire.App/Campfire.App.fsproj -c Release -r "$rid" --self-contained true \
-      -p:PublishReadyToRun=true -p:DebugType=None -p:DebugSymbols=false -o /out/campfire
+      -p:PublishReadyToRun=$READY_TO_RUN -p:DebugType=None -p:DebugSymbols=false -o /out/campfire
 
 
 # The shared libraries and executables that go into the runtime, in one directory tree.
