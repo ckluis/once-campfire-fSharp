@@ -429,6 +429,8 @@ if os.environ.get("MERGE_PART") == "1" and os.path.exists(f):
     result["memory"]["idle_current_mb"], result["memory"]["idle_anon_mb"] = old["memory"]["idle_current_mb"], old["memory"]["idle_anon_mb"]
 json.dump(result, open(f, "w"), indent=1)
 PY
+  # The last request log lines the app wrote (a sample, that logging is on and what it says; the driver keeps only 2 x LOG_MAX_SIZE).
+  docker logs --tail 12 "$CONTAINER" > "$OUT/$app-$rep-logtail.txt" 2>&1 || true
   docker rm -f "$CONTAINER" >/dev/null
   rm -rf "$WORK/$app"
   log "$app rep $rep: done -> $f"
