@@ -73,3 +73,20 @@ findings are fixed.
 | 7 Performance | `bench/run --apps reference,rust,fsharp`; profile; optimize | F# faster than Rust on all five workloads, with rows verified for posts |
 | 8 Datastar (optional) | a second frontend | screenshots identical; behavior screens pass. Needs sign-off first |
 | 9 Publish | GitHub repo, README with results, upstream README PR | maintainers' review |
+
+### Requirements carried forward
+
+Findings of a phase's verifier that a later phase has to meet. Each is a gate of that phase.
+
+- **Phase 4: the fragment cache is byte-bounded, pieces and SHA included.** Rust keeps a fragment's SHA-256 and
+  its compressed pieces in a generation-bounded map (`rust/crates/kit/src/deflater/splice.rs`, `Generations`),
+  and its test `fragments_a_page_keeps_showing_stay_while_the_rest_age_out` holds the total at or under
+  `budget + 2 * 2048` while 300 other fragments churn. `Campfire.Kit`'s `Splice.Fragment` carries both itself
+  (at most `PiecesPerFragment` pieces), so nothing in the kit bounds them: the view fragment cache is what does,
+  by dropping `Fragment` objects. Its budget must count the bytes of the pieces and the SHA each `Fragment`
+  holds, not only the fragment's own bytes, and the phase adds the test that reproduces Rust's: a page's
+  fragments that keep being shown stay while others age out, and the total held stays within the budget.
+- **Phase 7: the gaps `bench/results/cable-fanout.md` and `bench/results/front.md` record are open.** F# is slower
+  than Rust on plain-frame Cable bursts, lone broadcasts, idle CPU and memory per client, and on the front's
+  signed-cookie page, 100 KB identity page and 20 KB asset cache hit. They are gates, not accepted costs.
+

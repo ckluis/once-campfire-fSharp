@@ -30,6 +30,11 @@ Reading it:
 - Identity bodies of 100 KB cost 24 us more, and a cache hit of a 20 KB asset 7 us more (about 5 of them the
   copy): Kestrel copies a response into its pipe where hyper writes the `Bytes` as they are. That is the
   host, as in `kit-core.md`; the front goes straight to it for these bodies and holds nothing back.
+- The signed-cookie row is the 100 KB identity page (`/session` in `bench/front/fsharp/Program.fs`) with a signed
+  cookie to read, so its gap to Rust is the identity page's gap plus the cookie's. The cookie's own cost is the
+  difference of the two rows: 116.8 - 109.0 = 7.8 us in F# against 94.1 - 85.3 = 8.8 us in Rust. Reading and
+  verifying a signed cookie is 1 us cheaper here; the 22.7 us between the rows is the 23.7 us Kestrel's copy of
+  an identity body costs (above), not the cookie path, `MessageVerifier` or the cookie jar.
 - Zstd (for clients that ask for zstd and not gzip) is 43% cheaper than Rust's libzstd at level 1 on a 20 KB
   body, in managed code.
 
