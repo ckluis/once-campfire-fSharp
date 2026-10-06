@@ -6,9 +6,6 @@
 //
 // `vectors/campfire_sessions.json` holds session cookies *issued by Rails* for the seed's sessions
 // (`reference-tools/campfire/session_cookies.rb`).
-//
-// Not ported yet, because the controller it drives isn't (the 501s of the route table):
-// `concurrent_message_posts_all_complete` (messages#create), with the messages controllers.
 module Campfire.App.Tests.AppTests
 
 open System
@@ -508,4 +505,49 @@ let ``proxied blobs write odd dispositions as puma does`` () =
             do! check dropped (200, [])
         let! status, _ = dispositions "%FF"
         Assert.Equal(400, status)
+    }
+
+/// Regression: every message create runs rich text (plain text for the search index, mentions)
+/// inside the writer's transaction. It once checked out a pooled reader for that, so with as many
+/// concurrent posts as readers, the writer waited on a reader while the readers' holders waited
+/// on the writer, and the server stopped answering for good.
+[<Fact>]
+let ``concurrent message posts all complete`` () =
+    task {
+        use! test = bootSeeded "default"
+        let sessions, _, _ = sessionVectors ()
+        let session = sessions[0]
+        let! roomId =
+            test.App.Db.Read(fun conn ->
+                conn.QueryOne(
+                    """SELECT "memberships"."room_id" FROM "memberships" JOIN "users" ON "users"."id" = "memberships"."user_id"
+                       JOIN "rooms" ON "rooms"."id" = "memberships"."room_id"
+                       WHERE "users"."name" = ? AND "rooms"."type" = 'Rooms::Open' ORDER BY "rooms"."id" LIMIT 1""",
+                    [| S session.UserName |],
+                    fun r -> r.Int64 0
+                ))
+        let roomId = (unwrap roomId).Value
+
+        let! page = test.Send(getWithCookie $"/rooms/{roomId}" session.CookieHeader)
+        Assert.Equal(200, page.Status)
+
+        let post (n: int) : Task<Reply> =
+            let req =
+                (request "POST" $"/rooms/{roomId}/messages")
+                    .With("cookie", session.CookieHeader)
+                    .With("sec-fetch-site", "same-origin")
+                    .With("accept", "text/vnd.turbo-stream.html, text/html, application/xhtml+xml")
+                    .Form($"message%%5Bbody%%5D=%%3Cp%%3EHello+{n}%%3C%%2Fp%%3E&message%%5Bclient_message_id%%5D=concurrent-{n}")
+            test.Send req
+        let posts = [| for n in 0..31 -> post n |]
+        let all = Task.WhenAll posts
+        let! finished = Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds 60.0))
+        Assert.True(obj.ReferenceEquals(finished, all), "concurrent message posts deadlocked")
+        for reply in all.Result do
+            Assert.Equal(200, reply.Status)
+
+        let afterReply = test.Send(getWithCookie $"/rooms/{roomId}" session.CookieHeader)
+        let! finished = Task.WhenAny(afterReply, Task.Delay(TimeSpan.FromSeconds 10.0))
+        Assert.True(obj.ReferenceEquals(finished, afterReply), "the server stopped answering")
+        Assert.Equal(200, afterReply.Result.Status)
     }

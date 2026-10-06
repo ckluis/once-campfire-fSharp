@@ -63,6 +63,10 @@
     <Compile Include="Controllers/QrCode/Rqrcode.fs" />
     <Compile Include="Controllers/QrCode.fs" />
     <Compile Include="Controllers/UnfurlLinks.fs" />
+    <Compile Include="Controllers/Messages.fs" />
+    <Compile Include="Controllers/Messages/Boosts.fs" />
+    <Compile Include="Controllers/Messages/ByBots.fs" />
+    <Compile Include="Controllers/Messages/BoostsByBots.fs" />
     <Compile Include="Controllers.fs" />
     <Compile Include="Boot.fs" />
     <Compile Include="Program.fs" />

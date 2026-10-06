@@ -240,21 +240,21 @@ module RouteTable =
                 delete "/users/:user_id/push_subscriptions/:id(.:format)" "users/push_subscriptions#destroy" (PushSubscriptions.destroy) |> withDefaults meDefaults
                 get "/users/:id(.:format)" "users#show" (UsersController.show)
                 get "/autocompletable/users(.:format)" "autocompletable/users#index" (AutocompletableUsers.index)
-                get "/rooms/:room_id/messages(.:format)" "messages#index" (unported "messages#index")
-                post "/rooms/:room_id/messages(.:format)" "messages#create" (unported "messages#create")
+                get "/rooms/:room_id/messages(.:format)" "messages#index" (MessagesController.index)
+                post "/rooms/:room_id/messages(.:format)" "messages#create" (MessagesController.create)
                 get "/rooms/:room_id/messages/new(.:format)" "messages#new" (actionNotFound)
-                get "/rooms/:room_id/messages/:id/edit(.:format)" "messages#edit" (unported "messages#edit")
-                get "/rooms/:room_id/messages/:id(.:format)" "messages#show" (unported "messages#show")
-                patch "/rooms/:room_id/messages/:id(.:format)" "messages#update" (unported "messages#update")
-                put "/rooms/:room_id/messages/:id(.:format)" "messages#update" (unported "messages#update")
-                delete "/rooms/:room_id/messages/:id(.:format)" "messages#destroy" (unported "messages#destroy")
-                post "/rooms/:room_id/:bot_key/messages/:message_id/boosts(.:format)" "messages/boosts/by_bots#create" (unported "messages/boosts/by_bots#create") |> withDefaults botDefaults
-                delete "/rooms/:room_id/:bot_key/messages/:message_id/boosts/:id(.:format)" "messages/boosts/by_bots#destroy" (unported "messages/boosts/by_bots#destroy") |> withDefaults botDefaults
-                get "/rooms/:room_id/:bot_key/messages(.:format)" "messages/by_bots#index" (unported "messages/by_bots#index") |> withDefaults botDefaults
-                post "/rooms/:room_id/:bot_key/messages(.:format)" "messages/by_bots#create" (unported "messages/by_bots#create") |> withDefaults botDefaults
-                patch "/rooms/:room_id/:bot_key/messages/:id(.:format)" "messages/by_bots#update" (unported "messages/by_bots#update") |> withDefaults botDefaults
-                put "/rooms/:room_id/:bot_key/messages/:id(.:format)" "messages/by_bots#update" (unported "messages/by_bots#update") |> withDefaults botDefaults
-                delete "/rooms/:room_id/:bot_key/messages/:id(.:format)" "messages/by_bots#destroy" (unported "messages/by_bots#destroy") |> withDefaults botDefaults
+                get "/rooms/:room_id/messages/:id/edit(.:format)" "messages#edit" (MessagesController.edit)
+                get "/rooms/:room_id/messages/:id(.:format)" "messages#show" (MessagesController.show)
+                patch "/rooms/:room_id/messages/:id(.:format)" "messages#update" (MessagesController.update)
+                put "/rooms/:room_id/messages/:id(.:format)" "messages#update" (MessagesController.update)
+                delete "/rooms/:room_id/messages/:id(.:format)" "messages#destroy" (MessagesController.destroy)
+                post "/rooms/:room_id/:bot_key/messages/:message_id/boosts(.:format)" "messages/boosts/by_bots#create" (BoostsByBots.create) |> withDefaults botDefaults
+                delete "/rooms/:room_id/:bot_key/messages/:message_id/boosts/:id(.:format)" "messages/boosts/by_bots#destroy" (BoostsByBots.destroy) |> withDefaults botDefaults
+                get "/rooms/:room_id/:bot_key/messages(.:format)" "messages/by_bots#index" (ByBots.index) |> withDefaults botDefaults
+                post "/rooms/:room_id/:bot_key/messages(.:format)" "messages/by_bots#create" (ByBots.create) |> withDefaults botDefaults
+                patch "/rooms/:room_id/:bot_key/messages/:id(.:format)" "messages/by_bots#update" (ByBots.update) |> withDefaults botDefaults
+                put "/rooms/:room_id/:bot_key/messages/:id(.:format)" "messages/by_bots#update" (ByBots.update) |> withDefaults botDefaults
+                delete "/rooms/:room_id/:bot_key/messages/:id(.:format)" "messages/by_bots#destroy" (ByBots.destroy) |> withDefaults botDefaults
                 get "/rooms/:room_id/refresh(.:format)" "rooms/refreshes#show" (unported "rooms/refreshes#show")
                 get "/rooms/:room_id/settings(.:format)" "rooms/settings#show" (missingController)
                 get "/rooms/:room_id/involvement(.:format)" "rooms/involvements#show" (unported "rooms/involvements#show")
@@ -293,22 +293,22 @@ module RouteTable =
                 patch "/rooms/directs/:id(.:format)" "rooms/directs#update" (actionNotFound)
                 put "/rooms/directs/:id(.:format)" "rooms/directs#update" (actionNotFound)
                 delete "/rooms/directs/:id(.:format)" "rooms/directs#destroy" (unported "rooms/directs#destroy")
-                get "/messages/:message_id/boosts(.:format)" "messages/boosts#index" (unported "messages/boosts#index")
-                post "/messages/:message_id/boosts(.:format)" "messages/boosts#create" (unported "messages/boosts#create")
-                get "/messages/:message_id/boosts/new(.:format)" "messages/boosts#new" (unported "messages/boosts#new")
+                get "/messages/:message_id/boosts(.:format)" "messages/boosts#index" (BoostsController.index)
+                post "/messages/:message_id/boosts(.:format)" "messages/boosts#create" (BoostsController.create)
+                get "/messages/:message_id/boosts/new(.:format)" "messages/boosts#new" (BoostsController.``new``)
                 get "/messages/:message_id/boosts/:id/edit(.:format)" "messages/boosts#edit" (actionNotFound)
                 get "/messages/:message_id/boosts/:id(.:format)" "messages/boosts#show" (actionNotFound)
                 patch "/messages/:message_id/boosts/:id(.:format)" "messages/boosts#update" (actionNotFound)
                 put "/messages/:message_id/boosts/:id(.:format)" "messages/boosts#update" (actionNotFound)
-                delete "/messages/:message_id/boosts/:id(.:format)" "messages/boosts#destroy" (unported "messages/boosts#destroy")
-                get "/messages(.:format)" "messages#index" (unported "messages#index")
-                post "/messages(.:format)" "messages#create" (unported "messages#create")
+                delete "/messages/:message_id/boosts/:id(.:format)" "messages/boosts#destroy" (BoostsController.destroy)
+                get "/messages(.:format)" "messages#index" (MessagesController.index)
+                post "/messages(.:format)" "messages#create" (MessagesController.create)
                 get "/messages/new(.:format)" "messages#new" (actionNotFound)
-                get "/messages/:id/edit(.:format)" "messages#edit" (unported "messages#edit")
-                get "/messages/:id(.:format)" "messages#show" (unported "messages#show")
-                patch "/messages/:id(.:format)" "messages#update" (unported "messages#update")
-                put "/messages/:id(.:format)" "messages#update" (unported "messages#update")
-                delete "/messages/:id(.:format)" "messages#destroy" (unported "messages#destroy")
+                get "/messages/:id/edit(.:format)" "messages#edit" (MessagesController.edit)
+                get "/messages/:id(.:format)" "messages#show" (MessagesController.show)
+                patch "/messages/:id(.:format)" "messages#update" (MessagesController.update)
+                put "/messages/:id(.:format)" "messages#update" (MessagesController.update)
+                delete "/messages/:id(.:format)" "messages#destroy" (MessagesController.destroy)
                 delete "/searches/clear(.:format)" "searches#clear" (unported "searches#clear")
                 get "/searches(.:format)" "searches#index" (unported "searches#index")
                 post "/searches(.:format)" "searches#create" (unported "searches#create")
