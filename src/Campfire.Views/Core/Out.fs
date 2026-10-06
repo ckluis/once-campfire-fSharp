@@ -6,7 +6,7 @@
 // A template is an F# module at the same relative path as its ERB (and its askama file in
 // rust/crates/views/templates), `Campfire.Views.Templates.<Path>`: `messages/_message.html` is
 // `Templates/Messages/_Message.fs`, `rooms/show.html` is `Templates/Rooms/Show.fs`,
-// `index.turbo_stream.html` is `IndexTurboStream`. It has one `render` function that writes UTF-8
+// `index.turbo_stream.html` is `IndexTurboStream` (`rooms/show.html` is the module `ShowPage`: `rooms/show/` is a namespace). It has one `render` function that writes UTF-8
 // straight into an `Out` and returns unit, taking the view-model the Rust struct had as arguments:
 //
 //     module Campfire.Views.Templates.Accounts._Invite

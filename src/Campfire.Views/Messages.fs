@@ -40,6 +40,14 @@ module RoomKind =
 let roomDomId (kind: RoomKind) (id: int64) (prefix: string) : string =
     if prefix = "" then $"{RoomKind.paramKey kind}_{id}" else $"{prefix}_{RoomKind.paramKey kind}_{id}"
 
+/// `dom_id(room, prefix)` written into a template: `prefix` is the template's literal with its trailing
+/// underscore ("messages_"), or empty for none; no string is made for the id.
+let writeRoomDomId (w: Out) (prefix: byte[]) (kind: RoomKind) (id: int64) : unit =
+    w.Lit prefix
+    w.Raw(RoomKind.paramKey kind)
+    w.Byte(byte '_')
+    w.Int id
+
 /// A `/play <name>` message's `Sound`.
 type SoundImage =
     { /// `image_path(image.asset_path)`.
@@ -157,6 +165,11 @@ type MessageItem =
         match this with
         | Cached(_, roomId, _) -> roomId
         | View message -> message.RoomId
+
+    member this.ClientMessageId: string =
+        match this with
+        | Cached(clientMessageId, _, _) -> clientMessageId
+        | View message -> message.ClientMessageId
 
 /// `EmojiHelper::REACTIONS`.
 let reactions: (string * string)[] =

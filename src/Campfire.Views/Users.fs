@@ -141,6 +141,19 @@ type SidebarRoom =
     member this.ClassNames: string =
         if this.Unread then "align-center gap room btn txt-nowrap unread" else "align-center gap room btn txt-nowrap"
 
+/// What `users/sidebars/show` shows.
+type SidebarShow =
+    { CurrentUser: UserSummary
+      /// `Turbo::StreamsChannel.signed_stream_name(:rooms)`.
+      RoomsStream: string
+      /// `Turbo::StreamsChannel.signed_stream_name([ Current.user, :rooms ])`.
+      UserRoomsStream: string
+      DirectMemberships: SidebarDirectItem list
+      DirectPlaceholderUsers: UserSummary list
+      OtherMemberships: SidebarRoom list
+      /// `Current.user.administrator? || !Current.account.settings.restrict_room_creation_to_administrators?`.
+      CanCreateRooms: bool }
+
 /// The template digest in `users/sidebars/rooms/_direct`'s fragment keys: the partial.
 let directRoomDigest: string = FragmentCache.digest [| "users/sidebars/rooms/_direct" |]
 
