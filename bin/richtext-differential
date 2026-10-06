@@ -17,12 +17,12 @@ tool=reference-tools/richtext/differential
 out=target/richtext-differential
 mkdir -p "$out"
 
-CARGO_TARGET_DIR="$PWD/$out/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --manifest-path "$tool/Cargo.toml"
+CARGO_TARGET_DIR="$PWD/target/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --manifest-path "$tool/Cargo.toml"
 dotnet build "$tool/fsharp" -c Release -v quiet -nologo -o "$out/fsharp"
 
 compare() { # kind mode
   python3 "$tool/generate.py" "$1" "$count" "$seed" "$corpus" > "$out/$1.input"
-  RICHTEXT_CORPUS="$corpus" "$out/rust/release/$2" < "$out/$1.input" > "$out/$1.rust"
+  RICHTEXT_CORPUS="$corpus" "target/rust/release/$2" < "$out/$1.input" > "$out/$1.rust"
   if [ "$2" = parse ]; then
     dotnet "$out/fsharp/Differential.dll" parse < "$out/$1.input" > "$out/$1.fsharp"
   else

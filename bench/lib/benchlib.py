@@ -45,7 +45,7 @@ def loadavg():
 
 def build_loadgen():
     subprocess.run(["cargo", "build", "--release", "-q"], cwd=os.path.join(BENCH, "loadgen"), check=True,
-                   env={**os.environ, "CARGO_TARGET_DIR": os.path.join(ROOT, "target", "bench")})
+                   env={**os.environ, "CARGO_TARGET_DIR": os.path.join(ROOT, "target", "rust")})
 
 
 # --- Seed ------------------------------------------------------------------------------------

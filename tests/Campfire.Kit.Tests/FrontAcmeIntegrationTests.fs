@@ -299,7 +299,7 @@ let ``returning clients resume their sessions by ticket`` () =
         try
             let session = Path.Combine(storage, "session.pem")
             match! sClient https domain session false with
-            | None -> eprintfn "skipped: openssl isn't installed"
+            | None -> Assert.Skip "openssl isn't installed, so the resumed handshake can't be observed"
             | Some first ->
                 Assert.True(File.Exists session, "the first connection was issued a session: " + first)
                 Assert.Contains("New, ", first)

@@ -69,8 +69,9 @@ findings are fixed.
 | 3 HTTP and real time | Kit core (ctx, params, cookies, session, CSRF, formats, body, adapter); Kit front (TLS, ACME, HTTP/2, compression, response cache); Cable | ported kit and cable tests, including golden Cable frames |
 | 4 Views | helpers, fragment cache, layouts, rooms, messages; the remaining templates | ported view tests; rendered HTML for the seed matches Rust's byte for byte |
 | 5 App | boot, config, concerns, CLI, Dockerfile, parity candidate wiring; rooms, messages, searches, bots, presenters; channels, broadcasts, jobs; integrations (Web Push, webhooks, opengraph, network guard, QR, user agent) | ported app tests with the seed; the image boots under `parity/bin/candidate` |
+| 5b Baseline | `bench/run --apps reference,rust,fsharp` as soon as the app boots, before the parity loop, with a per-layer cost breakdown (Kestrel, Falco, SQLite, templates, rich text) | numbers recorded under `bench/results/`; no gate, it sets Phase 7's targets |
 | 6 Parity | loop: `parity/bin/compare` (lean, then full matrix) → fix → repeat until no new failures | allowlist no larger than Rust's |
-| 7 Performance | `bench/run --apps reference,rust,fsharp`; profile; optimize | F# faster than Rust on all five workloads, with rows verified for posts |
+| 7 Performance | `bench/run --apps reference,rust,fsharp`; profile; optimize | aim: faster than Rust on all five workloads (rows verified for posts); close to Rust counts as a win, reported as close. Known gaps so far: signed-cookie requests, identity bodies through Kestrel, Db row reads, rich text, plain-frame Cable fan-out |
 | 8 Datastar (optional) | a second frontend | screenshots identical; behavior screens pass. Needs sign-off first |
 | 9 Publish | GitHub repo, README with results, upstream README PR | maintainers' review |
 

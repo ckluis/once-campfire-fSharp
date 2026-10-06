@@ -41,7 +41,7 @@ build_fsharp() {
 }
 build_rust() {
   cp "$ROOT/rust/Cargo.lock" "$ROOT/bench/cable/rust/Cargo.lock"
-  (cd "$ROOT/bench/cable/rust" && CARGO_TARGET_DIR="$OUT/rust" mise exec rust -- cargo build --release --offline)
+  (cd "$ROOT/bench/cable/rust" && CARGO_TARGET_DIR="$ROOT/target/rust" mise exec rust -- cargo build --release --offline)
 }
 
 run_one() {
@@ -65,4 +65,4 @@ run_one() {
 [ "$which" != rust ] && build_fsharp
 [ "$which" != fsharp ] && build_rust
 [ "$which" != rust ] && run_one fsharp "$OUT/fsharp/CableBench"
-[ "$which" != fsharp ] && run_one rust "$OUT/rust/release/cablebench"
+[ "$which" != fsharp ] && run_one rust "$ROOT/target/rust/release/cablebench"

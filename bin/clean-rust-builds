@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Drop Rust compile intermediates under target/, keeping the executables the scripts run.
+# Every Rust helper (differentials, bench servers, loadgen) builds into the shared target/rust;
+# deps/, build/, incremental/ and .fingerprint/ there grow by hundreds of MB per tool and are only
+# needed to make the next build incremental. Run at each phase gate; scripts rebuild on demand.
+#   bin/clean-rust-builds          keep executables, drop intermediates
+#   bin/clean-rust-builds --all    drop target/rust entirely
+set -euo pipefail
+cd "$(dirname "$0")/.."
+before=$(du -sk target 2>/dev/null | cut -f1 || echo 0)
+if [ "${1:-}" = --all ]; then
+  rm -rf target/rust
+else
+  # also sweeps any older per-tool cargo dirs (target/*/rust) left from before target/rust was shared
+  find target -type d \( -name release -o -name debug \) -path '*rust*' 2>/dev/null | while read -r prof; do
+    rm -rf "$prof"/deps "$prof"/build "$prof"/incremental "$prof"/.fingerprint "$prof"/examples
+  done
+fi
+after=$(du -sk target 2>/dev/null | cut -f1 || echo 0)
+echo "target/: $((before / 1024)) MB -> $((after / 1024)) MB"

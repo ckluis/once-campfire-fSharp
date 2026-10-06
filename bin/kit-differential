@@ -30,22 +30,22 @@ if [ $mode = http ]; then
   http=reference-tools/kit/http-differential
   mkdir -p target/kit-http-differential
   python3 "$http/gen_main.py" rust/crates/kit/tests/http.rs target/kit-http-differential/main.rs
-  CARGO_TARGET_DIR="$PWD/target/kit-http-differential/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --offline --manifest-path "$http/Cargo.toml"
+  CARGO_TARGET_DIR="$PWD/target/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --offline --manifest-path "$http/Cargo.toml"
   dotnet build "$http/fsharp" -c Release -v quiet -nologo -o target/kit-http-differential/fsharp
   requests="${1:-1500}"
   status=0
   for traffic in plain ssl; do
-    python3 "$http/fuzz.py" "$PWD/target/kit-http-differential/rust/release/kit-http-differential" \
+    python3 "$http/fuzz.py" "$PWD/target/rust/release/kit-http-differential" \
       "$PWD/target/kit-http-differential/fsharp/HttpApp" "${2:-1}" "$requests" "$traffic" || status=1
   done
   exit $status
 fi
 
-CARGO_TARGET_DIR="$PWD/$out/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --offline --manifest-path "$tool/Cargo.toml"
+CARGO_TARGET_DIR="$PWD/target/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --offline --manifest-path "$tool/Cargo.toml"
 dotnet build "$tool/fsharp" -c Release -v quiet -nologo -o "$out/fsharp"
 
 python3 "$tool/generate.py" "$count" "$seed" > "$out/input"
-"$out/rust/release/kit-differential" < "$out/input" > "$out/rust.output"
+"target/rust/release/kit-differential" < "$out/input" > "$out/rust.output"
 
 if [ $mode = golden ]; then
   python3 "$tool/golden.py" "$out/input" "$out/rust.output" 150 > tests/Campfire.Kit.Tests/differential.jsonl

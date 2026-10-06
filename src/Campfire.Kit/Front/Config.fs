@@ -76,9 +76,10 @@ module FrontConfig =
         | "False" -> ValueSome false
         | _ -> ValueNone
 
-    /// `strconv.Atoi`: an optional sign and decimal digits, nothing else.
+    /// The longest timeout .NET timers can wait (just under 49.7 days); longer settings are clamped to it.
     let private maxTimeoutSeconds = 49L * 24L * 3600L
 
+    /// `strconv.Atoi`: an optional sign and decimal digits, nothing else.
     let private parseInt (value: string) : int64 voption =
         match Int64.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture) with
         | true, n -> ValueSome n

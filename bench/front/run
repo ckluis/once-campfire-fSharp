@@ -33,7 +33,7 @@ build_fsharp() {
 }
 build_rust() {
   cp "$ROOT/rust/Cargo.lock" "$ROOT/bench/front/rust/Cargo.lock"
-  (cd "$ROOT/bench/front/rust" && CARGO_TARGET_DIR="$OUT/rust" mise exec rust -- cargo build --release --offline)
+  (cd "$ROOT/bench/front/rust" && CARGO_TARGET_DIR="$ROOT/target/rust" mise exec rust -- cargo build --release --offline)
 }
 
 cpu_seconds() { ps -o cputime= -p "$1" | awk -F: '{ if (NF==3) print $1*3600+$2*60+$3; else print $1*60+$2 }'; }
@@ -90,6 +90,6 @@ case $which in
     # The Rust server needs a cookie signed with the same secret; the F# server prints one.
     [ -n "$COOKIE" ] || { build_fsharp; "$OUT/fsharp/FrontBench" 3003 3103 > "$OUT/cookie.log" 2>&1 & p=$!; sleep 3; COOKIE=$(grep COOKIE= "$OUT/cookie.log" | head -1 | sed 's/COOKIE=//'); kill $p; wait $p 2>/dev/null || true; }
     build_rust
-    run_server rust 3002 "$OUT/rust/release/frontbench"
+    run_server rust 3002 "$ROOT/target/rust/release/frontbench"
     ;;
 esac

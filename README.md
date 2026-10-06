@@ -48,6 +48,9 @@ specific to this port are listed below, each citing the reference file it depart
   - Compressed responses carry the same decoded bytes as Rust's, not the same compressed bytes (.NET's
     deflate and ZstdSharp are not flate2 and libzstd); the Rust test that pins the SHA-256 of a spliced gzip
     member checks the ETag and the decoded body instead.
+  - `HTTP_IDLE_TIMEOUT`, `HTTP_READ_TIMEOUT` and `HTTP_WRITE_TIMEOUT` above 49 days are clamped to 49 days,
+    the longest .NET's timers can wait. Thruster and the Rust port accept any number of seconds; a value
+    that large means "never" in all three. Tested by `FrontConfigTests`.
   - Certificates are ordered by a small RFC 8555 client of our own (`Front/Acme.fs`) in place of
     instant-acme, in autocert's cache layout as Rust writes it. It sends `User-Agent`, which RFC 8555
     requires (Pebble refuses requests without it), and renews at most once an hour for CAs whose
