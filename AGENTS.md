@@ -134,7 +134,7 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   `dotnet run -c Release --project bench/db-micro` (the database path in process, ns and bytes per page);
   `bench/quick cpu` is CPU per request alone. Every run warms each route at its measured concurrency until the app is flat
   (`bench/lib/warmup.py`, `WARMUP_SECS`/`WARMUP_MAX_SECS`; `bench/warmup` draws the curve) and `bench/report` flags runs that did
-  not settle. `bench/breakdown perf` scales perf's shares to the unprofiled CPU per request and attributes allocation the same
+  not settle. `bench/breakdown alloc` traces allocation by type and by the code that allocates, bytes per request (GC allocation ticks with stacks through dotnet-trace; `bench/alloc-analyze` reads the trace; build it once into `/var/tmp/alloc-analyze/out` in the toolchain image). `bench/breakdown perf` scales perf's shares to the unprofiled CPU per request and attributes allocation the same
   way for both apps (`bench/lib/clr-symbols` installs the libcoreclr and libc symbols it needs). Container logs are capped
   (`LOG_MAX_SIZE`, `LOG_MAX_FILE`; request logging itself stays on). Before every benchmark check `df -h /Users/clank`
   (stop under 15 GB free), and run `bin/clean-docker` after image rebuilds and `bin/clean-rust-builds` after Rust builds.

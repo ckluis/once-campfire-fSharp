@@ -27,8 +27,8 @@ Req/s and container CPU per request, median [min-max] of 3 reps. "7.1" is the ti
 What it says, and what it does not:
 
 - **c=16 gains 3-8% in req/s and 3-12% in CPU per request.** F# is ahead of the stored Rust baseline on the room page (1.07), messages (1.10), search (1.08) and
-  posting (1.006) and level on the sidebar (0.99). Each of these cells is Rust at 3.3-3.5 busy cores against F# at 3.4-3.6; the CPU per request is still above
-  Rust's: room +2%, messages +2%, search +3%, sidebar +10%, post +13%.
+  posting (1.006) and level on the sidebar (0.99). As in 7.1 the lead is partly because Rust leaves about half of the 4 cores idle in the stored runs (3.3-3.5 busy, 2.8 on a post) while F# uses 3.7-3.9
+  (3.2 on a post): the CPU per request is still above Rust's: room +2%, messages +2%, search +3%, sidebar +10%, post +13%.
 - **c=1 did not move beyond noise** (+1 to +3% on three workloads, -3% on search and post, whose spreads cover that). What is left at one connection (0.81-0.90) is
   thread wake-ups, not allocation or the GC; see below.
 - Most of the c=16 gain is the gen0 budget (below), not the allocation cuts: the allocation cuts alone were worth 1-2% CPU per request on the pages (control and
@@ -65,7 +65,7 @@ throughput room 26,423 / 5,266, sidebar 23,842 / 4,912, post 7,387 / 2,252). Tie
 | `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=0` | CPU per request -34% at c=1 (room 272 -> 179, sidebar 287 -> 187, post 812 -> 527) and -4..-10% at c=16, but **c=1 throughput unchanged** (workers sleeping instead of spinning costs the latency the spin saved) and, A/B on the final image with the default (46 hex = 70) in alternating runs, **messages 30.5k vs 33.8k and search 25.0-25.6k vs 29.0-29.2k at c=16**, CPU per request equal | **not set**: it trades throughput for CPU and loses 10-14% on two workloads. It would be the choice for a host where CPU is billed and latency is not |
 | `DOTNET_GCgen0size` 16 MiB / **64 MiB** / 256 MiB (on top of spin 0) | room c=16 CPU 139 -> 124 / **121** / 120, sidebar 144 -> 132 / **132** / 131, one-connection p99 0.41 -> 0.22-0.25 ms (Rust 0.17-0.20); peak anon 229 / **234** / 450 MB (251 MB without) | **set, 64 MiB**: 256 MiB gains nothing more for 200 MB. A per-heap budget, so memory scales with the core count |
 | workstation GC (`DOTNET_gcServer=0`, with gen0 64 MiB) | CPU and throughput the same as server GC within noise (room 120.4 vs 121.0, sidebar 132.2 vs 131.6) | not changed: server GC stays |
-| `DOTNET_TieredPGO=0` | much worse: sidebar c=16 CPU 131 -> 193, post c=1 +24% | PGO stays on |
+| `DOTNET_TieredPGO=0` | much worse: sidebar c=16 CPU 131 -> 193, post c=1 CPU +24% | PGO stays on |
 | `DOTNET_ReadyToRun=0` (everything JITted) | no gain (room 140, sidebar 133), post c=16 warm-up never settled | ReadyToRun stays |
 | `DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS=1` | no change over spin 0 | no |
 | Kestrel `IOQueueCount=0` (mounted experiment) | no change (room c=1 5,528 vs 5,475) | no |
