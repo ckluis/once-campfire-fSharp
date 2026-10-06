@@ -1,6 +1,6 @@
 # Porting Campfire to F#
 
-Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, 5.2, the account-side controllers, 5.3, the hot path, and 5.4, channels and integrations, done 2026-10-06)
+Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, 5.2, the account-side controllers, 5.3, the hot path, and 5.4, channels and integrations, done 2026-10-06; Phase 5b, the baseline, recorded 2026-10-06)
 
 ## Goal
 
@@ -141,6 +141,14 @@ findings are fixed.
   reference app) is the one test not ported. Checked in the image: a Cable connection to `/cable` gets the welcome frame and
   subscribes to a room its user belongs to, and the room page and sidebar are byte for byte Rust's with the VAPID tag in place.
   Numbers (no tuning): `bench/results/campfire-app-channels-integrations.md`.
+
+- *Phase 5b (the baseline), 2026-10-06:* `bench/run --apps reference,rust,fsharp` (and the `-identity` twins) ran three reps each
+  on one machine, one app at a time, with the status of every response, the rows every post wrote, response bytes per route and
+  the load average before each run checked; `bench/breakdown` and `bench/falco` measured where F# spends a request. F# is at
+  0.68-0.79x Rust's requests a second on the four read workloads at 16 connections and level (1.02x) on posting a message; 20-92x
+  Rails. The gaps, ranked with estimated gains, are in `bench/results/baseline-20261006.md`: database access around SQLite's
+  engine (about 28 us a request more than Rust's), the CLR's allocation and GC cost, HMAC for signed cookies, the console logger,
+  thread-pool spinning. The Falco layer costs about 29 ns a request and is not a target.
 
 ### Requirements carried forward
 
