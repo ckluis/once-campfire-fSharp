@@ -1,10 +1,52 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <Compile Include="Library.fs" />
+    <Compile Include="Core/Fragment.fs" />
+    <Compile Include="Core/Out.fs" />
+    <Compile Include="Core/ViewContext.fs" />
+    <Compile Include="Core/FragmentCache.fs" />
+    <Compile Include="Helpers/Tag.fs" />
+    <Compile Include="Helpers/Url.fs" />
+    <Compile Include="Helpers/Turbo.fs" />
+    <Compile Include="Helpers/Links.fs" />
+    <Compile Include="Helpers/Assets.fs" />
+    <Compile Include="Helpers/Forms.fs" />
+    <Compile Include="Helpers/UnicodeTables.fs" />
+    <Compile Include="Helpers/Application.fs" />
+    <Compile Include="Helpers/RoomsHelper.fs" />
+    <Compile Include="Helpers/UsersHelper.fs" />
+    <Compile Include="Helpers/TranslationsTable.fs" />
+    <Compile Include="Helpers/Translations.fs" />
+    <Compile Include="Helpers/Filters.fs" />
+    <Compile Include="MessagesSupport.fs" />
+    <Compile Include="Messages.fs" />
+    <Compile Include="MessagesPresentation.fs" />
+    <Compile Include="MessagesJson.fs" />
+    <Compile Include="Users.fs" />
+    <Compile Include="Accounts.fs" />
+    <Compile Include="Rooms.fs" />
+    <Compile Include="Autocompletable.fs" />
+    <Compile Include="Searches.fs" />
+    <Compile Include="Sessions.fs" />
+    <Compile Include="Templates/Layouts/_Lightbox.fs" />
+    <Compile Include="Templates/Layouts/Application.fs" />
+    <Compile Include="Templates/Layouts/ApplicationWrapper.fs" />
+    <Compile Include="Templates/Layouts/TurboRails/Frame.fs" />
+    <Compile Include="Layouts.fs" />
+    <Compile Include="Templates/Accounts/_HelpContact.fs" />
+    <Compile Include="Templates/Accounts/_Invite.fs" />
+    <Compile Include="Templates/Pwa/_InstallInstructions.fs" />
+    <Compile Include="Templates/Pwa/_BrowserSettings.fs" />
+    <Compile Include="Templates/Pwa/_SystemSettings.fs" />
+    <Compile Include="Templates/Users/_Mention.fs" />
+    <Compile Include="Templates/Users/Autocompletables/_Template.fs" />
+    <Compile Include="Templates/Welcome/Show.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Campfire.Routes/Campfire.Routes.fsproj" />
     <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
     <ProjectReference Include="../Campfire.Ruby/Campfire.Ruby.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.Views.Tests" />
   </ItemGroup>
 </Project>
