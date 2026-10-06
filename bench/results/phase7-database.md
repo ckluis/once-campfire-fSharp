@@ -68,7 +68,7 @@ mutexes, and the per-call transitions. `bench/breakdown perf` (c=16, its 15 s wa
 | SQLite engine | 40.1 / 43.6 → **24.2** | 42.1 / 39.6 → **24.4** | 42.2 / 69.0 → **34.2** | 58.1 / 73.4 → **34.1** | 197.3 / 238.4 → **165.4** |
 | Around the engine (F#: Microsoft.Data.Sqlite stubs + Campfire.Db; Rust: db crate) | 6.8 / 32.7 → **13.4** | 7.0 / 31.0 → **14.2** | 6.2 / 28.5 → **16.5** | 5.9 / 26.1 → **16.0** | 19.6 / 76.7 → **38.6** |
 
-The engine is now below Rust's on every route (the mutexes are off and the call count is down; Rust's bundled SQLite takes the connection mutex out with NO_MUTEX but keeps the memory mutex).
+The engine is now below Rust's on every route (the mutexes are off and the call count is down; I did not compare the two SQLite builds' compile options, so I can't say how much of the margin is the build).
 The part around it is still twice Rust's: row mapping into records and options, the lists, the read queue's lock.
 
 Tier 1 (`bench/db-micro`, one reader connection on the seed, best of 5, this Mac): room page 58.4 → 37.4 us, messages 49.2 → 28.7, sidebar 47.4 → 20.7, search 25.1 → 14.5, a bare
