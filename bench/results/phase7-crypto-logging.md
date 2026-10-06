@@ -34,7 +34,7 @@ What it says, and what it does not:
 - **c=1 moved the most (+23 to +43%),** and it is the answer to what 7.1 and 7.2 called "thread wake-ups": the console logger wakes its writer thread for every line while it is idle, which at one connection is on every request.
   Batching the lines removed that; there is no wake-up per request left to hide in the CPU figure. F# CPU per request at c=1 is still 1.3-2.0x Rust's (spinning workers; unchanged).
 
-## What the 40 s of CPU is: the split (tier 2, c=16, one rep each, mounted builds, same day, same schedule)
+## Where the saving came from: the split (tier 2, c=16, one rep each, mounted builds, same day, same schedule)
 
 | Build | room req/s / CPU | sidebar req/s / CPU | search req/s / CPU |
 |---|---|---|---|
@@ -79,8 +79,8 @@ the first Mac run said the verify cost 1.7 us (Apple's CommonCrypto is quick at 
 
 ## Behavior kept
 
-- `bin/verify` with `CAMPFIRE_REQUIRE_SEED=1`: 1,032 tests, 0 failed, 7 skipped (the Linux-only and media ones, as before). The first full run of it showed one failure in `Campfire.App.Tests` that I did not capture; 9 later runs of the App project (1 alone, 2 in `bin/verify App`
-  and in the full run, 6 in `bin/verify App Kit`) were clean, so I cannot name it. Running `dotnet test` on the App project directly, without `bin/verify`'s libvips path, fails three media tests on this Mac whatever the code is.
+- `bin/verify` with `CAMPFIRE_REQUIRE_SEED=1`: 1,032 tests, 0 failed, 7 skipped (the Linux-only and media ones, as before). The first full run of it showed one failure in `Campfire.App.Tests` that I did not capture; 5 later runs of the App project (`bin/verify App` once, the full
+  `bin/verify` once, `bin/verify App Kit` three times) were clean, so I cannot name it. Running `dotnet test` on the App project directly, without `bin/verify`'s libvips path, fails three media tests on this Mac whatever the code is.
 - `bin/kit-differential` 0 differ on all 9 sections of 3,000; `bin/views-differential` 22,374 of 22,374 renders identical; `bin/richtext-differential` 0 differ on all four sections of 20,000.
 - Every signature, cookie and token is byte for byte what it was (the micro prints the same avatar, Turbo and cookie strings before and after); the tier 2 and tier 3 runs compare decoded response bytes with Rust's.
 - `bench/lib/logcount`: 20,000 and 8,000 requests at 16 connections, then SIGTERM: 20,001 and 8,001 `Request path=` lines in `docker logs` (the requests plus the readiness probe that answered).
