@@ -23,11 +23,13 @@
     <Compile Include="Presenters/Common.fs" />
     <Compile Include="Presenters/RichText.fs" />
     <Compile Include="Presenters/Attachments.fs" />
+    <Compile Include="Presenters/Pagination.fs" />
     <Compile Include="Presenters/Accounts.fs" />
     <Compile Include="Presenters/ViewContext.fs" />
     <Compile Include="Presenters/Page.fs" />
     <Compile Include="Concerns.fs" />
     <Compile Include="ActiveStorage.fs" />
+    <Compile Include="Presenters/AttachmentWrites.fs" />
     <Compile Include="RichText.fs" />
     <Compile Include="CoreJobs.fs" />
     <Compile Include="Controllers/Sessions.fs" />
