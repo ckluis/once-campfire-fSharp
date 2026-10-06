@@ -27,6 +27,7 @@ let ``the views render as the rust views did`` () =
             let case = root.GetProperty "case"
             let rust = root.GetProperty "rust"
             let op = Inputs.str (Inputs.get case "op")
+            let op = if Inputs.str (Inputs.get (Inputs.get case "args") "name") = "to_lowercase" then op + ":to_lowercase" else op
             counts[op] <- (match counts.TryGetValue op with | true, n -> n | _ -> 0) + 1
             replayed <- replayed + 1
             let ours = Operations.run case shared
@@ -48,7 +49,14 @@ let ``the views render as the rust views did`` () =
           "users/sidebars/rooms/_direct_placeholder"; "users/direct_room"; "welcome/show"; "helpers/tag"; "helpers/form"; "helpers/button"; "helpers/link"
           "helpers/image_tag"; "helpers/application"; "helpers/users"; "helpers/rooms"; "helpers/translations"; "helpers/url"
           "helpers/turbo"; "fragment_cache/keys"; "fragment_cache/script"; "messages/presentation"; "messages/epoch_ms"
-          "messages/ruby_number"; "messages/json_by_bots_index" ] do
+          "messages/ruby_number"; "messages/json_by_bots_index"; "helpers/application:to_lowercase"; "messages/_message"
+          "messages/message_cached"; "messages/_actions"; "messages/_presentation"; "messages/_unrenderable"; "messages/_template"
+          "messages/index"; "messages/show"; "messages/edit"; "messages/create_turbo_stream"; "messages/destroy_turbo_stream"
+          "messages/room_not_found"; "messages/boosts/_boost"; "messages/boosts/_boosts"; "messages/boosts/index"
+          "messages/boosts/new"; "rooms/show"; "rooms/involvements/show"; "rooms/refreshes/show"; "rooms/opens/new"
+          "rooms/opens/edit"; "rooms/closeds/new"; "rooms/closeds/edit"; "rooms/directs/new"; "rooms/directs/edit"
+          "rooms/layouts/_form"; "searches/index"; "autocompletable/users/index"; "autocompletable/users/_prompt_item"
+          "users/sidebars/show" ] do
         Assert.True(counts.ContainsKey op, $"no {op} case in differential.jsonl")
     let report = String.Join("\n", failures |> Seq.truncate 10)
     Assert.True(failures.Count = 0, $"{failures.Count} of {replayed} differ:\n{report}")

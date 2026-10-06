@@ -15,7 +15,7 @@ use campfire_views::users::{MentionUser, Role, Status, UserSummary};
 use campfire_views::*;
 use serde_json::{Value, json};
 
-type Out = Result<Value, String>;
+pub type Out = Result<Value, String>;
 
 // ---- templates this crate declares because rust/crates/views has no struct for them -------------
 
@@ -51,23 +51,23 @@ struct List<'a> {
 
 // ---- reading arguments ------------------------------------------------------------------------------------
 
-fn s(v: &Value) -> String {
+pub fn s(v: &Value) -> String {
     v.as_str().unwrap_or_default().to_string()
 }
 
-fn opt(v: &Value) -> Option<String> {
+pub fn opt(v: &Value) -> Option<String> {
     v.as_str().map(str::to_string)
 }
 
-fn arr(v: &Value) -> Vec<Value> {
+pub fn arr(v: &Value) -> Vec<Value> {
     v.as_array().cloned().unwrap_or_default()
 }
 
-fn i(v: &Value) -> i64 {
+pub fn i(v: &Value) -> i64 {
     v.as_i64().unwrap_or_default()
 }
 
-fn b(v: &Value) -> bool {
+pub fn b(v: &Value) -> bool {
     v.as_bool().unwrap_or(false)
 }
 
@@ -112,7 +112,7 @@ fn platform(v: &Value) -> Platform {
 }
 
 /// Runs `f` with the `ViewContext` described by `ctx`.
-fn with_ctx<R>(ctx: &Value, shared: &Value, f: impl FnOnce(&ViewContext) -> R) -> R {
+pub fn with_ctx<R>(ctx: &Value, shared: &Value, f: impl FnOnce(&ViewContext) -> R) -> R {
     let asset_path = |logical: &str| asset(logical);
     let importmap = pick(ctx, shared, "importmap_tags");
     let stylesheet = pick(ctx, shared, "stylesheet_tags");
@@ -166,7 +166,7 @@ fn attrs_from(list: &Value) -> h::Attrs {
     attrs
 }
 
-fn user_summary(v: &Value) -> UserSummary {
+pub fn user_summary(v: &Value) -> UserSummary {
     UserSummary {
         id: i(&v["id"]),
         name: s(&v["name"]),
@@ -186,7 +186,7 @@ fn user_summary(v: &Value) -> UserSummary {
     }
 }
 
-fn sidebar_direct(v: &Value) -> users::SidebarDirect {
+pub fn sidebar_direct(v: &Value) -> users::SidebarDirect {
     users::SidebarDirect {
         room_id: i(&v["room_id"]),
         unread: b(&v["unread"]),
@@ -216,6 +216,9 @@ pub fn run(case: &Value, shared: &Value) -> Out {
     let op = case["op"].as_str().ok_or("no op")?;
     let args = &case["args"];
     let ctx = &case["ctx"];
+    if let Some(answer) = crate::pages::run(op, args, ctx, shared) {
+        return answer;
+    }
     match op {
         // ---- layouts -----------------------------------------------------------------------------
         // args: page_title?, body_class?, head, nav, content, footer, sidebar (html strings)
@@ -463,6 +466,8 @@ fn helper(name: &str, args: &Value, ctx: &Value, shared: &Value) -> Out {
                 }
                 "truncate" => text(h::truncate(&s(&args["text"]), i(&args["length"]) as usize, &s(&args["omission"]))),
                 "capitalize" => text(h::capitalize(&s(&args["text"]))),
+                // `str::to_lowercase`, as the room forms' `data-value` calls it
+                "to_lowercase" => text(s(&args["text"]).to_lowercase()),
                 // capitalize each character of text on its own
                 "capitalize_each" => text(s(&args["text"]).chars().map(|c| h::capitalize(&c.to_string())).collect::<String>()),
                 "to_sentence" => {
@@ -717,4 +722,62 @@ pub fn bench_cache(rounds: usize) {
         let nanos = started.elapsed().as_nanos() / (rounds * 40) as u128;
         println!("{}", json!({ "op": "fragment_cache hit", "ns_per_hit": nanos }));
     });
+}
+
+/// The two pages the benchmarks fetch most: a busy room page and a page of messages (the cases with the most
+/// messages), as the app serves them: recorded, into a buffer sized from the last render, with the fragment
+/// cache warm (every message already rendered) and cold (the cache emptied before each render, so every
+/// message renders). Prints the time per page.
+pub fn bench_hot_pages(cases: &[Value], shared: &Value, rounds: usize) {
+    use campfire_views::messages::{MessageItem, MessageView};
+    use campfire_views::rooms::ShowView;
+    let busiest = |op: &str, messages: &dyn Fn(&Value) -> usize| {
+        // the first of the cases with the most messages (`max_by_key` takes the last)
+        cases.iter().filter(|case| case["op"] == op && case["args"]["mode"] == "view" && !b(&case["args"]["frame"])).rev().max_by_key(|case| messages(&case["args"]))
+    };
+    let measure = |name: &str, render: &dyn Fn() -> (usize, usize), clear: &dyn Fn(), rounds: usize| {
+        let (bytes, fragments) = render();
+        for _ in 0..rounds / 4 {
+            std::hint::black_box(render());
+        }
+        let mut total = 0u128;
+        for _ in 0..rounds {
+            clear();
+            let started = Instant::now();
+            std::hint::black_box(render());
+            total += started.elapsed().as_nanos();
+        }
+        println!("{}", json!({ "op": name, "bytes": bytes, "fragments": fragments, "ns_per_render": total / rounds as u128 }));
+    };
+    if let Some(case) = busiest("rooms/show", &|args| arr(&args["show"]["messages"]).len()) {
+        with_ctx(&case["ctx"], shared, |ctx| {
+            let show: ShowView = serde_json::from_value(case["args"]["show"].clone()).unwrap();
+            let cache = FragmentCache::new(fragment_cache::DEFAULT_MAX_BYTES);
+            fragment_cache::with(&cache, || {
+                let render = || {
+                    let page = campfire_views::render_sized!(rooms::Show { ctx, show: &show }).unwrap();
+                    let fragments: usize = page.fragments().iter().map(|(_, fragment)| fragment.len()).sum();
+                    (page.text().len() + fragments, page.fragments().len())
+                };
+                measure("rooms/show (busy room page, warm cache)", &render, &|| (), rounds);
+                measure("rooms/show (busy room page, cold cache)", &render, &|| cache.clear(), rounds / 10);
+            });
+        });
+    }
+    if let Some(case) = busiest("messages/index", &|args| arr(&args["messages"]).len()) {
+        with_ctx(&case["ctx"], shared, |ctx| {
+            let views: Vec<MessageView> = serde_json::from_value(case["args"]["messages"].clone()).unwrap();
+            let items: Vec<MessageItem> = views.into_iter().map(MessageItem::from).collect();
+            let cache = FragmentCache::new(fragment_cache::DEFAULT_MAX_BYTES);
+            fragment_cache::with(&cache, || {
+                let render = || {
+                    let page = campfire_views::render_sized!(messages::Index { ctx, messages: &items }).unwrap();
+                    let fragments: usize = page.fragments().iter().map(|(_, fragment)| fragment.len()).sum();
+                    (page.text().len() + fragments, page.fragments().len())
+                };
+                measure("messages/index (messages page, warm cache)", &render, &|| (), rounds);
+                measure("messages/index (messages page, cold cache)", &render, &|| cache.clear(), rounds / 10);
+            });
+        });
+    }
 }

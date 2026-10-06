@@ -15,6 +15,7 @@ ruby_compat = { path = "../../../rust/crates/ruby" }
 askama = { version = "0.14", features = ["blocks"] }
 base64 = "0.22"
 jiff = { version = "0.2", features = ["serde"] }
+serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 
 [workspace]

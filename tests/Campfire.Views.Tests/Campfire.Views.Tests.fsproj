@@ -6,6 +6,8 @@
   <ItemGroup>
     <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
     <Compile Include="../../reference-tools/views/differential/fsharp/Inputs.fs" Link="Inputs.fs" />
+    <Compile Include="../../reference-tools/views/differential/fsharp/Answer.fs" Link="Answer.fs" />
+    <Compile Include="../../reference-tools/views/differential/fsharp/Pages.fs" Link="Pages.fs" />
     <Compile Include="../../reference-tools/views/differential/fsharp/Operations.fs" Link="Operations.fs" />
     <Compile Include="Support/Dom.fs" />
     <Compile Include="Support/Facts.fs" />

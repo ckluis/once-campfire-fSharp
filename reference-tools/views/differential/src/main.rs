@@ -11,6 +11,10 @@
 //! Every operation's arguments are described where `run` reads them.
 
 mod ops;
+mod pages;
+
+// The templates this tool declares (`ops.rs`, `pages.rs`) name `crate::messages` as the views crate's own do.
+pub use campfire_views::messages;
 
 use std::io::{BufRead, Write};
 
@@ -39,6 +43,7 @@ fn main() {
     if let Some(rounds) = bench {
         ops::bench(&cases, &shared, rounds);
         ops::bench_page(&cases, &shared, rounds * 50);
+        ops::bench_hot_pages(&cases, &shared, rounds * 50);
         ops::bench_cache(rounds * 500);
         return;
     }

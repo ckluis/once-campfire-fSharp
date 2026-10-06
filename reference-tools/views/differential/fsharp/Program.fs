@@ -12,7 +12,7 @@ open System.Text.Json
 open Campfire.Views
 open Campfire.Views.Differential
 
-let private write (output: Stream) (id: JsonElement) (answer: Result<Operations.Answer, string>) =
+let private write (output: Stream) (id: JsonElement) (answer: Result<Answer.Answer, string>) =
     use writer = new Utf8JsonWriter(output)
     writer.WriteStartObject()
     writer.WritePropertyName "id"
@@ -81,6 +81,57 @@ let main argv =
             render () |> ignore
         let nanos = Stopwatch.GetElapsedTime(started).Ticks * 100L / int64 pageRounds
         let bytes = (GC.GetAllocatedBytesForCurrentThread() - allocated) / int64 pageRounds
+        // The two pages the benchmarks fetch most (see `bench_hot_pages` of the Rust tool): recorded, into a buffer sized from
+        // the last render, with the fragment cache warm and cold.
+        let busiest (op: string) (count: JsonElement -> int) =
+            cases
+            |> Seq.filter (fun case ->
+                Inputs.str (Inputs.get case "op") = op
+                && Inputs.str (Inputs.get (Inputs.get case "args") "mode") = "view"
+                && not (Inputs.bool (Inputs.get (Inputs.get case "args") "frame")))
+            |> Seq.sortByDescending (fun case -> count (Inputs.get case "args"))
+            |> Seq.tryHead
+        let measure (name: string) (render: unit -> struct (int * int)) (clear: unit -> unit) (rounds: int) =
+            let struct (bytes, fragments) = render ()
+            for _ in 1 .. rounds / 4 do
+                render () |> ignore
+            let mutable total = 0L
+            let allocated = GC.GetAllocatedBytesForCurrentThread()
+            for _ in 1..rounds do
+                clear ()
+                let started = Stopwatch.GetTimestamp()
+                render () |> ignore
+                total <- total + Stopwatch.GetElapsedTime(started).Ticks * 100L
+            let allocatedPer = (GC.GetAllocatedBytesForCurrentThread() - allocated) / int64 rounds
+            printfn "{\"op\":\"%s\",\"bytes\":%d,\"fragments\":%d,\"ns_per_render\":%d,\"bytes_allocated_per_render\":%d}" name bytes fragments (total / int64 rounds) allocatedPer
+        let hotRounds = rounds * 50
+        let sized (page: RecordedPage) =
+            let mutable bytes = page.Text.Length
+            for struct (_, fragment) in page.Fragments do
+                bytes <- bytes + fragment.Length
+            struct (bytes, page.Fragments.Length)
+        match busiest "rooms/show" (fun args -> Inputs.arr (Inputs.get (Inputs.get args "show") "messages") |> List.length) with
+        | Some case ->
+            let ctx = Inputs.viewContext (Inputs.get case "ctx") shared
+            let show = Inputs.showView (Inputs.get (Inputs.get case "args") "show")
+            let cache = FragmentCache(FragmentCacheLimits.DefaultMaxBytes)
+            let size = RenderSize()
+            FragmentCache.withCache cache (fun () ->
+                let render () = sized (size.Render(fun w -> Templates.Rooms.ShowPage.render w ctx show))
+                measure "rooms/show (busy room page, warm cache)" render ignore hotRounds
+                measure "rooms/show (busy room page, cold cache)" render (fun () -> cache.Clear()) (hotRounds / 10))
+        | None -> ()
+        match busiest "messages/index" (fun args -> Inputs.arr (Inputs.get args "messages") |> List.length) with
+        | Some case ->
+            let ctx = Inputs.viewContext (Inputs.get case "ctx") shared
+            let items = Inputs.arr (Inputs.get (Inputs.get case "args") "messages") |> List.map Inputs.messageItem
+            let cache = FragmentCache(FragmentCacheLimits.DefaultMaxBytes)
+            let size = RenderSize()
+            FragmentCache.withCache cache (fun () ->
+                let render () = sized (size.Render(fun w -> Templates.Messages.Index.render w ctx items))
+                measure "messages/index (messages page, warm cache)" render ignore hotRounds
+                measure "messages/index (messages page, cold cache)" render (fun () -> cache.Clear()) (hotRounds / 10))
+        | None -> ()
         // The fragment cache's hit, as a room page makes it for each of its messages.
         let cache = FragmentCache(FragmentCacheLimits.DefaultMaxBytes)
         let at = (Campfire.RailsCompat.Timestamps.tryParse "2026-09-26T12:23:46.483521Z").Value

@@ -12,16 +12,7 @@ open Campfire.Views.Helpers
 open Campfire.Views.Helpers.Tag
 open Campfire.Views.Users
 open Campfire.Views.Differential.Inputs
-
-type Answer =
-    { Out: string
-      Text: string option
-      Fragments: (int * int) list option }
-
-let private text (out: string) : Answer = { Out = out; Text = None; Fragments = None }
-
-/// Renders with `ctx` and takes the text.
-let private rendered (f: Out -> unit) : Answer = text (Render.text f)
+open Campfire.Views.Differential.Answer
 
 /// A recorded page's fragment: `<li id="n">xxxx</li>`.
 let private fragmentOf (n: int) (size: int) : Fragment = Fragment($"<li id=\"{n}\">{String('x', size)}</li>")
@@ -130,6 +121,7 @@ let private helper (name: string) (args: JsonElement) (ctx: JsonElement) (shared
                     w.Raw content))
         | "truncate" -> text (Application.truncate (str (get args "text")) (intOf (get args "length")) (str (get args "omission")))
         | "capitalize" -> text (Application.capitalize (str (get args "text")))
+        | "to_lowercase" -> text (Application.toLowercase (str (get args "text")))
         | "capitalize_each" ->
             text (String.Join("", (str (get args "text")).EnumerateRunes() |> Seq.map (fun rune -> Application.capitalize (rune.ToString()))))
         | "to_sentence" -> text (Application.toSentence (strings (get args "items")) (str (get args "connector")))
@@ -192,14 +184,6 @@ let private helper (name: string) (args: JsonElement) (ctx: JsonElement) (shared
         | other -> failwith $"turbo helper {other}"
     | other -> failwith $"unknown helper {other}"
 
-let private sidebarDirect (v: JsonElement) : SidebarDirect =
-    { RoomId = int64Of (get v "room_id")
-      Unread = bool (get v "unread")
-      UpdatedAtEpoch = str (get v "updated_at_epoch")
-      Members = arr (get v "members") |> List.map userSummary
-      MembershipId = int64Of (get v "membership_id")
-      MembershipUpdatedAt = timestamp (get v "membership_updated_at") }
-
 let private cacheOp (name: string) (args: JsonElement) : Answer =
     match name with
     | "keys" ->
@@ -261,6 +245,9 @@ let run (case: JsonElement) (shared: JsonElement) : Answer =
     let args = get case "args"
     let ctx = get case "ctx"
     let ctxOf () = viewContext ctx shared
+    match Pages.tryRun op args ctx shared with
+    | Some answer -> answer
+    | None ->
     match op with
     | "layouts/application_wrapper" ->
         let part key = Html.Raw(str (get args key))

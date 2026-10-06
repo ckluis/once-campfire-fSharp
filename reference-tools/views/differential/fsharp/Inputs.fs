@@ -244,3 +244,86 @@ let boostJson (v: JsonElement) : MessagesJson.BoostJson =
       CreatedAt = str (get v "created_at")
       Booster = userJson (get v "booster")
       Message = { Id = int64Of (get (get v "message") "id"); Url = str (get (get v "message") "url") } }
+
+// The views crate's serde formats of the room, search and sidebar view-models.
+
+let roomKind (v: JsonElement) : RoomKind =
+    match str v with
+    | "closed" -> Closed
+    | "direct" -> Direct
+    | _ -> Open
+
+let roomView (v: JsonElement) : Rooms.RoomView =
+    { Id = int64Of (get v "id")
+      Kind = roomKind (get v "kind")
+      Name = opt (get v "name")
+      DisplayName = str (get v "display_name") }
+
+let messageItem (v: JsonElement) : MessageItem = MessageItem.View(messageView v)
+
+let showView (v: JsonElement) : Rooms.ShowView =
+    { Room = roomView (get v "room")
+      UpdatedAt = timestamp (get v "updated_at")
+      User = userView (get v "user")
+      Messages = arr (get v "messages") |> List.map messageItem
+      Invitation = bool (get v "invitation")
+      JoinCode = str (get v "join_code")
+      MessagesStreamName = str (get v "messages_stream_name") }
+
+let involvementView (v: JsonElement) : Rooms.InvolvementView =
+    { RoomId = int64Of (get v "room_id")
+      Kind = roomKind (get v "kind")
+      Involvement = str (get v "involvement") }
+
+let refreshView (v: JsonElement) : Rooms.RefreshView =
+    { RoomId = int64Of (get v "room_id")
+      RoomKind = roomKind (get v "room_kind")
+      NewMessages = arr (get v "new_messages") |> List.map messageItem
+      UpdatedMessages = arr (get v "updated_messages") |> List.map messageItem }
+
+let formRoom (v: JsonElement) : Rooms.FormRoom =
+    { Id =
+        (match get v "id" with
+         | id when id.ValueKind = JsonValueKind.Number -> Some(id.GetInt64())
+         | _ -> None)
+      Name = opt (get v "name") }
+
+let openFormView (v: JsonElement) : Rooms.OpenFormView =
+    { Room = formRoom (get v "room")
+      CanAdminister = bool (get v "can_administer")
+      Users = arr (get v "users") |> List.map userView }
+
+let closedFormView (v: JsonElement) : Rooms.ClosedFormView =
+    { Room = formRoom (get v "room")
+      CanAdminister = bool (get v "can_administer")
+      CurrentUserId = int64Of (get v "current_user_id")
+      SelectedUsers = arr (get v "selected_users") |> List.map userView
+      UnselectedUsers = arr (get v "unselected_users") |> List.map userView }
+
+let directEditView (v: JsonElement) : Rooms.DirectEditView =
+    { RoomId = int64Of (get v "room_id")
+      DisplayName = str (get v "display_name")
+      Users = arr (get v "users") |> List.map userView }
+
+let editView (v: JsonElement) : EditView =
+    { Message = messageView (get v "message")
+      EditableBodyHtml = str (get v "editable_body_html") }
+
+let searchesIndexView (v: JsonElement) : Searches.IndexView =
+    { Query = opt (get v "query")
+      Q = opt (get v "q")
+      Messages = arr (get v "messages") |> List.map messageItem
+      RecentSearches = arr (get v "recent_searches") |> List.map str
+      ReturnToRoomId = int64Of (get v "return_to_room_id") }
+
+let mentionUser (v: JsonElement) : MentionUser =
+    { User = userSummary (get v "user")
+      AttachableSgid = str (get v "attachable_sgid") }
+
+let sidebarDirect (v: JsonElement) : SidebarDirect =
+    { RoomId = int64Of (get v "room_id")
+      Unread = bool (get v "unread")
+      UpdatedAtEpoch = str (get v "updated_at_epoch")
+      Members = arr (get v "members") |> List.map userSummary
+      MembershipId = int64Of (get v "membership_id")
+      MembershipUpdatedAt = timestamp (get v "membership_updated_at") }
