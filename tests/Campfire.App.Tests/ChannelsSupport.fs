@@ -42,9 +42,10 @@ type CableSink() =
 /// Stand-in partials that name what they render, so frames show which partial and record.
 type FakePartials() =
     interface IPartials with
-        member _.Message(message: Message) = $"""<div id="message_{message.ClientMessageId}">message {message.Id}</div>"""
+        member _.Message(message: Message) =
+            System.ReadOnlyMemory<byte>(System.Text.Encoding.UTF8.GetBytes $"""<div id="message_{message.ClientMessageId}">message {message.Id}</div>""")
         member _.MessagePresentation(message: Message) = $"<div>presentation {message.Id} & more</div>"
-        member _.Boost(boost: Boost) = $"<div>boost {boost.Id}</div>"
+        member _.Boost(boost: Boost) = System.ReadOnlyMemory<byte>(System.Text.Encoding.UTF8.GetBytes $"<div>boost {boost.Id}</div>")
         member _.SharedRoom(room: Room) = $"<li>shared {room.Id}</li>"
         member _.DirectRoom(membership: Membership) = $"<li>direct {membership.Id}</li>"
 

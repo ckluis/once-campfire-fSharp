@@ -33,8 +33,15 @@ type AppRichText(secrets: Secrets, clock: SharedClock, logger: ILogger) =
 
         /// `body.attachables.grep(User).uniq`: verified SGIDs only.
         member this.MentionedUserIds(conn: Conn, html: string) : int64 list =
-            match this.WithContext(conn, fun ctx -> ActionText.mentionedUsers html ctx) with
-            | Ok users -> users |> List.map (fun user -> user.Id)
-            | Error error ->
-                logger.LogError("mentioned_users raised error={Error}", error.Message)
+            // A body that holds no attachment (an `<action-text-attachment>`, or the editor's `data-trix-attachment` that becomes one)
+            // has no mentions: most messages, which are not parsed to find that out.
+            let span = System.MemoryExtensions.AsSpan html
+            if System.MemoryExtensions.IndexOf(span, "action-text-attachment", System.StringComparison.OrdinalIgnoreCase) < 0
+               && System.MemoryExtensions.IndexOf(span, "data-trix-attachment", System.StringComparison.OrdinalIgnoreCase) < 0 then
                 []
+            else
+                match this.WithContext(conn, fun ctx -> ActionText.mentionedUsers html ctx) with
+                | Ok users -> users |> List.map (fun user -> user.Id)
+                | Error error ->
+                    logger.LogError("mentioned_users raised error={Error}", error.Message)
+                    []

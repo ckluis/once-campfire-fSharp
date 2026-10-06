@@ -144,9 +144,9 @@ module Rendered =
 
     let partials (rendered: Rendered) : IPartials =
         { new IPartials with
-            member _.Message _ = rendered.Message |> Option.map string |> Option.defaultValue ""
+            member _.Message _ = rendered.Message |> Option.map (fun fragment -> fragment.Memory) |> Option.defaultValue System.ReadOnlyMemory<byte>.Empty
             member _.MessagePresentation _ = defaultArg rendered.MessagePresentation ""
-            member _.Boost _ = rendered.Boost |> Option.map string |> Option.defaultValue ""
+            member _.Boost _ = rendered.Boost |> Option.map (fun fragment -> fragment.Memory) |> Option.defaultValue System.ReadOnlyMemory<byte>.Empty
             member _.SharedRoom _ = defaultArg rendered.SharedRoom ""
 
             member _.DirectRoom(membership: Membership) =

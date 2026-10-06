@@ -15,14 +15,15 @@ open Campfire.Db
 open Campfire.RailsCompat
 
 /// The partials Turbo renders for broadcasts (`ApplicationController.render(partial:, locals:)`,
-/// html format, no request). Each returns the rendered HTML.
+/// html format, no request). Each returns the rendered HTML; the fragment-backed ones (a message and a boost, cached bytes) as the
+/// UTF-8 they were rendered to, which the broadcast escapes as JSON without making a string of them.
 type IPartials =
     /// `messages/_message` with `message:`.
-    abstract Message: Message -> string
+    abstract Message: Message -> System.ReadOnlyMemory<byte>
     /// `messages/_presentation` with `message:`.
     abstract MessagePresentation: Message -> string
     /// `messages/boosts/_boost` with `boost:`.
-    abstract Boost: Boost -> string
+    abstract Boost: Boost -> System.ReadOnlyMemory<byte>
     /// `users/sidebars/rooms/_shared` with `room:`.
     abstract SharedRoom: Room -> string
     /// `users/sidebars/rooms/_direct` with `membership:`.
@@ -77,6 +78,9 @@ type Broadcasts(server: Cable) =
             | None -> NoTemplate
         broadcastActionTo server streamables action (Target target) template attributes |> ignore
 
+    member private _.ToUtf8(streamables: string list, action: Action, target: string, html: System.ReadOnlyMemory<byte>, attributes: (string * string option) list) : unit =
+        broadcastActionTo server streamables action (Target target) (HtmlUtf8 html) attributes |> ignore
+
     // Message::Broadcasts (reference/app/models/message/broadcasts.rb)
 
     /// `message.broadcast_create`: append the message to the room, then tell every member's
@@ -84,14 +88,15 @@ type Broadcasts(server: Cable) =
     /// Webhook replies, and `Messages::ByBotsController`.
     member this.MessageCreate(conn: Conn, room: Room, message: Message, partials: IPartials) : unit =
         let html = partials.Message message
-        this.To(Broadcasts.RoomMessages room, Append, BroadcastNames.roomDomId room BroadcastNames.Messages, Some html, [])
+        this.ToUtf8(Broadcasts.RoomMessages room, Append, BroadcastNames.roomDomId room BroadcastNames.Messages, html, [])
         this.UnreadRoom(conn, room)
 
     /// `broadcast_unread_room`: `{ roomId: }` to each member's `user_<id>_unreads`.
     member _.UnreadRoom(conn: Conn, room: Room) : unit =
+        // The same message to every member's stream: encoded once.
+        let json = System.Text.Encoding.UTF8.GetBytes(Json.encode (Value.Object [ "roomId", Value.Int room.Id ]))
         for membership in Membership.forRoom conn room.Id do
-            server.Broadcast(UnreadRooms.streamNameFor membership.UserId, Value.Object [ "roomId", Value.Int room.Id ])
-            |> ignore
+            server.BroadcastEncoded(UnreadRooms.streamNameFor membership.UserId, System.ReadOnlySpan json) |> ignore
 
     /// `message.broadcast_remove`: MessagesController#destroy and `User#remove_banned_content`.
     member this.MessageRemove(room: Room, message: Message) : unit =
@@ -110,7 +115,7 @@ type Broadcasts(server: Cable) =
     member this.BoostCreate(room: Room, message: Message, boost: Boost, partials: IPartials) : unit =
         let html = partials.Boost boost
         let target = $"boosts_message_{message.ClientMessageId}"
-        this.To(Broadcasts.RoomMessages room, Append, target, Some html, BroadcastNames.maintainScroll)
+        this.ToUtf8(Broadcasts.RoomMessages room, Append, target, html, BroadcastNames.maintainScroll)
 
     /// `broadcast_remove`: `dom_id(boost)`.
     member this.BoostRemove(room: Room, boost: Boost) : unit =
