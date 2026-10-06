@@ -1,0 +1,123 @@
+{
+ "app": "fsharp-identity",
+ "rep": 1,
+ "cold_start_ms": 223,
+ "memory": {
+  "idle_current_mb": 27,
+  "idle_anon_mb": 15,
+  "peak_current_mb": 151,
+  "peak_anon_mb": 123,
+  "cgroup_peak_mb": 153
+ },
+ "http": [
+  {
+   "avg_bytes": 416122,
+   "conc": 16,
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 10.351,
+    "mean_ms": 1.03,
+    "n": 122650,
+    "p50_ms": 0.959,
+    "p90_ms": 1.472,
+    "p99_ms": 2.441
+   },
+   "ok": 122650,
+   "path": "/rooms/486777696",
+   "rps": 15328.9,
+   "secs": 8.0,
+   "statuses": {
+    "200": 122650
+   },
+   "cost": {
+    "wall_s": 8.0,
+    "server_usage_us": 29291092,
+    "server_user_us": 21666041,
+    "server_system_us": 7625051,
+    "loadgen_user_us": 2808798,
+    "loadgen_system_us": 21487914,
+    "n": 122650,
+    "server_cpu_us_per_req": 238.8,
+    "server_user_us_per_req": 176.6,
+    "server_system_us_per_req": 62.2,
+    "loadgen_cpu_us_per_req": 198.1,
+    "server_cores_busy": 3.66,
+    "loadgen_cores_busy": 3.04
+   },
+   "route": "room_show",
+   "warmup": {
+    "secs": 30.0,
+    "windows_rps": [
+     9222.1,
+     11402.0,
+     13551.9,
+     15657.3,
+     15445.8,
+     15526.5,
+     14985.7,
+     15310.1,
+     15523.7,
+     15009.7,
+     15512.9,
+     15871.9,
+     15176.6,
+     15381.0,
+     14836.5
+    ],
+    "reason": "settled",
+    "window_secs": 2.0,
+    "settled": true,
+    "tail_rps": 15131.4
+   },
+   "host_probe_after": {
+    "spin_ms": 58.46,
+    "spin_ms_max_cpu": 62.61,
+    "cpus": "0-3,4-7",
+    "baseline_ms": 57.4,
+    "ratio": 1.019
+   }
+  }
+ ],
+ "cable": [],
+ "upload": {},
+ "loadavg_start": "1.44 2.68 2.72 1/191 787135",
+ "loadavg_end": "4.55 3.36 2.95 1/236 788633",
+ "post_rows": [],
+ "probe": [
+  {
+   "route": "room_show",
+   "path": "/rooms/486777696",
+   "gzip": {
+    "status": 200,
+    "content_encoding": "gzip",
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 24080,
+    "decoded_bytes": 416122,
+    "etag": true
+   },
+   "identity": {
+    "status": 200,
+    "content_encoding": null,
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 416122,
+    "decoded_bytes": 416122,
+    "etag": true
+   }
+  }
+ ],
+ "host_probe_start": {
+  "spin_ms": 57.88,
+  "spin_ms_max_cpu": 61.08,
+  "cpus": "0-3,4-7",
+  "baseline_ms": 57.4,
+  "ratio": 1.008
+ },
+ "host_probe_end": {
+  "spin_ms": 59.56,
+  "spin_ms_max_cpu": 62.34,
+  "cpus": "0-3,4-7",
+  "baseline_ms": 57.4,
+  "ratio": 1.038
+ }
+}

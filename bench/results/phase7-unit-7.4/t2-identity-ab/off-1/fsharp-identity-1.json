@@ -1,0 +1,144 @@
+{
+ "app": "fsharp-identity",
+ "rep": 1,
+ "cold_start_ms": 227,
+ "memory": {
+  "idle_current_mb": 27,
+  "idle_anon_mb": 15,
+  "peak_current_mb": 150,
+  "peak_anon_mb": 120,
+  "cgroup_peak_mb": 150
+ },
+ "http": [
+  {
+   "avg_bytes": 416122,
+   "conc": 16,
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 8.567,
+    "mean_ms": 0.85,
+    "n": 148173,
+    "p50_ms": 0.779,
+    "p90_ms": 1.206,
+    "p99_ms": 2.275
+   },
+   "ok": 148173,
+   "path": "/rooms/486777696",
+   "rps": 18519.5,
+   "secs": 8.0,
+   "statuses": {
+    "200": 148173
+   },
+   "cost": {
+    "wall_s": 8.0,
+    "server_usage_us": 29163465,
+    "server_user_us": 20946243,
+    "server_system_us": 8217222,
+    "loadgen_user_us": 2698288,
+    "loadgen_system_us": 22336778,
+    "n": 148173,
+    "server_cpu_us_per_req": 196.8,
+    "server_user_us_per_req": 141.4,
+    "server_system_us_per_req": 55.5,
+    "loadgen_cpu_us_per_req": 169.0,
+    "server_cores_busy": 3.64,
+    "loadgen_cores_busy": 3.13
+   },
+   "route": "room_show",
+   "warmup": {
+    "secs": 72.0,
+    "windows_rps": [
+     9299.1,
+     11817.5,
+     14197.0,
+     16934.4,
+     17682.9,
+     18501.4,
+     18689.6,
+     18595.6,
+     18315.6,
+     18927.6,
+     18467.3,
+     18521.4,
+     17866.0,
+     17749.0,
+     17764.1,
+     17377.7,
+     17008.1,
+     17635.7,
+     17032.5,
+     17331.8,
+     17363.0,
+     17412.1,
+     17500.7,
+     17511.4,
+     18548.3,
+     17865.9,
+     18149.4,
+     16867.9,
+     18034.3,
+     17357.2,
+     17250.2,
+     18006.8,
+     18187.1,
+     18031.6,
+     18157.7,
+     18064.3
+    ],
+    "reason": "settled",
+    "window_secs": 2.0,
+    "settled": true,
+    "tail_rps": 18084.5
+   },
+   "host_probe_after": {
+    "spin_ms": 60.54,
+    "spin_ms_max_cpu": 63.67,
+    "cpus": "0-3,4-7",
+    "baseline_ms": 57.4,
+    "ratio": 1.055
+   }
+  }
+ ],
+ "cable": [],
+ "upload": {},
+ "loadavg_start": "1.30 2.73 2.78 1/189 790372",
+ "loadavg_end": "5.69 3.94 3.21 1/228 793216",
+ "post_rows": [],
+ "probe": [
+  {
+   "route": "room_show",
+   "path": "/rooms/486777696",
+   "gzip": {
+    "status": 200,
+    "content_encoding": "gzip",
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 24080,
+    "decoded_bytes": 416122,
+    "etag": true
+   },
+   "identity": {
+    "status": 200,
+    "content_encoding": null,
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 416122,
+    "decoded_bytes": 416122,
+    "etag": true
+   }
+  }
+ ],
+ "host_probe_start": {
+  "spin_ms": 57.55,
+  "spin_ms_max_cpu": 60.76,
+  "cpus": "0-3,4-7",
+  "baseline_ms": 57.4,
+  "ratio": 1.003
+ },
+ "host_probe_end": {
+  "spin_ms": 58.87,
+  "spin_ms_max_cpu": 61.39,
+  "cpus": "0-3,4-7",
+  "baseline_ms": 57.4,
+  "ratio": 1.026
+ }
+}
