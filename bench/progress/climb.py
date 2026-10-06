@@ -100,8 +100,8 @@ def describe(rows):
 
     A run is a version (a dot) when it has its own description (earlier versions, the Phase 7 start), is a
     unit's tier 3 confirmation, or follows an app commit since the previous version. Re-measurements of
-    unchanged code and runtime knobs tried without a commit are measurement-only: they stay in the log and
-    the "Every run" panel but never move the line or the carried values."""
+    unchanged code and runtime knobs tried without a commit are measurement-only: they stay in
+    bench/results/phase7-log.jsonl but are not drawn and never move the line or the carried values."""
     prev, out = None, []
     for r in rows:
         if not r.get("description") and prev and r.get("commit"):
