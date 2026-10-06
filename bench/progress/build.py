@@ -188,7 +188,7 @@ def card(r, view, measured, rust, ov):
             '<table><tr class="grp"><th></th><th colspan="3">16 connections</th><th colspan="3">1 connection</th></tr>'
             '<tr class="sub"><th></th><th>F#</th><th>Rust</th><th>F#/Rust</th><th>F#</th><th>Rust</th><th>F#/Rust</th></tr>%s</table>'
             '%s<p class="foot">Requests per second, CPU µs per request beneath. %s Greyed F# values were carried from an earlier run.</p></div>'
-            % (e(t.strftime("%H:%M UTC") if t else "?"), e(str(r.get("unit", ""))), e(str(r.get("tier", ""))),
+            % (e(t.astimezone().strftime("%a %-d %b, %H:%M %Z") if t else "?"), e(str(r.get("unit", ""))), e(str(r.get("tier", ""))),
                "" if kept else " · reverted", e(str(r.get("change", ""))), e(str(r.get("commit", ""))),
                e(str(r.get("build", ""))[:30]), (" · overall %.2f× of Rust" % ov) if ov else "", "".join(rows), done(r),
                "Rust was measured in the same run." if r.get("rust") else "Rust is the stored Phase 7 starting point."))
@@ -230,7 +230,7 @@ def page():
     for i, (t, v, r, *_) in enumerate(pts):
         if i % step == 0 or i == len(pts) - 1:
             svg.append('<text x="%.1f" y="%d" class="tick" text-anchor="middle">%s</text><text x="%.1f" y="%d" class="day" text-anchor="middle">%s</text>'
-                       % (X(r), H - B + 20, t.strftime("%H:%M"), X(r), H - B + 36, t.strftime("%a %-d %b")))
+                       % (X(r), H - B + 20, t.astimezone().strftime("%H:%M"), X(r), H - B + 36, t.astimezone().strftime("%a %-d %b")))
     svg.append("</svg>")
 
     dots = []
@@ -255,7 +255,7 @@ def page():
                  % (latest[1], gain, rate, abs(to_go), "to go to match Rust" if to_go > 0 else "ahead of Rust"))
     else:
         stats = '<p class="sub">No runs yet.</p>'
-    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    now = datetime.now().astimezone().strftime("%H:%M %Z")
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="30">
 <title>F# vs Rust</title><style>
