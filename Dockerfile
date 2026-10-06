@@ -205,9 +205,9 @@ USER 1000:1000
 # Runtime settings measured in Phase 7 unit 7.2 (bench/results/phase7-runtime.md), kept because they lowered CPU per request
 # without hurting another workload; an environment variable of the same name given to the container overrides it.
 #   DOTNET_GCgen0size=0x4000000 (64 MiB): the server GC's gen0 budget, so a collection (its suspension and its thread joins)
-#     comes far less often. The room page went from 145 to 121 us of CPU per request at sixteen connections, and its
-#     one-connection p99 from 0.41 to 0.24 ms. It is a per-heap budget, so memory grows with the core count; with 4 cores the
-#     peak was 234 MB against 251 MB without it (256 MiB cost 450 MB, and bought nothing more).
+#     comes far less often. The numbers are in the results file; on the room page it took 139 to 121 us of CPU per request at
+#     sixteen connections and the one-connection p99 from 0.41 to 0.24 ms. It is a per-heap budget, so memory grows with the
+#     core count; with 4 cores the peak was 234 MB against 251 MB without it (256 MiB cost 450 MB, and bought nothing more).
 # Measured and not set: DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=0 (CPU per request -34% at one connection, but 10-14% fewer
 # requests a second on the messages page and search at sixteen), workstation GC, TieredPGO=0, ReadyToRun off.
 ENV DOTNET_GCgen0size=0x4000000
