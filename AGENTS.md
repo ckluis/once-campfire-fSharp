@@ -130,7 +130,7 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   medians of `bench/results/phase7-start/`, "vs stored Rust baseline"): the five workloads at c=1 and c=16, 3 reps, `bench/run`'s validity checks and report, plus CPU per
   request from the container's cgroup; run it a unit at a time, `--only fsharp:1 --part 1/2` and so on, then `bench/quick report DIR`. Tier 2 builds nothing into
   an image: `bin/publish-mounted` (in colima) publishes the app as the Dockerfile does, and `bench/quick --mounted /var/tmp/campfire-mounted` runs it mounted over
-  `/opt/campfire`; `bench/quick log DIR --unit ... --tier 2 --change ... --kept true|false` appends to `bench/results/phase7-log.jsonl` and rebuilds the dashboard. Tier 1 is
+  `/opt/campfire`; `bench/quick log DIR --unit ... --tier 2 --change ... --kept true|false` appends to `bench/results/phase7-log.jsonl` and rebuilds `index.html` (its hero is the climb chart, `bench/progress/climb.py`). Tier 1 is
   `dotnet run -c Release --project bench/db-micro` (the database path in process, ns and bytes per page);
   `bench/quick cpu` is CPU per request alone. Every run warms each route at its measured concurrency until the app is flat
   (`bench/lib/warmup.py`, `WARMUP_SECS`/`WARMUP_MAX_SECS`; `bench/warmup` draws the curve) and `bench/report` flags runs that did
