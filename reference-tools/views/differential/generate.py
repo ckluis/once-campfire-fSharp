@@ -26,6 +26,9 @@ HOSTILE = [
     "", " ", "plain", "Plain Name", "a&b", "<script>alert(1)</script>", '"quoted"', "it's", "&amp; already", "a -> b", "a<b>c",
     "é ü ñ", "日本語 テキスト", "😀 emoji 👍🏽", "back\\slash", "line\nbreak", "tab\there", "x" * 300, "&lt;", "Ünal-Smith", "o'Brien",
     "ß straße", "İstanbul", "ǆ ǈ", "ΐ", "ŉ", "ﬃ", "https://example.com/?a=1&b=2", "mailto:a@b.c", "100%", "a+b c", "~tilde", "ａｂｃ",
+    # what `trim` and `compact_blank` call blank, and what they don't
+    "\u001f", "\u0085", "\u00a0", "\u2003 ", "\u180e", "\u200b", "\u3000", "\u2028", "\u001c x", "\ufeff", "\u000b", "\u0000",
+    "a\u0301 b", "𝒜𝒷", "👍🏽 x", "\ud7ff", "\ue000",
 ]
 KINDS = ["text", "safe", "bool", "int", "none"]
 ATTR_NAMES = [
@@ -160,6 +163,9 @@ def attrs_list():
     return attrs
 
 
+timestamps_for_cache = ["2024-06-01T12:00:00.000123Z", "2026-09-26T12:23:46.483521Z", "1970-01-01T00:00:00Z", "2038-01-19T03:14:08.5Z"]
+
+
 def n(base):
     return max(1, base * SCALE)
 
@@ -213,6 +219,24 @@ for _ in range(n(10)):
     case("users/autocompletables/_template", None, random_ctx())
 for _ in range(n(40)):
     case("welcome/show", {"current_user_name": RNG.choice([RNG.choice(USERS)["name"], hostile()])}, random_ctx())
+
+def sidebar_direct(updated_at):
+    members = [RNG.choice(USERS) for _ in range(RNG.randrange(1, 7))]
+    if RNG.random() < 0.3:
+        members = [dict(RNG.choice(USERS), name=hostile())]
+    return {
+        "room_id": RNG.randrange(1, 10**9), "unread": RNG.random() < 0.5, "updated_at_epoch": str(RNG.randrange(10**12, 2 * 10**12)),
+        "members": members, "membership_id": RNG.randrange(1, 10**6), "membership_updated_at": updated_at,
+    }
+
+
+for _ in range(n(40)):
+    case("users/sidebars/rooms/_direct", {"membership": sidebar_direct(RNG.choice(timestamps_for_cache))}, random_ctx())
+    case("users/sidebars/rooms/_shared", {"room": {"id": RNG.randrange(1, 10**9), "param_key": RNG.choice(["rooms_open", "rooms_closed"]), "name": RNG.choice([RNG.choice(SEED["rooms"])["name"] or "HQ", hostile()]), "unread": RNG.random() < 0.5}})
+    case("users/sidebars/rooms/_direct_placeholder", {"user": RNG.choice(USERS)}, random_ctx())
+    first = sidebar_direct(RNG.choice(timestamps_for_cache))
+    second = dict(first, members=[RNG.choice(USERS) for _ in range(RNG.randrange(1, 4))], unread=not first["unread"])
+    case("users/direct_room", {"membership": first, "second": second}, random_ctx())
 
 # ---- helpers: tags ---------------------------------------------------------------------------------------------
 for _ in range(n(200)):

@@ -39,6 +39,10 @@
     <Compile Include="Templates/Pwa/_SystemSettings.fs" />
     <Compile Include="Templates/Users/_Mention.fs" />
     <Compile Include="Templates/Users/Autocompletables/_Template.fs" />
+    <Compile Include="Templates/Users/Sidebars/Rooms/_Direct.fs" />
+    <Compile Include="Templates/Users/Sidebars/Rooms/_Shared.fs" />
+    <Compile Include="Templates/Users/Sidebars/Rooms/_DirectPlaceholder.fs" />
+    <Compile Include="UsersCached.fs" />
     <Compile Include="Templates/Welcome/Show.fs" />
   </ItemGroup>
   <ItemGroup>

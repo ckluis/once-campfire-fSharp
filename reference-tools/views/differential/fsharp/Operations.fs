@@ -192,6 +192,14 @@ let private helper (name: string) (args: JsonElement) (ctx: JsonElement) (shared
         | other -> failwith $"turbo helper {other}"
     | other -> failwith $"unknown helper {other}"
 
+let private sidebarDirect (v: JsonElement) : SidebarDirect =
+    { RoomId = int64Of (get v "room_id")
+      Unread = bool (get v "unread")
+      UpdatedAtEpoch = str (get v "updated_at_epoch")
+      Members = arr (get v "members") |> List.map userSummary
+      MembershipId = int64Of (get v "membership_id")
+      MembershipUpdatedAt = timestamp (get v "membership_updated_at") }
+
 let private cacheOp (name: string) (args: JsonElement) : Answer =
     match name with
     | "keys" ->
@@ -305,6 +313,28 @@ let run (case: JsonElement) (shared: JsonElement) : Answer =
               AttachableSgid = str (get args "attachable_sgid") }
         rendered (fun w -> Templates.Users._Mention.render w (ctxOf ()) user)
     | "users/autocompletables/_template" -> rendered (fun w -> Templates.Users.Autocompletables._Template.render w (ctxOf ()))
+    | "users/sidebars/rooms/_direct" ->
+        rendered (fun w -> Templates.Users.Sidebars.Rooms._Direct.render w (ctxOf ()) (sidebarDirect (get args "membership")))
+    | "users/sidebars/rooms/_shared" ->
+        let room = get args "room"
+        let room: SidebarRoom =
+            { Id = int64Of (get room "id")
+              ParamKey = str (get room "param_key")
+              Name = str (get room "name")
+              Unread = bool (get room "unread") }
+        rendered (fun w -> Templates.Users.Sidebars.Rooms._Shared.render w room)
+    | "users/sidebars/rooms/_direct_placeholder" ->
+        rendered (fun w -> Templates.Users.Sidebars.Rooms._DirectPlaceholder.render w (ctxOf ()) (userSummary (get args "user")))
+    | "users/direct_room" ->
+        let ctx = ctxOf ()
+        let first, second = sidebarDirect (get args "membership"), sidebarDirect (get args "second")
+        let cache = FragmentCache FragmentCacheLimits.DefaultMaxBytes
+        FragmentCache.withCache cache (fun () ->
+            let a = UsersCached.directRoom ctx first
+            let b = UsersCached.directRoom ctx second
+            if not (obj.ReferenceEquals(a, b)) then failwith "the second render did not reuse the cached fragment"
+            let c = Render.text (fun w -> UsersCached.cachedDirectRoom w ctx (View second))
+            { Out = a.ToString(); Text = Some c; Fragments = None })
     | "welcome/show" -> rendered (fun w -> Templates.Welcome.Show.render w (ctxOf ()) (str (get args "current_user_name")))
     | _ when op.StartsWith "helpers/" -> helper (op.Substring "helpers/".Length) args ctx shared
     | _ when op.StartsWith "fragment_cache/" -> cacheOp (op.Substring "fragment_cache/".Length) args

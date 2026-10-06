@@ -25,6 +25,13 @@ struct Lightbox<'a> {
     ctx: &'a ViewContext<'a>,
 }
 
+#[derive(Template)]
+#[template(path = "users/sidebars/rooms/_direct_placeholder.html")]
+struct DirectPlaceholder<'a> {
+    ctx: &'a ViewContext<'a>,
+    user: UserSummary,
+}
+
 /// What `recorded.rs`'s own tests render: a list of handed fragments, then a plain one.
 struct Handed(Fragment);
 
@@ -179,6 +186,17 @@ fn user_summary(v: &Value) -> UserSummary {
     }
 }
 
+fn sidebar_direct(v: &Value) -> users::SidebarDirect {
+    users::SidebarDirect {
+        room_id: i(&v["room_id"]),
+        unread: b(&v["unread"]),
+        updated_at_epoch: s(&v["updated_at_epoch"]),
+        members: arr(&v["members"]).iter().map(user_summary).collect(),
+        membership_id: i(&v["membership_id"]),
+        membership_updated_at: timestamp(&v["membership_updated_at"]),
+    }
+}
+
 fn help_contact(v: &Value) -> Option<accounts::HelpContact> {
     v.is_object().then(|| accounts::HelpContact { name: s(&v["name"]), email_address: s(&v["email_address"]) })
 }
@@ -268,6 +286,36 @@ pub fn run(case: &Value, shared: &Value) -> Out {
         "users/autocompletables/_template" => {
             with_ctx(ctx, shared, |ctx| text(users::AutocompletableTemplate { ctx }.render().map_err(|e| e.to_string())?))
         }
+        // args: membership: {room_id, unread, updated_at_epoch, members: [user], membership_id, membership_updated_at}
+        "users/sidebars/rooms/_direct" => with_ctx(ctx, shared, |ctx| {
+            text(users::SidebarDirectPartial { ctx, membership: sidebar_direct(&args["membership"]) }.render().map_err(|e| e.to_string())?)
+        }),
+        // args: room: {id, param_key, name, unread}
+        "users/sidebars/rooms/_shared" => {
+            let room = &args["room"];
+            let room = users::SidebarRoom { id: i(&room["id"]), param_key: s(&room["param_key"]), name: s(&room["name"]), unread: b(&room["unread"]) };
+            text(users::SidebarSharedPartial { room }.render().map_err(|e| e.to_string())?)
+        }
+        // args: user
+        "users/sidebars/rooms/_direct_placeholder" => {
+            with_ctx(ctx, shared, |ctx| text(DirectPlaceholder { ctx, user: user_summary(&args["user"]) }.render().map_err(|e| e.to_string())?))
+        }
+        // args: membership, second (the same membership version with other members): the partial is cached, so the
+        // second render is the first's; answers {out: the first, text: the second}
+        "users/direct_room" => with_ctx(ctx, shared, |ctx| {
+            let cache = FragmentCache::new(fragment_cache::DEFAULT_MAX_BYTES);
+            let (first, second) = (sidebar_direct(&args["membership"]), sidebar_direct(&args["second"]));
+            fragment_cache::with(&cache, || {
+                let a = users::direct_room(ctx, &first);
+                let b = users::direct_room(ctx, &second);
+                if !Arc::ptr_eq(&a, &b) {
+                    return Err("the second render did not reuse the cached fragment".to_string());
+                }
+                let item = users::SidebarDirectItem::from(second.clone());
+                let c = users::cached_direct_room(ctx, &item).0;
+                Ok(json!({ "out": a.as_str(), "text": c.as_str() }))
+            })
+        }),
         // args: current_user_name
         "welcome/show" => with_ctx(ctx, shared, |ctx| {
             text(welcome::Show { ctx, current_user_name: s(&args["current_user_name"]) }.render().map_err(|e| e.to_string())?)

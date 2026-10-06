@@ -15,29 +15,29 @@ views'.
 
 | Case | F# (ns) | Rust (ns) | F# / Rust | F# bytes allocated |
 |---|---|---|---|---|
-| welcome page, 21.6 KB (layout, lightbox, ~60 helper calls), context built once | 3,324 | 3,205 | 1.04 | 28,376 |
-| fragment cache hit, one message of a room page (key built in the thread's buffer, looked up by span) | 96 | 114 | 0.84 | 48 |
-| layout from parts, context built from JSON each time | 7,857 | 5,029 | 1.56 | 69,788 |
-| welcome page, context built from JSON each time | 7,678 | 5,155 | 1.49 | 71,835 |
-| pwa/_browser_settings | 2,818 | 2,182 | 1.29 | 6,289 |
-| pwa/_install_instructions | 2,109 | 1,632 | 1.29 | 3,571 |
-| pwa/_system_settings | 2,585 | 2,170 | 1.19 | 5,795 |
-| accounts/_invite | 4,517 | 4,661 | 0.97 | 15,205 |
-| users/_mention | 2,637 | 2,071 | 1.27 | 4,131 |
-| layouts/_lightbox | 2,179 | 1,909 | 1.14 | 5,892 |
-| messages/presentation (attachments, sounds) | 4,757 | 2,556 | 1.86 | 6,046 |
-| helpers/form | 3,220 | 3,586 | 0.90 | 6,154 |
-| helpers/tag | 774 | 763 | 1.01 | 1,358 |
-| helpers/image_tag | 2,457 | 2,107 | 1.17 | 2,973 |
-| fragment_cache/script (a script of fetches and gets with eviction) | 25,628 | 11,458 | 2.24 | 61,335 |
+| welcome page, 21.6 KB (layout, lightbox, ~60 helper calls), context built once | 3,271 | 3,124 | 1.05 | 27,688 |
+| fragment cache hit, one message of a room page (key built in the thread's buffer, looked up by span) | 84 | 115 | 0.73 | 48 |
+| layout from parts, context built from JSON each time | 7,674 | 5,192 | 1.48 | 69,705 |
+| welcome page, context built from JSON each time | 7,686 | 5,370 | 1.43 | 71,816 |
+| pwa/_browser_settings | 2,780 | 2,170 | 1.28 | 6,154 |
+| pwa/_install_instructions | 2,093 | 1,713 | 1.22 | 3,910 |
+| pwa/_system_settings | 2,615 | 2,177 | 1.20 | 5,711 |
+| accounts/_invite | 4,730 | 4,691 | 1.01 | 14,945 |
+| users/_mention | 2,616 | 2,109 | 1.24 | 4,099 |
+| layouts/_lightbox | 2,405 | 1,937 | 1.24 | 5,850 |
+| messages/presentation (attachments, sounds) | 4,376 | 2,604 | 1.68 | 5,874 |
+| helpers/form | 3,424 | 3,866 | 0.89 | 6,922 |
+| helpers/tag | 804 | 796 | 1.01 | 1,401 |
+| helpers/image_tag | 2,584 | 2,167 | 1.19 | 2,990 |
+| fragment_cache/script (a script of fetches and gets with eviction) | 19,042 | 10,276 | 1.85 | 53,843 |
 
 Reading it:
 
-- The page itself is level with askama's (3.3 us against 3.2 us), and allocates the page's exact-size copy plus 7 KB
-  (28.4 KB for a 21.6 KB page, `OutTests` pins "a page renders into a pooled buffer and allocates little more than
+- The page itself is level with askama's (3.3 us against 3.1 us), and allocates the page's exact-size copy plus 6 KB
+  (27.7 KB for a 21.6 KB page, `OutTests` pins "a page renders into a pooled buffer and allocates little more than
   itself"): the writer's array comes from `ArrayPool`, the attribute lists of the helpers are the rest. Rust's
   `render` allocates the page's `String` and grows it by doubling from the template's size hint.
-- A fragment cache hit costs 96 ns, 16% less than Rust's (`thread_local!` store and mutex there, `AsyncLocal` and a
+- A fragment cache hit costs 84 ns, 27% less than Rust's (`thread_local!` store and mutex there, `AsyncLocal` and a
   monitor here), and allocates nothing in a template (the 48 bytes are the bench's own partial application of the key
   writer; a template writes it as a lambda, which is inlined).
 - The ratios above 1.5 are the harness: `JsonElement` property lookups and the string the answer is decoded into

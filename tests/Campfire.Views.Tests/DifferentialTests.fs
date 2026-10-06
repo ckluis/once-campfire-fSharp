@@ -44,7 +44,8 @@ let ``the views render as the rust views did`` () =
     for op in
         [ "layouts/application_wrapper"; "layouts/_lightbox"; "layouts/turbo_rails/frame"; "recorded/page"; "accounts/_help_contact"
           "accounts/_invite"; "pwa/_install_instructions"; "pwa/_browser_settings"; "pwa/_system_settings"; "users/_mention"
-          "users/autocompletables/_template"; "welcome/show"; "helpers/tag"; "helpers/form"; "helpers/button"; "helpers/link"
+          "users/autocompletables/_template"; "users/sidebars/rooms/_direct"; "users/sidebars/rooms/_shared"
+          "users/sidebars/rooms/_direct_placeholder"; "users/direct_room"; "welcome/show"; "helpers/tag"; "helpers/form"; "helpers/button"; "helpers/link"
           "helpers/image_tag"; "helpers/application"; "helpers/users"; "helpers/rooms"; "helpers/translations"; "helpers/url"
           "helpers/turbo"; "fragment_cache/keys"; "fragment_cache/script"; "messages/presentation"; "messages/epoch_ms"
           "messages/ruby_number"; "messages/json_by_bots_index" ] do

@@ -40,6 +40,17 @@ let ``users partials`` () =
     assertParity name "html" (Render.text (fun w -> Templates.Users._Mention.render w (context name Request.none) (mentionUser name "JZ")))
 
 [<Fact>]
+let ``sidebar shared rooms`` () =
+    for (name, roomName, unread) in [ "shared_room_unread", "HQ", true; "shared_room", "All Talk", false ] do
+        let room = facts.Value.GetProperty("rooms").GetProperty roomName
+        let view: Users.SidebarRoom =
+            { Id = room.GetProperty("id").GetInt64()
+              ParamKey = nonNull (room.GetProperty("param_key").GetString())
+              Name = roomName
+              Unread = unread }
+        assertParity name "html" (Render.text (fun w -> Templates.Users.Sidebars.Rooms._Shared.render w view))
+
+[<Fact>]
 let ``welcome show`` () =
     // The first page to use the layout: its parity covers the layout and the lightbox.
     let name = "welcome"
