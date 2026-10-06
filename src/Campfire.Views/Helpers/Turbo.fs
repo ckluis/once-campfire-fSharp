@@ -49,14 +49,27 @@ let private domPrefix (model: string) (prefix: string option) : string =
             unprefixed[model] <- made
             made
 
+/// Whether a dom_id prefix can go out unescaped: ASCII letters, digits and `_`, as every model param
+/// key and literal prefix is. Anything else (a view-model field that someday carries user text) is
+/// escaped instead, so the unescaped fast path never depends on the caller.
+let private isPlain (prefix: string) =
+    let mutable plain = true
+    for c in prefix do
+        if not (System.Char.IsAsciiLetterOrDigit c || c = '_') then plain <- false
+    plain
+
 /// `dom_id(record, prefix)` as an attribute value: "prefix_model_id", written by the tag with the id
 /// formatted straight into the buffer, so no string is made for it.
-let domIdValue (model: string) (id: int64) (prefix: string option) : AttrValue = Numbered(domPrefix model prefix, id)
+let domIdValue (model: string) (id: int64) (prefix: string option) : AttrValue =
+    let text = domPrefix model prefix
+    if isPlain text then Numbered(text, id)
+    else Text(text + id.ToString(System.Globalization.CultureInfo.InvariantCulture))
 
 /// `dom_id(record, prefix)`: "prefix_model_id".
 let domId (model: string) (id: 'a) (prefix: string option) : string = domPrefix model prefix + string id
 
 /// `dom_id(record, prefix)` written into a template, with no string made for it.
 let writeDomId (w: Out) (model: string) (id: int64) (prefix: string option) : unit =
-    w.Raw(domPrefix model prefix)
+    let text = domPrefix model prefix
+    if isPlain text then w.Raw text else w.Text text
     w.Int id

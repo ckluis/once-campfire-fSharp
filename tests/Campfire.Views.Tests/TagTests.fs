@@ -92,3 +92,12 @@ let ``builds rails query strings`` () =
     Assert.Equal("/rooms/directs?user_ids%5B%5D=5&user_ids%5B%5D=6", Url.roomsDirectsWithUsers [ 5L; 6L ])
     Assert.Equal("/x?a=1&z=a+b", Url.withQuery "/x" [ "z", Url.One "a b"; "a", Url.One "1" ])
     Assert.Equal("/x", Url.withQuery "/x" [])
+
+[<Fact>]
+let ``a dom_id prefix that isn't a plain identifier is escaped, not written raw`` () =
+    match Turbo.domIdValue "rooms_open" 42L (Some "list") with
+    | Numbered(text, 42L) -> Assert.Equal("list_rooms_open_", text)
+    | other -> failwithf "plain prefix took the escaped path: %A" other
+    match Turbo.domIdValue "x\"><script>" 1L None with
+    | Text text -> Assert.Equal("x\"><script>_1", text)
+    | other -> failwithf "hostile prefix took the raw path: %A" other
