@@ -72,7 +72,7 @@ findings are fixed.
 | 5b Baseline | `bench/run --apps reference,rust,fsharp` as soon as the app boots, before the parity loop, with a per-layer cost breakdown (Kestrel, Falco, SQLite, templates, rich text) | numbers recorded under `bench/results/`; no gate, it sets Phase 7's targets |
 | 6 Parity | loop: `parity/bin/compare` (lean, then full matrix) → fix → repeat until no new failures | allowlist no larger than Rust's |
 | 7 Performance | `bench/run --apps reference,rust,fsharp`; profile; optimize | aim: faster than Rust on all five workloads (rows verified for posts); close to Rust counts as a win, reported as close. Known gaps so far: signed-cookie requests, identity bodies through Kestrel, Db row reads, rich text, plain-frame Cable fan-out |
-| 8 Datastar (optional) | a second frontend | screenshots identical; behavior screens pass. Needs sign-off first |
+| 8 Datastar | dropped 2026-10-06 | Chris is benchmarking for maximum backend performance; a Datastar or htmx frontend would mainly help the browser and live updates, not the five HTTP workloads |
 | 9 Publish | GitHub repo, README with results, upstream README PR | maintainers' review |
 
 ### Phase 5 progress
