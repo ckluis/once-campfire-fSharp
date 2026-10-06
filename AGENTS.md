@@ -91,14 +91,20 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   `tests/http.rs` from both kits and sends them the same random requests, comparing status, headers and body.
   It needs mise for the Rust toolchain; run it after changing params, cookies, formats, request, the multipart
   reader, `Ctx` or the adapter.
+- `bin/views-test-parity` lists any `#[test]` of `rust/crates/views` without an F# test of the same name (spaces for
+  underscores) in `tests/Campfire.Views.Tests`, and any file of `rust/crates/views/templates` without an F# module at the
+  same relative path under `Templates/`. It prints a count of each and exits 1 if anything is missing; run it after
+  porting a test or a template.
 - `bin/views-differential` compares `Campfire.Views` with the Rust views crate, byte for byte: every template ported so far,
   every view helper, the fragment cache's keys and eviction, and the view-model helpers, on cases made from the parity seeds
   (`parity/.seed/*`) and the views crate's golden facts plus generated variations (hostile text, every combination of platform
   flags, attribute kinds, sizes). `bin/views-differential golden` refreshes the sample of Rust's answers that
-  `Campfire.Views.Tests` replays, and `bin/views-differential bench` records render times (`bench/results/views-foundations.md`, and for a busy room page
-  and a messages page `bench/results/views-hot-paths.md`).
+  `Campfire.Views.Tests` replays, and `bin/views-differential bench` records render times (`bench/results/views-foundations.md`, for a busy room page
+  and a messages page `bench/results/views-hot-paths.md`, and for the account, profile, person, sign-in and manifest pages
+  `bench/results/views-remaining-templates.md`).
   Adding a template or helper to it is a branch in `reference-tools/views/differential/src/ops.rs` (what Rust renders; the
-  hot-path templates are in `src/pages.rs`), one in `fsharp/Operations.fs` (`fsharp/Pages.fs`), and cases for it in `generate.py`;
+  hot-path templates are in `src/pages.rs`, the account, session, user, profile and PWA ones in `src/rest.rs`), one in
+  `fsharp/Operations.fs` (`fsharp/Pages.fs`, `fsharp/Rest.fs`), and cases for it in `generate.py`;
   run `golden` after, so `bin/verify` replays them. A page case also renders cold and warm and plain and recorded and checks
   they are the same bytes, and takes `frame` (the Turbo-Frame layout) and `mode` ("mixed" gives half the messages to the
   template as cached fragments). It needs mise for the Rust toolchain.

@@ -45,6 +45,7 @@ fn main() {
         ops::bench(&cases, &shared, rounds);
         ops::bench_page(&cases, &shared, rounds * 50);
         ops::bench_hot_pages(&cases, &shared, rounds * 50);
+        rest::bench_pages(&cases, &shared, rounds * 50);
         ops::bench_cache(rounds * 500);
         return;
     }

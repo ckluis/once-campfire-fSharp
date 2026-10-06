@@ -132,6 +132,73 @@ let main argv =
                 measure "messages/index (messages page, warm cache)" render ignore hotRounds
                 measure "messages/index (messages page, cold cache)" render (fun () -> cache.Clear()) (hotRounds / 10))
         | None -> ()
+        // The pages of unit 4.3 alone, as the welcome page is measured: the case with the most rows of each kind, its context and
+        // view-model built once, rendered into a buffer that ends as the exact page.
+        let busiestOf (op: string) (rows: JsonElement -> int) =
+            cases
+            |> Seq.filter (fun case -> Inputs.str (Inputs.get case "op") = op && not (Inputs.bool (Inputs.get (Inputs.get case "args") "frame")))
+            |> Seq.sortByDescending (fun case -> rows (Inputs.get case "args"))
+            |> Seq.tryHead
+        let measureRest (name: string) (render: unit -> int) =
+            let length = render ()
+            for _ in 1 .. pageRounds / 4 do
+                render () |> ignore
+            let allocated = GC.GetAllocatedBytesForCurrentThread()
+            let started = Stopwatch.GetTimestamp()
+            for _ in 1..pageRounds do
+                render () |> ignore
+            let nanos = Stopwatch.GetElapsedTime(started).Ticks * 100L / int64 pageRounds
+            let bytes = (GC.GetAllocatedBytesForCurrentThread() - allocated) / int64 pageRounds
+            printfn "{\"op\":\"%s\",\"bytes\":%d,\"ns_per_render\":%d,\"bytes_allocated_per_render\":%d}" name length nanos bytes
+        let count (list: JsonElement) = Inputs.arr list |> List.length
+        match busiestOf "accounts/edit" (fun args -> count (Inputs.get (Inputs.get args "edit") "administrators") + count (Inputs.get (Inputs.get args "edit") "members")) with
+        | Some case ->
+            let ctx = Inputs.viewContext (Inputs.get case "ctx") shared
+            let edit = Inputs.get (Inputs.get case "args") "edit"
+            let edit: Accounts.EditView =
+                { AccountId = Inputs.int64Of (Inputs.get edit "account_id")
+                  JoinCode = Inputs.str (Inputs.get edit "join_code")
+                  RestrictRoomCreationToAdministrators = Inputs.bool (Inputs.get edit "restrict_room_creation_to_administrators")
+                  Administrators = Rest.users (Inputs.get edit "administrators")
+                  Members = Rest.users (Inputs.get edit "members")
+                  NextPage = Inputs.opt (Inputs.get edit "next_page") }
+            measureRest "accounts/edit (account page, most users)" (fun () -> (Render.page 0 (fun w -> Templates.Accounts.Edit.render w ctx edit)).Length)
+        | None -> ()
+        match busiestOf "users/profiles/show" (fun args -> count (Inputs.get (Inputs.get args "profile") "shared_memberships") + count (Inputs.get (Inputs.get args "profile") "direct_memberships")) with
+        | Some case ->
+            let ctx = Inputs.viewContext (Inputs.get case "ctx") shared
+            let profile = Inputs.get (Inputs.get case "args") "profile"
+            let profile: Users.ProfileShow =
+                { User = Inputs.userSummary (Inputs.get profile "user")
+                  AvatarAttached = Inputs.bool (Inputs.get profile "avatar_attached")
+                  TransferId = Inputs.str (Inputs.get profile "transfer_id")
+                  SharedMemberships = Rest.memberships (Inputs.get profile "shared_memberships")
+                  DirectMemberships = Rest.memberships (Inputs.get profile "direct_memberships") }
+            measureRest "users/profiles/show (profile, most rooms)" (fun () -> (Render.page 0 (fun w -> Templates.Users.Profiles.Show.render w ctx profile)).Length)
+        | None -> ()
+        match busiestOf "users/show" (fun args -> (Inputs.str (Inputs.get (Inputs.get args "user") "bio")).Length) with
+        | Some case ->
+            let ctx = Inputs.viewContext (Inputs.get case "ctx") shared
+            let user = Inputs.userSummary (Inputs.get (Inputs.get case "args") "user")
+            let transferId = Inputs.str (Inputs.get (Inputs.get case "args") "transfer_id")
+            measureRest "users/show (a person's page)" (fun () -> (Render.page 0 (fun w -> Templates.Users.Show.render w ctx user transferId)).Length)
+        | None -> ()
+        match busiestOf "sessions/new" (fun _ -> 0) with
+        | Some case ->
+            let ctx = Inputs.viewContext (Inputs.get case "ctx") shared
+            let args = Inputs.get case "args"
+            let email = Inputs.opt (Inputs.get args "email_address")
+            let contact = Inputs.helpContact (Inputs.get args "help_contact")
+            measureRest "sessions/new (sign in)" (fun () -> (Render.page 0 (fun w -> Templates.Sessions.New.render w ctx email contact)).Length)
+        | None -> ()
+        match busiestOf "pwa/manifest" (fun _ -> 0) with
+        | Some case ->
+            let args = Inputs.get case "args"
+            let name = Inputs.opt (Inputs.get args "account_name")
+            let small, large, baseUrl =
+                Inputs.str (Inputs.get args "logo_path_small"), Inputs.str (Inputs.get args "logo_path"), Inputs.str (Inputs.get args "base_url")
+            measureRest "pwa/manifest" (fun () -> (Render.page 0 (fun w -> Templates.Pwa.Manifest.render w name small large baseUrl Inputs.asset)).Length)
+        | None -> ()
         // The fragment cache's hit, as a room page makes it for each of its messages.
         let cache = FragmentCache(FragmentCacheLimits.DefaultMaxBytes)
         let at = (Campfire.RailsCompat.Timestamps.tryParse "2026-09-26T12:23:46.483521Z").Value

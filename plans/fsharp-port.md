@@ -94,6 +94,10 @@ Findings of a phase's verifier that a later phase has to meet. Each is a gate of
   *Unit 4.2:* a room page (and the messages page, search and a refresh) gives each message to the recorded page as a
   fragment, `Fragment` and all, and `RoomsViewsTests` ("show recorded keeps every message as a fragment") holds a
   recorded page to a plain render, cold and warm, in the application layout and the Turbo-Frame one.
+  *Unit 4.3:* the remaining pages (accounts, bots, sessions, users, profile, push subscriptions, first run) cache
+  no fragments, so they only have to render the same bytes as Rust's in both layouts: `bin/views-differential` renders
+  each cold and warm, plain and recorded, and in the Turbo-Frame layout when its case takes `frame`. Every Rust
+  `#[test]` and template of the crate has an F# counterpart (`bin/views-test-parity`).
 - **Phase 7: the gaps `bench/results/cable-fanout.md` and `bench/results/front.md` record are open.** F# is slower
   than Rust on plain-frame Cable bursts, lone broadcasts, idle CPU and memory per client, and on the front's
   signed-cookie page, 100 KB identity page and 20 KB asset cache hit. They are gates, not accepted costs.

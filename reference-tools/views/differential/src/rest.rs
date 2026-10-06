@@ -291,3 +291,79 @@ fn answer(op: &str, args: &Value, ctx: &ViewContext) -> Out {
         _ => unreachable!(),
     }
 }
+
+/// The pages of this file alone, as `bench_page` measures the welcome page: the case with the most rows of each kind,
+/// its context and view-model built once, rendered `rounds` times (askama's `render`, the exact string it returns).
+/// Prints the time per page.
+pub fn bench_pages(cases: &[Value], shared: &Value, rounds: usize) {
+    use std::time::Instant;
+    let busiest = |op: &str, rows: &dyn Fn(&Value) -> usize| {
+        // the first of the cases with the most rows (`max_by_key` takes the last)
+        cases.iter().filter(|case| case["op"] == op && !ops::b(&case["args"]["frame"])).rev().max_by_key(|case| rows(&case["args"]))
+    };
+    let measure = |name: &str, render: &dyn Fn() -> usize| {
+        let length = render();
+        for _ in 0..rounds / 4 {
+            std::hint::black_box(render());
+        }
+        let started = Instant::now();
+        for _ in 0..rounds {
+            std::hint::black_box(render());
+        }
+        let nanos = started.elapsed().as_nanos() / rounds as u128;
+        println!("{}", json!({ "op": name, "bytes": length, "ns_per_render": nanos }));
+    };
+    let rows = |list: &Value| ops::arr(list).len();
+    if let Some(case) = busiest("accounts/edit", &|args| rows(&args["edit"]["administrators"]) + rows(&args["edit"]["members"])) {
+        ops::with_ctx(&case["ctx"], shared, |ctx| {
+            let edit = &case["args"]["edit"];
+            let page = accounts::Edit {
+                ctx,
+                account_id: ops::i(&edit["account_id"]),
+                join_code: ops::s(&edit["join_code"]),
+                restrict_room_creation_to_administrators: ops::b(&edit["restrict_room_creation_to_administrators"]),
+                administrators: users(&edit["administrators"]),
+                members: users(&edit["members"]),
+                next_page: ops::opt(&edit["next_page"]),
+            };
+            measure("accounts/edit (account page, most users)", &|| page.render().unwrap().len());
+        });
+    }
+    if let Some(case) = busiest("users/profiles/show", &|args| rows(&args["profile"]["shared_memberships"]) + rows(&args["profile"]["direct_memberships"])) {
+        ops::with_ctx(&case["ctx"], shared, |ctx| {
+            let profile = &case["args"]["profile"];
+            let page = users::ProfileShow {
+                ctx,
+                user: ops::user_summary(&profile["user"]),
+                avatar_attached: ops::b(&profile["avatar_attached"]),
+                transfer_id: ops::s(&profile["transfer_id"]),
+                shared_memberships: memberships(&profile["shared_memberships"]),
+                direct_memberships: memberships(&profile["direct_memberships"]),
+            };
+            measure("users/profiles/show (profile, most rooms)", &|| page.render().unwrap().len());
+        });
+    }
+    if let Some(case) = busiest("users/show", &|args| ops::s(&args["user"]["bio"]).len()) {
+        ops::with_ctx(&case["ctx"], shared, |ctx| {
+            let page = users::Show { ctx, user: ops::user_summary(&case["args"]["user"]), transfer_id: ops::s(&case["args"]["transfer_id"]) };
+            measure("users/show (a person's page)", &|| page.render().unwrap().len());
+        });
+    }
+    if let Some(case) = busiest("sessions/new", &|_| 0) {
+        ops::with_ctx(&case["ctx"], shared, |ctx| {
+            let page = sessions::New { ctx, email_address: ops::opt(&case["args"]["email_address"]), help_contact: help_contact(&case["args"]["help_contact"]) };
+            measure("sessions/new (sign in)", &|| page.render().unwrap().len());
+        });
+    }
+    if let Some(case) = busiest("pwa/manifest", &|_| 0) {
+        let asset_path = |logical: &str| ops::asset(logical);
+        let page = pwa::Manifest {
+            account_name: ops::opt(&case["args"]["account_name"]),
+            logo_path_small: ops::s(&case["args"]["logo_path_small"]),
+            logo_path: ops::s(&case["args"]["logo_path"]),
+            base_url: ops::s(&case["args"]["base_url"]),
+            asset_path: &asset_path,
+        };
+        measure("pwa/manifest", &|| page.render().unwrap().len());
+    }
+}

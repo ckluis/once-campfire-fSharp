@@ -19,7 +19,7 @@ let private known =
           "users/push_subscriptions/index"; "users/push_subscriptions/_push_subscription"; "users/avatars/show"; "pwa/manifest"
           "pwa/service_worker" ]
 
-let private users (list: JsonElement) : UserSummary list = arr list |> List.map userSummary
+let users (list: JsonElement) : UserSummary list = arr list |> List.map userSummary
 
 let private botForm (v: JsonElement) : Accounts.BotForm =
     { Name = opt (get v "name")
@@ -38,7 +38,7 @@ let private membership (v: JsonElement) : ProfileMembership =
       Involvement = str (get v "involvement")
       Direct = bool (get v "direct") }
 
-let private memberships (list: JsonElement) : ProfileMembership list = arr list |> List.map membership
+let memberships (list: JsonElement) : ProfileMembership list = arr list |> List.map membership
 
 let private pushSubscription (v: JsonElement) : PushSubscription =
     { Id = int64Of (get v "id")
