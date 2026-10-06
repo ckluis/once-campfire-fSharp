@@ -215,13 +215,13 @@ module Accounts =
           Version = (UserAgent.Agent.version agent).String
           Platform = defaultArg (UserAgent.Agent.platform agent) "" }
 
+    /// `params[key]` as `Param::to_s` reads it: `Some` for a scalar (nil is `""`), `None` for a missing
+    /// key, a hash, an array or a file.
+    let paramToS (parameters: ParamMap) (key: string) : string option =
+        match parameters.Get key with
+        | ValueSome param -> Option.ofObj (param.ToS())
+        | ValueNone -> None
+
     /// A permitted string attribute: `Some` when the key was given (its value may be nil).
     let stringAttribute (parameters: ParamMap) (key: string) : string option option =
-        if not (parameters.ContainsKey key) then
-            None
-        else
-            Some(
-                match parameters.Get key with
-                | ValueSome param -> Option.ofObj (param.ToS())
-                | ValueNone -> None
-            )
+        if not (parameters.ContainsKey key) then None else Some(paramToS parameters key)

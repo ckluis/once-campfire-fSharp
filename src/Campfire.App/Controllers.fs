@@ -168,14 +168,14 @@ module RouteTable =
                 get "/" "welcome#show" (Welcome.show)
                 get "/first_run/new(.:format)" "first_runs#new" (actionNotFound)
                 get "/first_run/edit(.:format)" "first_runs#edit" (actionNotFound)
-                get "/first_run(.:format)" "first_runs#show" (unported "first_runs#show")
+                get "/first_run(.:format)" "first_runs#show" (FirstRuns.show)
                 patch "/first_run(.:format)" "first_runs#update" (actionNotFound)
                 put "/first_run(.:format)" "first_runs#update" (actionNotFound)
                 delete "/first_run(.:format)" "first_runs#destroy" (actionNotFound)
-                post "/first_run(.:format)" "first_runs#create" (unported "first_runs#create")
-                get "/session/transfers/:id(.:format)" "sessions/transfers#show" (unported "sessions/transfers#show")
-                patch "/session/transfers/:id(.:format)" "sessions/transfers#update" (unported "sessions/transfers#update")
-                put "/session/transfers/:id(.:format)" "sessions/transfers#update" (unported "sessions/transfers#update")
+                post "/first_run(.:format)" "first_runs#create" (FirstRuns.create)
+                get "/session/transfers/:id(.:format)" "sessions/transfers#show" (SessionTransfers.show)
+                patch "/session/transfers/:id(.:format)" "sessions/transfers#update" (SessionTransfers.update)
+                put "/session/transfers/:id(.:format)" "sessions/transfers#update" (SessionTransfers.update)
                 get "/session/new(.:format)" "sessions#new" (Sessions.``new``)
                 get "/session/edit(.:format)" "sessions#edit" (actionNotFound)
                 get "/session(.:format)" "sessions#show" (actionNotFound)
@@ -183,63 +183,63 @@ module RouteTable =
                 put "/session(.:format)" "sessions#update" (actionNotFound)
                 delete "/session(.:format)" "sessions#destroy" (Sessions.destroy)
                 post "/session(.:format)" "sessions#create" (Sessions.create)
-                get "/account/users(.:format)" "accounts/users#index" (unported "accounts/users#index")
+                get "/account/users(.:format)" "accounts/users#index" (AccountUsers.index)
                 post "/account/users(.:format)" "accounts/users#create" (actionNotFound)
                 get "/account/users/new(.:format)" "accounts/users#new" (actionNotFound)
                 get "/account/users/:id/edit(.:format)" "accounts/users#edit" (actionNotFound)
                 get "/account/users/:id(.:format)" "accounts/users#show" (actionNotFound)
-                patch "/account/users/:id(.:format)" "accounts/users#update" (unported "accounts/users#update")
-                put "/account/users/:id(.:format)" "accounts/users#update" (unported "accounts/users#update")
-                delete "/account/users/:id(.:format)" "accounts/users#destroy" (unported "accounts/users#destroy")
-                patch "/account/bots/:bot_id/key(.:format)" "accounts/bots/keys#update" (unported "accounts/bots/keys#update")
-                put "/account/bots/:bot_id/key(.:format)" "accounts/bots/keys#update" (unported "accounts/bots/keys#update")
-                get "/account/bots(.:format)" "accounts/bots#index" (unported "accounts/bots#index")
-                post "/account/bots(.:format)" "accounts/bots#create" (unported "accounts/bots#create")
-                get "/account/bots/new(.:format)" "accounts/bots#new" (unported "accounts/bots#new")
-                get "/account/bots/:id/edit(.:format)" "accounts/bots#edit" (unported "accounts/bots#edit")
+                patch "/account/users/:id(.:format)" "accounts/users#update" (AccountUsers.update)
+                put "/account/users/:id(.:format)" "accounts/users#update" (AccountUsers.update)
+                delete "/account/users/:id(.:format)" "accounts/users#destroy" (AccountUsers.destroy)
+                patch "/account/bots/:bot_id/key(.:format)" "accounts/bots/keys#update" (BotKeys.update)
+                put "/account/bots/:bot_id/key(.:format)" "accounts/bots/keys#update" (BotKeys.update)
+                get "/account/bots(.:format)" "accounts/bots#index" (Bots.index)
+                post "/account/bots(.:format)" "accounts/bots#create" (Bots.create)
+                get "/account/bots/new(.:format)" "accounts/bots#new" (Bots.``new``)
+                get "/account/bots/:id/edit(.:format)" "accounts/bots#edit" (Bots.edit)
                 get "/account/bots/:id(.:format)" "accounts/bots#show" (actionNotFound)
-                patch "/account/bots/:id(.:format)" "accounts/bots#update" (unported "accounts/bots#update")
-                put "/account/bots/:id(.:format)" "accounts/bots#update" (unported "accounts/bots#update")
-                delete "/account/bots/:id(.:format)" "accounts/bots#destroy" (unported "accounts/bots#destroy")
-                post "/account/join_code(.:format)" "accounts/join_codes#create" (unported "accounts/join_codes#create")
-                get "/account/logo(.:format)" "accounts/logos#show" (unported "accounts/logos#show")
-                delete "/account/logo(.:format)" "accounts/logos#destroy" (unported "accounts/logos#destroy")
-                get "/account/custom_styles/edit(.:format)" "accounts/custom_styles#edit" (unported "accounts/custom_styles#edit")
-                patch "/account/custom_styles(.:format)" "accounts/custom_styles#update" (unported "accounts/custom_styles#update")
-                put "/account/custom_styles(.:format)" "accounts/custom_styles#update" (unported "accounts/custom_styles#update")
+                patch "/account/bots/:id(.:format)" "accounts/bots#update" (Bots.update)
+                put "/account/bots/:id(.:format)" "accounts/bots#update" (Bots.update)
+                delete "/account/bots/:id(.:format)" "accounts/bots#destroy" (Bots.destroy)
+                post "/account/join_code(.:format)" "accounts/join_codes#create" (JoinCodes.create)
+                get "/account/logo(.:format)" "accounts/logos#show" (Logos.show)
+                delete "/account/logo(.:format)" "accounts/logos#destroy" (Logos.destroy)
+                get "/account/custom_styles/edit(.:format)" "accounts/custom_styles#edit" (CustomStyles.edit)
+                patch "/account/custom_styles(.:format)" "accounts/custom_styles#update" (CustomStyles.update)
+                put "/account/custom_styles(.:format)" "accounts/custom_styles#update" (CustomStyles.update)
                 get "/account/new(.:format)" "accounts#new" (actionNotFound)
-                get "/account/edit(.:format)" "accounts#edit" (unported "accounts#edit")
+                get "/account/edit(.:format)" "accounts#edit" (AccountsController.edit)
                 get "/account(.:format)" "accounts#show" (actionNotFound)
-                patch "/account(.:format)" "accounts#update" (unported "accounts#update")
-                put "/account(.:format)" "accounts#update" (unported "accounts#update")
+                patch "/account(.:format)" "accounts#update" (AccountsController.update)
+                put "/account(.:format)" "accounts#update" (AccountsController.update)
                 delete "/account(.:format)" "accounts#destroy" (actionNotFound)
                 post "/account(.:format)" "accounts#create" (actionNotFound)
-                get "/join/:join_code(.:format)" "users#new" (unported "users#new")
-                post "/join/:join_code(.:format)" "users#create" (unported "users#create")
-                get "/qr_code/:id(.:format)" "qr_code#show" (unported "qr_code#show")
-                get "/users/:user_id/avatar(.:format)" "users/avatars#show" (unported "users/avatars#show")
-                delete "/users/:user_id/avatar(.:format)" "users/avatars#destroy" (unported "users/avatars#destroy")
-                delete "/users/:user_id/ban(.:format)" "users/bans#destroy" (unported "users/bans#destroy")
-                post "/users/:user_id/ban(.:format)" "users/bans#create" (unported "users/bans#create")
-                get "/users/:user_id/sidebar(.:format)" "users/sidebars#show" (unported "users/sidebars#show") |> withDefaults meDefaults
+                get "/join/:join_code(.:format)" "users#new" (UsersController.``new``)
+                post "/join/:join_code(.:format)" "users#create" (UsersController.create)
+                get "/qr_code/:id(.:format)" "qr_code#show" (QrCode.show)
+                get "/users/:user_id/avatar(.:format)" "users/avatars#show" (Avatars.show)
+                delete "/users/:user_id/avatar(.:format)" "users/avatars#destroy" (Avatars.destroy)
+                delete "/users/:user_id/ban(.:format)" "users/bans#destroy" (Bans.destroy)
+                post "/users/:user_id/ban(.:format)" "users/bans#create" (Bans.create)
+                get "/users/:user_id/sidebar(.:format)" "users/sidebars#show" (Sidebars.show) |> withDefaults meDefaults
                 get "/users/:user_id/profile/new(.:format)" "users/profiles#new" (actionNotFound) |> withDefaults meDefaults
                 get "/users/:user_id/profile/edit(.:format)" "users/profiles#edit" (actionNotFound) |> withDefaults meDefaults
-                get "/users/:user_id/profile(.:format)" "users/profiles#show" (unported "users/profiles#show") |> withDefaults meDefaults
-                patch "/users/:user_id/profile(.:format)" "users/profiles#update" (unported "users/profiles#update") |> withDefaults meDefaults
-                put "/users/:user_id/profile(.:format)" "users/profiles#update" (unported "users/profiles#update") |> withDefaults meDefaults
+                get "/users/:user_id/profile(.:format)" "users/profiles#show" (Profiles.show) |> withDefaults meDefaults
+                patch "/users/:user_id/profile(.:format)" "users/profiles#update" (Profiles.update) |> withDefaults meDefaults
+                put "/users/:user_id/profile(.:format)" "users/profiles#update" (Profiles.update) |> withDefaults meDefaults
                 delete "/users/:user_id/profile(.:format)" "users/profiles#destroy" (actionNotFound) |> withDefaults meDefaults
                 post "/users/:user_id/profile(.:format)" "users/profiles#create" (actionNotFound) |> withDefaults meDefaults
-                post "/users/:user_id/push_subscriptions/:push_subscription_id/test_notifications(.:format)" "users/push_subscriptions/test_notifications#create" (unported "users/push_subscriptions/test_notifications#create") |> withDefaults meDefaults
-                get "/users/:user_id/push_subscriptions(.:format)" "users/push_subscriptions#index" (unported "users/push_subscriptions#index") |> withDefaults meDefaults
-                post "/users/:user_id/push_subscriptions(.:format)" "users/push_subscriptions#create" (unported "users/push_subscriptions#create") |> withDefaults meDefaults
+                post "/users/:user_id/push_subscriptions/:push_subscription_id/test_notifications(.:format)" "users/push_subscriptions/test_notifications#create" (TestNotifications.create) |> withDefaults meDefaults
+                get "/users/:user_id/push_subscriptions(.:format)" "users/push_subscriptions#index" (PushSubscriptions.index) |> withDefaults meDefaults
+                post "/users/:user_id/push_subscriptions(.:format)" "users/push_subscriptions#create" (PushSubscriptions.create) |> withDefaults meDefaults
                 get "/users/:user_id/push_subscriptions/new(.:format)" "users/push_subscriptions#new" (actionNotFound) |> withDefaults meDefaults
                 get "/users/:user_id/push_subscriptions/:id/edit(.:format)" "users/push_subscriptions#edit" (actionNotFound) |> withDefaults meDefaults
                 get "/users/:user_id/push_subscriptions/:id(.:format)" "users/push_subscriptions#show" (actionNotFound) |> withDefaults meDefaults
                 patch "/users/:user_id/push_subscriptions/:id(.:format)" "users/push_subscriptions#update" (actionNotFound) |> withDefaults meDefaults
                 put "/users/:user_id/push_subscriptions/:id(.:format)" "users/push_subscriptions#update" (actionNotFound) |> withDefaults meDefaults
-                delete "/users/:user_id/push_subscriptions/:id(.:format)" "users/push_subscriptions#destroy" (unported "users/push_subscriptions#destroy") |> withDefaults meDefaults
-                get "/users/:id(.:format)" "users#show" (unported "users#show")
-                get "/autocompletable/users(.:format)" "autocompletable/users#index" (unported "autocompletable/users#index")
+                delete "/users/:user_id/push_subscriptions/:id(.:format)" "users/push_subscriptions#destroy" (PushSubscriptions.destroy) |> withDefaults meDefaults
+                get "/users/:id(.:format)" "users#show" (UsersController.show)
+                get "/autocompletable/users(.:format)" "autocompletable/users#index" (AutocompletableUsers.index)
                 get "/rooms/:room_id/messages(.:format)" "messages#index" (unported "messages#index")
                 post "/rooms/:room_id/messages(.:format)" "messages#create" (unported "messages#create")
                 get "/rooms/:room_id/messages/new(.:format)" "messages#new" (actionNotFound)
@@ -312,9 +312,9 @@ module RouteTable =
                 delete "/searches/clear(.:format)" "searches#clear" (unported "searches#clear")
                 get "/searches(.:format)" "searches#index" (unported "searches#index")
                 post "/searches(.:format)" "searches#create" (unported "searches#create")
-                post "/unfurl_link(.:format)" "unfurl_links#create" (unported "unfurl_links#create")
-                get "/webmanifest(.:format)" "pwa#manifest" (unported "pwa#manifest")
-                get "/service-worker(.:format)" "pwa#service_worker" (unported "pwa#service_worker")
+                post "/unfurl_link(.:format)" "unfurl_links#create" (UnfurlLinks.create)
+                get "/webmanifest(.:format)" "pwa#manifest" (Pwa.manifest)
+                get "/service-worker(.:format)" "pwa#service_worker" (Pwa.serviceWorker)
                 get "/up(.:format)" "rails/health#show" (Health.show)
                 get "/recede_historical_location(.:format)" "turbo/native/navigation#recede" (TurboNative.recede)
                 get "/resume_historical_location(.:format)" "turbo/native/navigation#resume" (TurboNative.resume)
