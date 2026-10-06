@@ -61,8 +61,12 @@ They are properties of the host the cable is mounted in, so the cable can't set 
   per client is 9 kB. The process itself is 68 MB at boot against 3 MB (the runtime and Server GC, which also
   lets the heap grow to 150 to 300 MB over a burst before it collects); Phase 7's.
 - Rejected, measured: running a connection's continuations inline on the publishing thread (15 us per delivery:
-  nothing is batched, because each message is written before the next is published) and a thread of the cable's
-  own for connections like Rust's (no better than the pool with its spinning off).
+  nothing is batched, because each message is written before the next is published); a thread pool of the
+  cable's own that connections are resumed on, with workers that sleep instead of spinning (Rust's separate
+  runtime): it halves what a lone broadcast costs in process (4.5 to 2.1 us per delivery) and changes nothing
+  through Kestrel (lone broadcast 48 to 54 us against 53 to 57 us, three runs each), because Kestrel's own
+  hop onto the thread pool for the send is then the cost; and writing to the transport's pipe or the socket
+  instead of the response (above).
 
 ## In process
 

@@ -207,6 +207,8 @@ async def main():
                 "single_cpu_us_per_delivery": round(
                     (single_user1 - single_user0 + single_system1 - single_system0) * 1e6 / (args.clients * args.rounds), 2
                 ),
+                "single_user_us_per_delivery": round((single_user1 - single_user0) * 1e6 / (args.clients * args.rounds), 2),
+                "single_sys_us_per_delivery": round((single_system1 - single_system0) * 1e6 / (args.clients * args.rounds), 2),
                 "burst_seconds": round(burst_seconds, 3),
                 "burst_deliveries": deliveries,
                 "server_cpu_us_per_delivery": round((user1 - user0 + system1 - system0) * 1e6 / deliveries, 2),
