@@ -33,7 +33,8 @@ module Config =
           CloseTimeout = TimeSpan.FromSeconds 5.0 }
 
 /// What the connection's `connect` sees of the upgrade request: its path and query, and its headers
-/// (`Headers["Cookie"]` has one value per Cookie header line).
+/// (`Headers["Cookie"]` has one value per Cookie header line). Kestrel's headers are only good while the
+/// request is, so `connect` reads what it needs from them, as it does for a request in Rust.
 type ConnectRequest =
     { Uri: string
       Headers: IHeaderDictionary }

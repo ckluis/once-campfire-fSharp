@@ -509,3 +509,120 @@ let ``a stream that stops after the connection closes is released from the hub``
             eq 0 app.Server.StreamCount
             eq "unsubscribed rejected=false" (List.last (logOf app))
         })
+
+/// `ActionCable::Server::Base#allow_request_origin?` beyond the cases the Rust tests cover.
+[<Fact>]
+let ``origins: the allowed list, the forwarded protocol and disabling the check`` () =
+    task {
+        let attempt (app: TestServer) (headers: (string * string) list) : Task<bool> =
+            task {
+                match! Client.Open(app.Authority, ("Cookie", "session_token=1") :: headers) with
+                | Choice1Of2 client ->
+                    (client :> IDisposable).Dispose()
+                    return true
+                | Choice2Of2 response ->
+                    eq 404 response.Status
+                    return false
+            }
+        do!
+            withServer { testConfig with AllowedRequestOrigins = [ "http://other.example" ] } (fun app ->
+                task {
+                    let! listed = attempt app [ "Origin", "http://other.example" ]
+                    let! unlisted = attempt app [ "Origin", "http://evil.example" ]
+                    let! missing = attempt app []
+                    Assert.True listed
+                    Assert.False unlisted
+                    Assert.False missing
+                })
+        do!
+            withServer testConfig (fun app ->
+                task {
+                    // The same origin, https, is the page's when a proxy says the request was https.
+                    let httpsOrigin = "Origin", app.Origin.Replace("http://", "https://")
+                    let! plain = attempt app [ httpsOrigin ]
+                    let! forwarded = attempt app [ httpsOrigin; "X-Forwarded-Proto", "https" ]
+                    let! forwardedSsl = attempt app [ httpsOrigin; "X-Forwarded-Ssl", "on" ]
+                    let! sameOrigin = attempt app [ "Origin", app.Origin ]
+                    Assert.False plain
+                    Assert.True forwarded
+                    Assert.True forwardedSsl
+                    Assert.True sameOrigin
+                })
+        do!
+            withServer { testConfig with DisableRequestForgeryProtection = true } (fun app ->
+                task {
+                    let! anywhere = attempt app [ "Origin", "http://evil.example" ]
+                    let! none = attempt app []
+                    Assert.True anywhere
+                    Assert.True none
+                })
+    }
+
+[<Fact>]
+let ``a connection's request is what the authenticator sees`` () =
+    task {
+        // What the request says is read while it is open: Kestrel resets its headers when it ends.
+        let seen = Collections.Concurrent.ConcurrentQueue<string * string * string>()
+        let authenticate (request: ConnectRequest) =
+            seen.Enqueue((request.Uri, request.Headers["X-Custom"].ToString(), request.Headers["Cookie"].ToString()))
+            Task.FromResult(Some "someone")
+        let server = Server.builder testConfig authenticate id |> ServerBuilder.build
+        let! app, address = host server
+        try
+            let authority = (Uri address).Authority
+            let headers =
+                [ "Origin", $"http://{authority}"
+                  "Cookie", "a=1"
+                  "X-Custom", "yes" ]
+            match! Client.Open(authority, headers) with
+            | Choice1Of2 client ->
+                use _ = client
+                let! welcome = client.NextText()
+                eq Welcome welcome
+            | Choice2Of2 response -> failwith $"{response.Status}"
+            // Asked twice, once before the internal channel is subscribed to and once after.
+            eq 2 seen.Count
+            let uri, custom, cookie = seen.ToArray()[0]
+            eq "/cable" uri
+            eq "yes" custom
+            eq "a=1" cookie
+        finally
+            (server :> IDisposable).Dispose()
+            app.DisposeAsync().AsTask().Wait()
+    }
+
+/// The front server terminates TLS in the same Kestrel, so frames have to go through what the upgrade
+/// returns, not around it.
+[<Fact>]
+let ``cable over TLS`` () =
+    task {
+        let log = Log()
+        let server =
+            Server.builder testConfig cookieAuth identify
+            |> ServerBuilder.channel "RoomChannel" (roomChannel log)
+            |> ServerBuilder.build
+        let! app, address = hostOn server true
+        try
+            Assert.StartsWith("https://", address)
+            let authority = (Uri address).Authority
+            let headers =
+                [ "Origin", $"https://{authority}"
+                  "Cookie", "session_token=1"
+                  "Sec-WebSocket-Protocol", "actioncable-v1-json"
+                  "X-Forwarded-Proto", "https"
+                  "Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits" ]
+            match! Client.Open(authority, headers, true) with
+            | Choice2Of2 response -> failwith $"{response.Status}"
+            | Choice1Of2 client ->
+                use _ = client
+                do! expectText Welcome client
+                let room = room 1
+                do! client.Subscribe room
+                do! expectText (confirm room) client
+                let big = String.replicate 300 "<div>message</div>"
+                eq 1 (server.BroadcastTo("RoomChannel", [ "room-1" ], str big))
+                do! expectText (message room (Json.encode (str big))) client
+        finally
+            (server :> IDisposable).Dispose()
+            app.DisposeAsync().AsTask().Wait()
+    }

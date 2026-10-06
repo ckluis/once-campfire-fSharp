@@ -98,18 +98,34 @@ let testVerifier (signed: string) : string option =
 
 let testConfig: Config = { Config.defaults with AssumeSsl = false }
 
-/// Kestrel on a loopback port, with `server` mounted at /cable.
-let host (server: Server<'U>) : Task<WebApplication * string> =
+/// A self-signed certificate for 127.0.0.1, for the tests that serve TLS.
+let selfSigned () : System.Security.Cryptography.X509Certificates.X509Certificate2 =
+    use key = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256)
+    let request =
+        System.Security.Cryptography.X509Certificates.CertificateRequest("CN=127.0.0.1", key, HashAlgorithmName.SHA256)
+    let certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays -1.0, DateTimeOffset.UtcNow.AddDays 1.0)
+    // Kestrel wants a certificate with a private key it can use on every platform.
+    System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(certificate.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx), null)
+
+/// Kestrel on a loopback port, with `server` mounted at /cable (over TLS when `tls`).
+let hostOn (server: Server<'U>) (tls: bool) : Task<WebApplication * string> =
     task {
         let builder = WebApplication.CreateSlimBuilder()
         builder.Logging.ClearProviders() |> ignore
-        builder.WebHost.UseUrls "http://127.0.0.1:0" |> ignore
+        if tls then
+            builder.WebHost.ConfigureKestrel(fun options ->
+                options.Listen(System.Net.IPAddress.Loopback, 0, fun listen -> listen.UseHttps(selfSigned ()) |> ignore))
+            |> ignore
+        else
+            builder.WebHost.UseUrls "http://127.0.0.1:0" |> ignore
         let app = builder.Build()
         Endpoint.map Protocol.DefaultMountPath server app
         do! app.StartAsync()
         let address = (nonNull (app.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>().Features.Get<IServerAddressesFeature>())).Addresses |> Seq.head
         return app, address
     }
+
+let host (server: Server<'U>) : Task<WebApplication * string> = hostOn server false
 
 type TestServer =
     { Server: Server<User>
@@ -245,8 +261,7 @@ let clientFrame (opcode: byte) (fin: bool) (rsv1: bool) (payload: byte[]) : byte
     frame.Write(payload |> Array.mapi (fun i b -> b ^^^ mask[i % 4]), 0, payload.Length)
     frame.ToArray()
 
-type Client(tcp: TcpClient, protocol: string option, extensions: string option) =
-    let stream = tcp.GetStream()
+type Client(tcp: TcpClient, stream: Stream, protocol: string option, extensions: string option) =
     let gate = obj ()
     let mutable closed = false
     let mutable pendingRaw: Task<Got> = Unchecked.defaultof<_>
@@ -258,6 +273,10 @@ type Client(tcp: TcpClient, protocol: string option, extensions: string option) 
     member _.Stream = stream
 
     static member Open(authority: string, headers: (string * string) list) : Task<Choice<Client, Http>> =
+        Client.Open(authority, headers, false)
+
+    /// Connects, over TLS when `tls` (trusting whatever certificate the server has), and upgrades.
+    static member Open(authority: string, headers: (string * string) list, tls: bool) : Task<Choice<Client, Http>> =
         task {
             let host, port =
                 let i = authority.LastIndexOf ':'
@@ -265,7 +284,15 @@ type Client(tcp: TcpClient, protocol: string option, extensions: string option) 
             let tcp = new TcpClient()
             do! tcp.ConnectAsync(host, port)
             tcp.NoDelay <- true
-            let stream = tcp.GetStream()
+            let! stream =
+                task {
+                    if tls then
+                        let ssl = new System.Net.Security.SslStream(tcp.GetStream(), false, (fun _ _ _ _ -> true))
+                        do! ssl.AuthenticateAsClientAsync(host)
+                        return ssl :> Stream
+                    else
+                        return tcp.GetStream() :> Stream
+                }
             let key = Convert.ToBase64String(RandomNumberGenerator.GetBytes 16)
             let request = StringBuilder()
             request.Append($"GET /cable HTTP/1.1\r\nHost: {authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n") |> ignore
@@ -278,7 +305,7 @@ type Client(tcp: TcpClient, protocol: string option, extensions: string option) 
             if response.Status = 101 then
                 let accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")))
                 if response.Header "Sec-WebSocket-Accept" <> Some accept then failwith "wrong Sec-WebSocket-Accept"
-                return Choice1Of2(new Client(tcp, response.Header "Sec-WebSocket-Protocol", response.Header "Sec-WebSocket-Extensions"))
+                return Choice1Of2(new Client(tcp, stream, response.Header "Sec-WebSocket-Protocol", response.Header "Sec-WebSocket-Extensions"))
             else
                 tcp.Dispose()
                 return Choice2Of2 response
