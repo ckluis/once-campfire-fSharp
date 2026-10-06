@@ -133,9 +133,11 @@ up() {
   rm -rf "$dir"; copy_seed_into "$seed" "$dir"
   local args=(); mapfile -t args < <(env_args)
   # Labelled parity.candidate.port (not parity.port) so `reference down --all` leaves it alone.
+  # Request logging stays on; only its retention is capped (one unbounded json log of a Rust bench run was 9 GB).
   docker run -d --name "$(container "$port")" \
     --label parity.seed="$seed" --label parity.candidate.port="$port" --label parity.owner="$OWNER" \
     --cpus "${PARITY_CPUS:-2}" \
+    --log-driver json-file --log-opt "max-size=${LOG_MAX_SIZE:-10m}" --log-opt "max-file=${LOG_MAX_FILE:-2}" \
     --user "$(id -u):$(id -g)" \
     -p "127.0.0.1:$port:80" \
     "${args[@]}" \
@@ -175,8 +177,12 @@ stage_rust_context() {
 build() {
   [ "$APP_CONTEXT" = staged-rust ] && APP_CONTEXT=$(stage_rust_context)
   log "building $APP_IMAGE from ${APP_DOCKERFILE#"$ROOT"/}"
+  # The repository commit the image was built from goes in a label (CAMPFIRE_REVISION when the VM has no git): the benchmarks
+  # record it next to the image digest. A label does not invalidate the layer cache.
+  local rev=${CAMPFIRE_REVISION:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}
   docker build -t "$APP_IMAGE" -f "$APP_DOCKERFILE" \
     --build-arg APP_VERSION=parity --build-arg GIT_REVISION="$(reference_revision)" \
+    --label "org.opencontainers.image.revision=$rev" \
     "$APP_CONTEXT"
   log "building $IMAGE from parity/docker/candidate/Dockerfile"
   docker build -t "$IMAGE" --build-arg BASE_IMAGE="$APP_IMAGE" "$PARITY/docker/candidate"

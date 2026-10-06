@@ -70,10 +70,33 @@ let ``a failed statement is dropped from the cache`` () =
     Assert.Equal(1, conn.Execute("INSERT INTO things (id) VALUES (?)", [| I 2L |]))
 
 [<Fact>]
-let ``placeholders are numbered outside quotes`` () =
-    let numbered, count = Binding.numberPlaceholders """SELECT '?', "?", ?, ? FROM t WHERE a = 'it''s ?' AND b = ?"""
-    Assert.Equal("""SELECT '?', "?", ?1, ?2 FROM t WHERE a = 'it''s ?' AND b = ?3""", numbered)
-    Assert.Equal(3, count)
+let ``a question mark inside quotes is not a placeholder`` () =
+    use conn = Conn.OpenInMemory()
+    let value =
+        conn.QueryRow("""SELECT '?', ?, 'it''s ?' || ?""", [| I 41L; S "!" |], fun r -> r.Text 0, r.Int64 1, r.Text 2)
+    Assert.Equal(("?", 41L, "it's ?!"), value)
+    Assert.Throws<ArgumentException>(fun () -> conn.QueryRow("SELECT ?, ?", [| I 1L |], fun r -> r.Int64 0) |> ignore) |> ignore
+
+[<Fact>]
+let ``an empty string binds and reads back as text, not NULL`` () =
+    use conn = Conn.OpenInMemory()
+    table conn
+    conn.Execute("INSERT INTO things (id, name) VALUES (?, ?)", [| I 1L; S "" |]) |> ignore
+    conn.Execute("INSERT INTO things (id, name) VALUES (?, ?)", [| I 2L; Null |]) |> ignore
+    conn.Execute("INSERT INTO things (id, name, data) VALUES (?, ?, ?)", [| I 3L; S "héllo \u00e9\U0001F600"; B [||] |]) |> ignore
+    let read (id: int64) = conn.QueryRow("SELECT name, typeof(name), data, typeof(data) FROM things WHERE id = ?", [| I id |], fun r -> r.OptText 0, r.Text 1, r.Arg 2, r.Text 3)
+    Assert.Equal((Some "", "text", Null, "null"), read 1L)
+    Assert.Equal((None, "null", Null, "null"), read 2L)
+    let name, _, data, dataType = read 3L
+    Assert.Equal(Some "héllo \u00e9\U0001F600", name)
+    Assert.Equal("blob", dataType)
+    Assert.Equal<byte[]>([||], (match data with B v -> v | _ -> [| 9uy |]))
+    // Required accessors refuse a NULL; a stored zero is not a NULL.
+    Assert.Throws<DbException>(fun () -> conn.QueryRow("SELECT name FROM things WHERE id = 2", [||], fun r -> r.Text 0) |> ignore) |> ignore
+    Assert.Throws<DbException>(fun () -> conn.QueryRow("SELECT n FROM things WHERE id = 2", [||], fun r -> r.Int64 0) |> ignore) |> ignore
+    Assert.Equal(0L, conn.QueryRow("SELECT 0", [||], fun r -> r.Int64 0))
+    Assert.Equal(Some 0L, conn.QueryRow("SELECT 0", [||], fun r -> r.OptInt64 0))
+    Assert.Equal(None, conn.QueryRow("SELECT NULL", [||], fun r -> r.OptInt64 0))
 
 [<Fact>]
 let ``every kind of value binds and reads back`` () =
@@ -140,3 +163,11 @@ let ``a stored value that cannot be converted is an error, not an exception`` ()
     | other -> failwith $"escaped as {other.GetType().Name}: {other.Message}"
     // The statement that raised is dropped and the connection still works.
     Assert.Equal(1L, conn.Count("SELECT COUNT(*) FROM things WHERE id = 1", [||]))
+
+[<Fact>]
+let ``the library runs without its memory statistics mutex`` () =
+    use conn = Conn.OpenInMemory()
+    table conn
+    conn.Execute("INSERT INTO things (id, name) VALUES (?, ?)", [| I 1L; S "x" |]) |> ignore
+    // With SQLITE_CONFIG_MEMSTATUS off (Library.ensureConfigured, before the first connection) SQLite keeps no count.
+    Assert.Equal(0L, SQLitePCL.raw.sqlite3_memory_used ())

@@ -19,6 +19,10 @@ type Timestamp =
 
     static member private EpochTicks = DateTime.UnixEpoch.Ticks
 
+    static member private DigitAt(text: ReadOnlySpan<byte>, i: int) : bool = uint (int text[i] - 48) <= 9u
+
+    static member private Two(text: ReadOnlySpan<byte>, i: int) : int = (int text[i] - 48) * 10 + (int text[i + 1] - 48)
+
     /// Truncates (toward negative infinity) to the microseconds a `datetime(6)` column keeps.
     static member FromDateTimeOffset(at: DateTimeOffset) : Timestamp =
         let ticks = at.UtcTicks - Timestamp.EpochTicks
@@ -121,6 +125,38 @@ type Timestamp =
                     ValueSome { Microsecond = (at.Ticks - Timestamp.EpochTicks) / 10L + int64 micros }
                 else
                     ValueNone
+
+    /// `ParseDbFast` on the UTF-8 bytes SQLite holds, without making a string of them: the same form, the same checks. Anything
+    /// else is None here and goes the long way, through the string.
+    static member ParseDbUtf8(text: ReadOnlySpan<byte>) : Timestamp voption =
+        let n = text.Length
+        if n < 19 || n > 26 || text[4] <> byte '-' || text[7] <> byte '-' || text[10] <> byte ' ' || text[13] <> byte ':' || text[16] <> byte ':' then
+            ValueNone
+        else
+            let mutable ok =
+                Timestamp.DigitAt(text, 0) && Timestamp.DigitAt(text, 1) && Timestamp.DigitAt(text, 2) && Timestamp.DigitAt(text, 3)
+                && Timestamp.DigitAt(text, 5) && Timestamp.DigitAt(text, 6) && Timestamp.DigitAt(text, 8) && Timestamp.DigitAt(text, 9)
+                && Timestamp.DigitAt(text, 11) && Timestamp.DigitAt(text, 12) && Timestamp.DigitAt(text, 14) && Timestamp.DigitAt(text, 15)
+                && Timestamp.DigitAt(text, 17) && Timestamp.DigitAt(text, 18)
+            if ok && n > 19 then
+                if n = 20 || text[19] <> byte '.' then ok <- false
+                for i in 20 .. n - 1 do
+                    if not (Timestamp.DigitAt(text, i)) then ok <- false
+            if not ok then
+                ValueNone
+            else
+                let y = Timestamp.Two(text, 0) * 100 + Timestamp.Two(text, 2)
+                let mo, d, h, mi, s = Timestamp.Two(text, 5), Timestamp.Two(text, 8), Timestamp.Two(text, 11), Timestamp.Two(text, 14), Timestamp.Two(text, 17)
+                if y < 1 || mo < 1 || mo > 12 || d < 1 || d > DateTime.DaysInMonth(y, mo) || h > 23 || mi > 59 || s > 59 then
+                    ValueNone
+                else
+                    let mutable micros = 0
+                    let mutable scale = 100_000
+                    for i in 20 .. n - 1 do
+                        micros <- micros + (int text[i] - 48) * scale
+                        scale <- scale / 10
+                    let at = DateTime(y, mo, d, h, mi, s, DateTimeKind.Utc)
+                    ValueSome { Microsecond = (at.Ticks - Timestamp.EpochTicks) / 10L + int64 micros }
 
     /// Parses what Rails (or SQLite's `STRFTIME`) wrote: `YYYY-MM-DD HH:MM:SS[.fraction]`,
     /// also tolerating a `T` separator and a trailing `Z` or ` UTC`.

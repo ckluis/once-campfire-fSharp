@@ -553,7 +553,10 @@ type Database
     /// Runs `f` on a reader connection: right here, on the calling task's thread, when one is free
     /// and no read is queued for one, since a read on a warm page cache takes less time than the
     /// hop to a reader thread and back; otherwise as `ReadOffloaded` does. At most as
-    /// many pool threads as there are readers are ever inside `f`.
+    /// many pool threads as there are readers are ever inside `f`. The task is complete when it returns:
+    /// Rust yields to the runtime's other tasks here (`tokio::task::yield_now`, a re-queue on the same
+    /// worker), but a `Task.Yield` queues the continuation to the thread pool and wakes another worker to
+    /// look for it, which cost a request with five or six reads 190 us of CPU at one connection.
     ///
     /// Reads whose cost grows with the whole database rather than with a page (search, every
     /// user, all of a user's messages) use `ReadOffloaded`, to keep them off the pool's threads.
@@ -561,17 +564,16 @@ type Database
         match readers.TakeConnection() with
         | None -> this.ReadOffloaded f
         | Some conn ->
-            task {
-                // A read that raises a bug still gives its connection back.
+            // A read that raises a bug still gives its connection back, and fails its caller's task.
+            try
                 let result =
                     try
                         DbRun.attempt (fun () -> f conn)
                     finally
                         readers.GiveBack conn
-                // Give the pool's other tasks their turn, as the hop to another thread did.
-                do! Task.Yield()
-                return result
-            }
+                Task.FromResult result
+            with e ->
+                Task.FromException<Result<'T, DbError>> e
 
     /// Runs `f` on a reader thread, the next one free. Once queued, `f` runs even if its caller
     /// stops waiting (a request dropped when its client goes away): some reads broadcast

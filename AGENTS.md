@@ -125,6 +125,17 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   `bench/front/run` measures the front server against Rust's; run it after changing `Front/` or `Splice.fs`.
   The TLS session-resumption test needs Linux (Kestrel issues no session tickets through macOS's TLS stack, so it skips
   there) and `openssl`; `bin/linux-tests Kit` runs `Campfire.Kit.Tests` in `Dockerfile.toolchain` inside colima.
+- Phase 7 measuring (all inside colima, `SERVER_CPUS=0-3 LOADGEN_CPUS=4-7`): `bench/quick` is the before/after runner for Rust and
+  F# only (the five workloads at c=1 and c=16, 3 reps, alternating order, `bench/run`'s validity checks and report, plus CPU per
+  request from the container's cgroup; run it a unit at a time, `--only rust:1` and so on, then `bench/quick report DIR`);
+  `bench/quick cpu` is CPU per request alone. Every run warms each route at its measured concurrency until the app is flat
+  (`bench/lib/warmup.py`, `WARMUP_SECS`/`WARMUP_MAX_SECS`; `bench/warmup` draws the curve) and `bench/report` flags runs that did
+  not settle. `bench/breakdown perf` scales perf's shares to the unprofiled CPU per request and attributes allocation the same
+  way for both apps (`bench/lib/clr-symbols` installs the libcoreclr and libc symbols it needs). Container logs are capped
+  (`LOG_MAX_SIZE`, `LOG_MAX_FILE`; request logging itself stays on). Before every benchmark check `df -h /Users/clank`
+  (stop under 15 GB free), and run `bin/clean-docker` after image rebuilds and `bin/clean-rust-builds` after Rust builds.
+  Rebuild `campfire-fsharp:app` from HEAD before measuring F# (`CAMPFIRE_REVISION=$(git rev-parse HEAD) parity/bin/candidate build`
+  in colima labels the image with its commit; `bench/run`'s env.txt records the label and the digest).
 - `bench/cable/run` measures fan-out to 1,000 local subscribers against `campfire_cable` (needs python3 and mise, like
   `bench/kit/run`); `FanOutTests` measures the same in process, without Kestrel. Run both after changing `Pubsub.fs`,
   `Connection.fs` or `Socket.fs`; the results and what they say of the host's settings are in `bench/results/cable-fanout.md`.

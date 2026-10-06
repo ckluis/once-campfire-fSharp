@@ -1,6 +1,6 @@
 # Porting Campfire to F#
 
-Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, 5.2, the account-side controllers, 5.3, the hot path, and 5.4, channels and integrations, done 2026-10-06)
+Status: in progress (Phase 0 done 2026-10-05; Phases 1-4 done; Phase 5 units 5.1, boot, wiring and the image, 5.2, the account-side controllers, 5.3, the hot path, and 5.4, channels and integrations, done 2026-10-06; Phase 5b, the baseline, recorded 2026-10-06)
 
 ## Goal
 
@@ -142,6 +142,14 @@ findings are fixed.
   subscribes to a room its user belongs to, and the room page and sidebar are byte for byte Rust's with the VAPID tag in place.
   Numbers (no tuning): `bench/results/campfire-app-channels-integrations.md`.
 
+- *Phase 5b (the baseline), 2026-10-06:* `bench/run --apps reference,rust,fsharp` (and the `-identity` twins) ran three reps each
+  on one machine, one app at a time, with the status of every response, the rows every post wrote, response bytes per route and
+  the load average before each run checked; `bench/breakdown` and `bench/falco` measured where F# spends a request. F# is at
+  0.68-0.79x Rust's requests a second on the four read workloads at 16 connections and level (1.02x) on posting a message; 20-92x
+  Rails. The gaps, ranked with estimated gains, are in `bench/results/baseline-20261006.md`: database access around SQLite's
+  engine (about 28 us a request more than Rust's), the CLR's allocation and GC cost, HMAC for signed cookies, the console logger,
+  thread-pool spinning. The Falco layer costs about 29 ns a request and is not a target.
+
 ### Requirements carried forward
 
 Findings of a phase's verifier that a later phase has to meet. Each is a gate of that phase.
@@ -169,3 +177,13 @@ Findings of a phase's verifier that a later phase has to meet. Each is a gate of
   than Rust on plain-frame Cable bursts, lone broadcasts, idle CPU and memory per client, and on the front's
   signed-cookie page, 100 KB identity page and 20 KB asset cache hit. They are gates, not accepted costs.
 
+
+## Process changes
+
+- **2026-10-06, once tuning began (Chris).** Rust is a fixed target during tuning: incremental runs measure F# alone
+  against the stored Rust numbers in `bench/results/phase7-start/`, and Rust and Rails are re-measured only at the
+  re-baseline that closes an area. Iteration has three tiers: (1) seconds, in-process A/B micro-benchmarks and the
+  affected tests (SageFs optional); (2) minutes, a published build mounted into the container, F# only, on the
+  workloads the change touches; (3) once per unit, the rebuilt image, `bench/quick` F#-only on all five workloads,
+  `bin/verify` and the differentials. Every tier 2 and 3 run is appended to `bench/results/phase7-log.jsonl`, which
+  `bench/progress/build.py` turns into the progress dashboard.

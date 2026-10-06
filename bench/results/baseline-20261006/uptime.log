@@ -1,0 +1,31 @@
+03:16:45 reference rep 1 start:  03:16:45 up  8:01,  1 user,  load average: 0.53, 1.61, 1.57
+03:21:46 reference rep 1 end:    03:21:46 up  8:06,  1 user,  load average: 3.51, 3.07, 2.22
+03:21:55 rust rep 1 start:  03:21:55 up  8:06,  1 user,  load average: 3.23, 3.02, 2.21
+03:27:40 rust rep 1 end:    03:27:40 up  8:12,  1 user,  load average: 5.54, 4.07, 2.84
+03:27:47 fsharp rep 1 start:  03:27:47 up  8:12,  1 user,  load average: 4.68, 3.94, 2.81
+03:33:53 fsharp rep 1 end:    03:33:53 up  8:18,  1 user,  load average: 5.55, 4.63, 3.39
+03:33:59 rust-identity rep 1 start:  03:33:59 up  8:18,  1 user,  load average: 5.10, 4.55, 3.37
+03:39:00 rust-identity rep 1 end:    03:39:00 up  8:23,  1 user,  load average: 4.59, 4.13, 3.43
+03:39:05 fsharp-identity rep 1 start:  03:39:05 up  8:24,  1 user,  load average: 4.22, 4.06, 3.42
+03:43:55 fsharp-identity rep 1 end:    03:43:55 up  8:28,  1 user,  load average: 7.34, 5.12, 3.91
+03:44:02 fsharp-identity rep 2 start:  03:44:02 up  8:29,  1 user,  load average: 6.21, 4.95, 3.87
+03:49:12 fsharp-identity rep 2 end:    03:49:12 up  8:34,  1 user,  load average: 8.22, 5.36, 4.16
+03:49:19 rust-identity rep 2 start:  03:49:19 up  8:34,  1 user,  load average: 7.56, 5.27, 4.14
+03:54:39 rust-identity rep 2 end:    03:54:39 up  8:39,  1 user,  load average: 5.77, 4.72, 4.10
+03:54:45 fsharp rep 2 start:  03:54:45 up  8:39,  1 user,  load average: 5.31, 4.64, 4.08
+04:01:01 fsharp rep 2 end:    04:01:01 up  8:46,  1 user,  load average: 6.17, 5.07, 4.32
+04:01:09 rust rep 2 start:  04:01:09 up  8:46,  1 user,  load average: 5.22, 4.90, 4.27
+04:07:24 rust rep 2 end:    04:07:24 up  8:52,  1 user,  load average: 5.72, 4.80, 4.29
+04:07:30 reference rep 2 start:  04:07:30 up  8:52,  1 user,  load average: 5.26, 4.72, 4.27
+04:13:52 reference rep 2 end:    04:13:52 up  8:58,  1 user,  load average: 3.87, 3.80, 3.89
+04:13:58 reference rep 3 start:  04:13:58 up  8:58,  1 user,  load average: 3.56, 3.73, 3.86
+04:20:00 reference rep 3 end:    04:20:00 up  9:05,  1 user,  load average: 4.52, 3.72, 3.71
+04:20:07 rust rep 3 start:  04:20:07 up  9:05,  1 user,  load average: 3.83, 3.60, 3.67
+04:28:03 rust rep 3 start:  04:28:03 up 0 min,  1 user,  load average: 0.06, 0.01, 0.00
+04:32:58 rust rep 3 end:    04:32:58 up 5 min,  1 user,  load average: 5.68, 3.18, 1.34
+04:33:58 fsharp rep 3 start:  04:33:58 up 6 min,  1 user,  load average: 2.78, 2.81, 1.33
+04:39:33 fsharp rep 3 end:    04:39:33 up 11 min,  1 user,  load average: 5.95, 5.10, 2.77
+04:39:40 rust-identity rep 3 start:  04:39:40 up 12 min,  1 user,  load average: 5.03, 4.94, 2.74
+04:44:41 rust-identity rep 3 end:    04:44:41 up 17 min,  1 user,  load average: 4.73, 4.44, 3.05
+04:44:47 fsharp-identity rep 3 start:  04:44:47 up 17 min,  1 user,  load average: 4.35, 4.37, 3.03
+04:49:37 fsharp-identity rep 3 end:    04:49:37 up 22 min,  1 user,  load average: 5.12, 4.56, 3.40

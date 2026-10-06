@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# How long a fresh app takes to reach its steady throughput: the curve behind bench/run's WARMUP_SECS default.
+# Run inside colima, like bench/run:
+#
+#   bench/warmup [--apps fsharp,rust] [--routes room_show,sidebar,...] [--concs "1 16"] [--windows 20] [--window-secs 2] [--out DIR]
+#
+# For each app (a fresh container and seed copy each, in the order given) and route and concurrency, runs the load
+# generator back to back in WINDOWS windows of --window-secs seconds and records each window's requests a second. The
+# plateau is the median of the last quarter of the windows; "settled at" is the start of the first window from which
+# every later window is within 3% of the plateau (the run-to-run spread of a settled window is 1-3%). An app that has
+# no warm-up artifact settles in the first window; the CLR's tiered JIT, which compiles a method with its quick tier
+# first and promotes it after 30 calls and a 100 ms timer that restarts whenever new methods are being called, does not.
+# Each (route, c) is measured in a fresh process, so every curve starts from cold.
+set -euo pipefail
+MODE=warmup
+ARGS=("$@")
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+set --
+export SERVER_CPUS=${SERVER_CPUS:-0-3} LOADGEN_CPUS=${LOADGEN_CPUS:-4-7}
+export WORK=${WORK:-/var/tmp/campfire-bench-work}
+BENCH_RUN_LIB=1 source "$ROOT/bench/run"
+set -- "${ARGS[@]}"
+
+APPS=fsharp,rust ROUTES="room_show,messages_page,sidebar,search,post_message" CONCS="1 16" WINDOWS=20 WSECS=2 OUT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --apps) APPS=$2; shift 2 ;;
+    --routes) ROUTES=$2; shift 2 ;;
+    --concs) CONCS=$2; shift 2 ;;
+    --windows) WINDOWS=$2; shift 2 ;;
+    --window-secs) WSECS=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
+done
+OUT=${OUT:-$BENCH/results/warmup-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$OUT"
+
+route_path() {
+  case "$1" in
+    room_show) echo "/rooms/$ROOM" ;;
+    messages_page) echo "/rooms/$ROOM/messages?before=$BEFORE" ;;
+    sidebar) echo /users/me/sidebar ;;
+    search) echo "/searches?q=coffee" ;;
+    avatar) echo "/users/$AVATAR/avatar" ;;
+    up) echo /up ;;
+    post_message) echo POST ;;
+    *) echo "unknown route $1" >&2; return 1 ;;
+  esac
+}
+
+for app in ${APPS//,/ }; do
+  for route in ${ROUTES//,/ }; do
+    for c in $CONCS; do
+      wait_for_quiet
+      start_app "$app" >/dev/null
+      sleep 5
+      cookie=$(lg login --base "$BASE" --email "$EMAIL" --password "$PASSWORD" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cookie"])')
+      scrape=$(lg scrape --base "$BASE" --cookie "$cookie" --room "$ROOM")
+      csrf=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["csrf"] or "")' "$scrape")
+      path=$(route_path "$route")
+      if [ "$path" = POST ]; then args=(--post-room "$WRITE_ROOM" --csrf "$csrf"); else args=(--path "$path"); fi
+      wins=()
+      for _ in $(seq 1 "$WINDOWS"); do
+        res=$(lg http --base "$BASE" --cookie "$cookie" "${args[@]}" --conc "$c" --duration "$WSECS")
+        wins+=("$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); print(json.dumps({"rps": r["rps"], "p50_ms": r["latency"].get("p50_ms"), "errors": r["errors"], "statuses": r["statuses"]}))' "$res")")
+      done
+      python3 - "$OUT/$app-$route-c$c.json" "$app" "$route" "$c" "$WSECS" "${wins[@]}" <<'PY'
+import json, statistics, sys
+f, app, route, c, wsecs, *w = sys.argv[1:]
+w = [json.loads(x) for x in w]
+rps = [x["rps"] for x in w]
+tail = rps[-max(3, len(rps) // 4):]
+plateau = statistics.median(tail)
+settled = len(rps)
+for i in range(len(rps) - 1, -1, -1):
+    if rps[i] >= 0.97 * plateau and rps[i] <= 1.03 * plateau:
+        settled = i
+    else:
+        break
+out = {"app": app, "route": route, "conc": int(c), "window_secs": float(wsecs), "rps": rps, "plateau_rps": plateau,
+       "first_window_vs_plateau": round(rps[0] / plateau, 3), "settled_at_s": settled * float(wsecs),
+       "bad": sum(x["errors"] + sum(v for k, v in x["statuses"].items() if int(k) >= 400) for x in w)}
+json.dump(out, open(f, "w"), indent=1)
+print(f"{app:7} {route:14} c={c:<3} first window {out['first_window_vs_plateau']:.2f}x plateau ({plateau:,.0f} req/s), settled at {out['settled_at_s']:.0f}s, bad {out['bad']}")
+print("        " + " ".join(f"{x/plateau:.2f}" for x in rps))
+PY
+      drop_app_dir_w() { docker rm -f "$CONTAINER" >/dev/null; rm -rf "${WORK:?}/${1:?}"; }
+      drop_app_dir_w "$app"
+    done
+  done
+done
+echo "results in $OUT" >&2

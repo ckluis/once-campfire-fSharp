@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Install the native symbols perf needs to name what libcoreclr.so and libc do (run inside colima; bench/breakdown perf
+# calls it). The F# image ships libcoreclr.so and libc stripped, so without this every CLR allocation helper, GC function and
+# memcpy is "[unknown]". Idempotent: it does nothing when /usr/lib/debug/.build-id already has both.
+#
+#   bench/lib/clr-symbols [IMAGE]        IMAGE defaults to campfire-fsharp:app
+#
+# - libcoreclr: dotnet-symbol (installed into TOOLS_DIR, /var/tmp/dotnet-tools, by the recipe in bench/breakdown's header)
+#   downloads libcoreclr.so.dbg from Microsoft's symbol server by the library's build id.
+# - libc: libc6-dbg of the version the image's libc6 has (Debian), fetched with apt in the image and unpacked; its files
+#   are named by build id already.
+# perf looks symbols up by build id under /usr/lib/debug/.build-id when the process it profiled is gone, so the install is
+# `sudo ln`/`cp` into that directory. The downloads live in SYMBOLS_DIR (default /var/tmp/symbols).
+set -euo pipefail
+IMAGE=${1:-campfire-fsharp:app}
+SYMBOLS_DIR=${SYMBOLS_DIR:-/var/tmp/symbols}
+TOOLS_DIR=${TOOLS_DIR:-/var/tmp/dotnet-tools}
+TOOL_IMAGE=${TOOL_IMAGE:-campfire-fsharp-toolchain:latest}
+DEBUG_ROOT=/usr/lib/debug/.build-id
+mkdir -p "$SYMBOLS_DIR"; chmod 1777 "$SYMBOLS_DIR" 2>/dev/null || true
+
+build_id() {
+  python3 - "$1" <<'PY'
+import mmap, struct, sys
+f = open(sys.argv[1], "rb")
+m = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+shoff = struct.unpack_from("<Q", m, 0x28)[0]
+shentsize, shnum, shstrndx = struct.unpack_from("<HHH", m, 0x3A)
+secs = [struct.unpack_from("<IIQQQQIIQQ", m, shoff + i * shentsize) for i in range(shnum)]
+stroff = secs[shstrndx][4]
+for s in secs:
+    if m[stroff + s[0]:m.find(b"\0", stroff + s[0])] == b".note.gnu.build-id":
+        off = s[4]
+        namesz, descsz, _ = struct.unpack_from("<III", m, off)
+        o = off + 12 + (namesz + 3) // 4 * 4
+        print(m[o:o + descsz].hex())
+        break
+PY
+}
+installed() { [ -e "$DEBUG_ROOT/${1:0:2}/${1:2}.debug" ]; }
+
+cid=$(docker create "$IMAGE")
+trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+docker cp "$cid:/opt/campfire/libcoreclr.so" "$SYMBOLS_DIR/libcoreclr.so"
+docker cp "$cid:/usr/lib/aarch64-linux-gnu/libc.so.6" "$SYMBOLS_DIR/libc.so.6"
+
+id=$(build_id "$SYMBOLS_DIR/libcoreclr.so")
+if installed "$id"; then
+  echo "libcoreclr symbols ($id): installed"
+else
+  [ -x "$TOOLS_DIR/dotnet-symbol" ] || docker run --rm -v "$TOOLS_DIR:/tools" -e HOME=/tmp -e DOTNET_ROOT=/opt/dotnet "$TOOL_IMAGE" \
+    bash -c 'export PATH=$PATH:/opt/dotnet; dotnet tool install --tool-path /tools dotnet-symbol >/dev/null'
+  docker run --rm --user "$(id -u):$(id -g)" -v "$TOOLS_DIR:/tools" -v "$SYMBOLS_DIR:/work" -e HOME=/tmp -e DOTNET_ROOT=/opt/dotnet \
+    -e DOTNET_ROLL_FORWARD=Major "$TOOL_IMAGE" /tools/dotnet-symbol --symbols --output /work /work/libcoreclr.so >/dev/null
+  sudo mkdir -p "$DEBUG_ROOT/${id:0:2}"
+  sudo ln -sf "$SYMBOLS_DIR/libcoreclr.so.dbg" "$DEBUG_ROOT/${id:0:2}/${id:2}.debug"
+  echo "libcoreclr symbols ($id): installed now"
+fi
+
+id=$(build_id "$SYMBOLS_DIR/libc.so.6")
+if installed "$id"; then
+  echo "libc symbols ($id): installed"
+else
+  ver=$(docker run --rm --entrypoint "" "$IMAGE" dpkg-query -W -f '${Version}' libc6)
+  rm -rf "$SYMBOLS_DIR/libc-dbg"; mkdir -p "$SYMBOLS_DIR/libc-dbg"
+  docker run --rm --user root --entrypoint "" -v "$SYMBOLS_DIR/libc-dbg:/out" "$IMAGE" \
+    sh -c "apt-get update -qq >/dev/null 2>&1; cd /out && apt-get download -qq libc6-dbg=$ver"
+  dpkg-deb -x "$SYMBOLS_DIR"/libc-dbg/libc6-dbg_*.deb "$SYMBOLS_DIR/libc-dbg/x"
+  sudo cp -r "$SYMBOLS_DIR/libc-dbg/x/usr/lib/debug/.build-id/." "$DEBUG_ROOT/"
+  installed "$id" && echo "libc symbols ($id): installed now" || { echo "libc6-dbg $ver does not carry build id $id" >&2; exit 1; }
+fi

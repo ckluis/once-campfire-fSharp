@@ -126,18 +126,26 @@ def http(route, conc, key):
         h = next(h for h in r["http"] if h["route"] == route and h["conc"] == conc)
         if h["latency"].get("n", 0) == 0 or h["ok"] == 0:
             return None
+        if key == "cpu":
+            return h["cost"]["server_cpu_us_per_req"]
         return h["rps"] if key == "rps" else h["latency"][key]
     return get
 
 
 wi = bool(identity)
-header("HTTP (signed in as david; keep-alive; c = concurrent connections)", wi)
+has_cpu = any("cost" in h for a in apps for r in runs[a] for h in r["http"])
+header("HTTP (signed in as david; keep-alive; c = concurrent connections)", wi,
+       note="`CPU µs/req` is the container's CPU (cgroup cpu.stat, user + system, unprofiled) over the run divided by its requests; "
+            "for CPU a ratio below 1 means the first app spends more per request." if has_cpu else "")
 for route, conc in routes:
     row(f"{route} c={conc} req/s", http(route, conc, "rps"), True, wi)
+    if has_cpu:
+        row(f"{route} c={conc} CPU µs/req", http(route, conc, "cpu"), False, wi)
     row(f"{route} c={conc} p50 ms", http(route, conc, "p50_ms"), False, wi)
     row(f"{route} c={conc} p99 ms", http(route, conc, "p99_ms"), False, wi)
 
-header("Action Cable fan-out (one room; chatter.js subscriptions per client)")
+if first["cable"]:
+    header("Action Cable fan-out (one room; chatter.js subscriptions per client)")
 for i, c in enumerate(first["cable"]):
     n = c["clients"]
     row(f"{n} clients: subscribed", lambda r, i=i: r["cable"][i]["ready"], True)
@@ -150,11 +158,12 @@ for i, c in enumerate(first["cable"]):
     row(f"{n} clients: saturated post→all p50 ms", lambda r, i=i: r["cable"][i]["throughput"]["all_clients"]["p50_ms"], False)
     row(f"{n} clients: saturated POST p50 ms", lambda r, i=i: r["cable"][i]["throughput"]["post"]["p50_ms"], False)
 
-header("Upload + thumbnail (black_hole.jpg, 505 KB)")
-med = lambda key: (lambda r: statistics.median([x[key] for x in r["upload"]["runs"] if key in x]))
-row("POST with attachment (ms)", med("post_ms"), False)
-row("then GET thumb → 200 (ms)", med("thumb_ms"), False)
-row("POST → thumbnail served (ms)", lambda r: r["upload"]["median_total_ms"], False)
+if first.get("upload"):
+    header("Upload + thumbnail (black_hole.jpg, 505 KB)")
+    med = lambda key: (lambda r: statistics.median([x[key] for x in r["upload"]["runs"] if key in x]))
+    row("POST with attachment (ms)", med("post_ms"), False)
+    row("then GET thumb → 200 (ms)", med("thumb_ms"), False)
+    row("POST → thumbnail served (ms)", lambda r: r["upload"]["median_total_ms"], False)
 
 
 def procmem(n, phase, what):
@@ -173,7 +182,7 @@ def procmem(n, phase, what):
     return get
 
 
-if all("process_memory" in c for a in apps for r in runs[a] for c in r["cable"]):
+if first["cable"] and all("process_memory" in c for a in apps for r in runs[a] for c in r["cable"]):
     header("Memory during cable fan-out, by process (MB, peak within the phase)", note=(
         "App process: Rails' Puma master and workers (Action Cable runs in them), or the Rust and F# ports' one campfire\n"
         "process (its front server included). Pss counts pages shared between forked workers once;\n"
@@ -198,6 +207,21 @@ print("|---|---|---|---|")
 for a, r in every:
     print(f"| {NAME[a]} | {r['rep']} | {' '.join(r['loadavg_start'].split()[:3])} | {' '.join(r['loadavg_end'].split()[:3])} |")
 
+if any("host_probe_start" in r for a, r in every):
+    print("\n### Host CPU probe (a fixed spin timed on every pinned CPU, against the quietest this VM has shown; bench/lib/hostprobe.py)\n")
+    print("The VM's load average cannot see another program on the Mac taking the cores its vCPUs run on; this can. A ratio of 1.00 is a quiet host, "
+          "above 1.10 the pinned server and load generator were slowed by something outside the run. `After each window` probes the machine "
+          "right after every measured run of the rep.\n")
+    print("| App | Rep | Before the run | After the run | Windows probed above 1.10 | Highest after a window |")
+    print("|---|---|---|---|---|---|")
+    for a, r in every:
+        if "host_probe_start" not in r:
+            continue
+        after = [h["host_probe_after"]["ratio"] for h in r["http"] if "host_probe_after" in h]
+        bad = sum(1 for x in after if x > 1.10)
+        flag = " **noisy**" if bad or r["host_probe_start"]["ratio"] > 1.10 else ""
+        print(f"| {NAME[a]} | {r['rep']} | {r['host_probe_start']['ratio']:.2f} | {r['host_probe_end']['ratio']:.2f} | {bad}/{len(after)}{flag} | {max(after) if after else float('nan'):.2f} |")
+
 print("\n### Responses by status class, every HTTP run of every rep\n")
 print("| App | Route | 2xx | 3xx | 4xx | 5xx | Errors (no response) |")
 print("|---|---|---|---|---|---|---|")
@@ -213,6 +237,29 @@ for a in apps + list(identity):
     for route, t in tally.items():
         flag = " **←**" if t[2] or t[3] or t[4] else ""
         print(f"| {NAME[a]} | {route} | {t[0]:,} | {t[1]:,} | {t[2]:,} | {t[3]:,} | {t[4]:,}{flag} |")
+
+if any("warmup" in h for a in apps + list(identity) for r in (runs.get(a) or identity.get(a)) for h in r["http"]):
+    print("\n### Warm-up before each measured run (the app runs the route at the measured concurrency until its throughput is flat; bench/lib/warmup.py)\n")
+    print("`measured / warm-up tail` is the measured run's requests a second over the mean of the last three 2 s warm-up windows: well above 1 "
+          "would mean the app was still speeding up when measurement began, well below 1 that it was slowing down.\n")
+    print("| App | Route | c | warm-up seconds | settled | measured / warm-up tail |")
+    print("|---|---|---|---|---|---|")
+    for a in apps + list(identity):
+        group = runs.get(a) or identity.get(a)
+        seen = []
+        for h in group[0]["http"]:
+            if (h["route"], h["conc"]) not in seen:
+                seen.append((h["route"], h["conc"]))
+        for route, conc in seen:
+            hs = [next((h for h in r["http"] if h["route"] == route and h["conc"] == conc and "warmup" in h), None) for r in group]
+            hs = [h for h in hs if h]
+            if not hs:
+                continue
+            secs = [h["warmup"]["secs"] for h in hs]
+            ok = sum(1 for h in hs if h["warmup"]["settled"] in (True, None))
+            ratios = [h["rps"] / h["warmup"]["tail_rps"] for h in hs if h["warmup"].get("tail_rps")]
+            flag = " **←**" if ok < len(hs) else ""
+            print(f"| {NAME[a]} | {route} | {conc} | {cell(secs)[1]} | {ok}/{len(hs)}{flag} | {statistics.median(ratios) if ratios else float('nan'):.2f} |")
 
 print("\n### Rows written by `post_message` (messages of the write room counted in the app's SQLite file around each run)\n")
 print("| App | Rep | Phase | Posts answered below 400 | Rows written | Match |")

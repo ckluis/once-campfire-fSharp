@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# What the routing layer costs per request (bench/falco/Program.fs), on Linux in the toolchain image
+# inside colima, pinned to one CPU like a Kestrel thread would be. Run from the VM:
+#
+#   colima ssh -- bash -c 'cd /Users/clank/Desktop/projects/once-campfire-fsharp && bench/falco/run [--iterations N] [--rounds N]'
+set -euo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+mkdir -p "$ROOT/target/falco-cost"
+docker run --rm --user "$(id -u):$(id -g)" --cpuset-cpus "${FALCO_CPU:-2}" -v "$ROOT:$ROOT" -w "$ROOT" \
+  -e HOME=/tmp -e DOTNET_ROOT=/opt/dotnet -e DOTNET_NOLOGO=1 -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_TieredPGO=1 \
+  campfire-fsharp-toolchain:latest bash -c "export PATH=\$PATH:/opt/dotnet && dotnet build bench/falco/FalcoCost.fsproj -c Release -o target/falco-cost -v quiet -nologo && dotnet target/falco-cost/FalcoCost.dll $*"
