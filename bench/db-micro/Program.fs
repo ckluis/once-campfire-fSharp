@@ -63,6 +63,8 @@ let main argv =
           "SELECT 1 (floor: bind, step, reset, cache)", (fun () -> conn.QueryRow("SELECT 1", [||], fun r -> r.Int64 0) |> ignore)
           "SELECT 1 with a 400-character SQL text (the cache lookup's hashing)",
           (let pad = String(' ', 380) in let sql = "SELECT 1" + pad + " /* x */" in fun () -> conn.QueryRow(sql, [||], fun r -> r.Int64 0) |> ignore)
+          "PRAGMA wal_checkpoint(NOOP) (what the writer asks after every commit)",
+          (fun () -> conn.QueryRow("PRAGMA wal_checkpoint(NOOP)", [||], fun r -> r.Int64 1) |> ignore)
           "1 statement: Account.first", (fun () -> Account.first conn |> ignore)
           "session + user (2 lookups)", (fun () -> Session.findByToken conn token |> ignore; User.findById conn user.Id |> ignore)
           "room page db (room, last 40 messages, account, last room)",
