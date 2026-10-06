@@ -87,6 +87,26 @@ specific to this port are listed below, each citing the reference file it depart
   host turns it off, `Server`, which neither websocket-driver nor Rust sends. Tested by `ProtocolTests` ("the
   101 answers as websocket-driver does, plus the host's Date").
 
+- **Views** (`Campfire.Views`; `rust/crates/views` is the port it follows). None of these changes a byte of
+  output, which `bin/views-differential` compares with the Rust crate's on thousands of cases:
+  - The view fragment cache counts what the page-splicing layer keeps for each fragment (its SHA-256 and compressed
+    pieces) in the fragment's entry, and drops them with it. Rust keeps them in a bounded map in the kit, keyed by
+    the address of the fragment's `Arc`, which a .NET object can't be found by (and `Campfire.Views` may not
+    reference `Campfire.Kit`). A fragment's entry therefore costs its bytes plus its pieces' as of the last time it
+    was used, and a page's fragments that keep being shown stay while the rest age out. Tested by
+    `FragmentCacheTests` ("fragments a page keeps showing stay while the rest age out, pieces and SHA included").
+  - A template digest in a fragment's key is a hash of the names of the template modules it renders, not of their
+    source text (`ActionView::Digestor`, `include_str!` in Rust): the templates are compiled in and the cache doesn't
+    outlive the process, so the digest only has to be stable within it.
+  - `capitalize`, `User#initials`' word boundary and the case of a name's first letters use tables generated from
+    Rust's standard library (`bin/views-differential --unicode`), not .NET's own casing, which leaves out special
+    casing (`ß` is `SS`), the Turkish dotless i and characters Unicode added since. Rust's `capitalize` is what
+    the references' `String#capitalize` is closest to; a name whose first letter has special casing prints as Rust
+    prints it. Tested by `HelpersTests` ("capitalizes like rust") and the differential's every-code-point cases.
+  - Timestamps in cache keys and `to_fs(:epoch)` are `DateTimeOffset`s, which hold 100 ns where jiff holds 1 ns.
+    A key shows microseconds, so no key differs; a record dated before 1970 or outside the years 1 to 9999 is not
+    representable (no record is).
+
 ## License
 
 MIT. Campfire, the Rust port, its parity harness and vectors are © 37signals, LLC.

@@ -87,6 +87,10 @@ Findings of a phase's verifier that a later phase has to meet. Each is a gate of
   by dropping `Fragment` objects. Its budget must count the bytes of the pieces and the SHA each `Fragment`
   holds, not only the fragment's own bytes, and the phase adds the test that reproduces Rust's: a page's
   fragments that keep being shown stay while others age out, and the total held stays within the budget.
+  *Unit 4.1:* `Campfire.Views` cannot reference the kit, so its own `Fragment` carries an `IFragmentAttachment`
+  the kit's page parts hang their SHA and pieces on (`Campfire.App` links the two when it first splices a view
+  fragment, Phase 5), and the cache counts `Fragment.HeldBytes` each time an entry is used; the test is
+  `FragmentCacheTests` ("fragments a page keeps showing stay while the rest age out, pieces and SHA included").
 - **Phase 7: the gaps `bench/results/cable-fanout.md` and `bench/results/front.md` record are open.** F# is slower
   than Rust on plain-frame Cable bursts, lone broadcasts, idle CPU and memory per client, and on the front's
   signed-cookie page, 100 KB identity page and 20 KB asset cache hit. They are gates, not accepted costs.
