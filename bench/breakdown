@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# Where a request's time goes, per app and per workload (plan step 5b). Run inside colima, like bench/run:
+#
+#   bench/breakdown cpu     [--apps rust,fsharp] [--reps 3 [--first-rep N]] [--routes a,b] [--identity] [--out DIR]   CPU per request, per route
+#   bench/breakdown profile [--routes a,b] [--secs 8] [--out DIR]                        F# per-layer profile per route
+#   bench/breakdown perf    [--apps fsharp,rust] [--routes a,b] [--secs 8] [--conc 16] [--out DIR]    CPU per layer from perf, per route
+#   bench/breakdown report  DIR                                                          tables from a cpu run
+#
+# Apps start the way bench/run starts them (same image, environment, CPU pinning, seed copy, host
+# network: this sources bench/run's functions), one at a time, the order alternating between reps.
+#
+# cpu: for each route at c=1 and c=16, the container's CPU (cgroup cpu.stat, user and system) per request
+# next to the load generator's, and how many cores each kept busy (bench/lib/cpurun.py). A server that
+# is not near its 4 cores while the load generator is is limited by the load generator, not by itself.
+#
+# profile (F# only): the container gets a trace directory as /tmp, so the runtime's diagnostic socket is
+# reachable from a tool container sharing its PID namespace, where dotnet-trace samples every managed
+# thread (profile dotnet-sampled-thread-time) while the load generator holds c=16 and dotnet-counters
+# records System.Runtime (GC, allocation, thread pool, lock contention). bench/lib/layers.py turns the
+# trace into time per layer (Kestrel, the front server, Falco and routing, the kit adapter and Ctx, cookies
+# and sessions, authentication, SQLite, rich text, templates and the fragment cache, gzip and the splice,
+# GC suspension, lock contention, thread-pool hand-offs). The tools are installed once into TOOLS_DIR
+# (default /var/tmp/dotnet-tools) from the toolchain image:
+#   docker run --rm -v /var/tmp/dotnet-tools:/tools -e HOME=/tmp campfire-fsharp-toolchain:latest \
+#     bash -c 'export PATH=$PATH:/opt/dotnet; dotnet tool install --tool-path /tools dotnet-trace; dotnet tool install --tool-path /tools dotnet-counters'
+set -euo pipefail
+
+MODE=${1:?usage: bench/breakdown cpu|profile|perf|report ...}; shift
+ARGS=("$@")
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+set --
+export SERVER_CPUS=${SERVER_CPUS:-0-3} LOADGEN_CPUS=${LOADGEN_CPUS:-4-7}
+export WORK=${WORK:-/var/tmp/campfire-bench-work}
+BENCH_RUN_LIB=1 source "$ROOT/bench/run"
+set -- "${ARGS[@]}"
+
+TOOLS_DIR=${TOOLS_DIR:-/var/tmp/dotnet-tools}
+DIAG_DIR=${DIAG_DIR:-/var/tmp/diag}
+TOOL_IMAGE=${TOOL_IMAGE:-campfire-fsharp-toolchain:latest}
+APPS=rust,fsharp REPS=3 FIRST_REP=1 IDENTITY="" CONC=16 OUT="" ROUTES="room_show,messages_page,sidebar,search,post_message,up,static_css,avatar" SECS=8
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --apps) APPS=$2; shift 2 ;;
+    --reps) REPS=$2; shift 2 ;;
+    --first-rep) FIRST_REP=$2; shift 2 ;;
+    --identity) IDENTITY=1; shift ;;
+    --conc) CONC=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;;
+    --routes) ROUTES=$2; shift 2 ;;
+    --secs) SECS=$2; shift 2 ;;
+    *) break ;;
+  esac
+done
+
+routes_table() {
+  cat <<TABLE
+room_show|/rooms/$ROOM
+messages_page|/rooms/$ROOM/messages?before=$BEFORE
+sidebar|/users/me/sidebar
+search|/searches?q=coffee
+avatar|/users/$AVATAR/avatar
+static_css|$CSS
+up|/up
+post_message|POST
+TABLE
+}
+
+# Sign in and scrape what the routes need; sets COOKIE, CSRF, CSS.
+sign_in() {
+  local scrape
+  COOKIE=$(lg login --base "$BASE" --email "$EMAIL" --password "$PASSWORD" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cookie"])')
+  scrape=$(lg scrape --base "$BASE" --cookie "$COOKIE" --room "$ROOM")
+  CSRF=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["csrf"] or "")' "$scrape")
+  CSS=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["css"])' "$scrape")
+}
+
+# lg arguments for a route name, in the array ROUTE_ARGS (the CSRF token may be empty: an array keeps the
+# empty argument where word splitting would drop it, and --csrf would swallow the next option).
+route_args() {
+  local name=$1 path
+  path=$(routes_table | awk -F'|' -v n="$name" '$1==n{print $2}')
+  if [ "$path" = POST ]; then ROUTE_ARGS=(--post-room "$WRITE_ROOM" --csrf "$CSRF"); else ROUTE_ARGS=(--path "$path"); fi
+  [ -z "$IDENTITY" ] || ROUTE_ARGS+=(--gzip 0)   # Accept-Encoding: identity, as bench/run's -identity apps
+}
+
+drop_app_dir() { docker rm -f "$CONTAINER" >/dev/null; rm -rf "${WORK:?}/${1:?}"; }
+
+cpu_unit() {
+  local app=$1 rep=$2 cg route c rows="[]"
+  wait_for_quiet
+  local load_start; load_start=$(cat /proc/loadavg)
+  start_app "$app" >/dev/null
+  cg=$(cgroup_dir)
+  sleep 5
+  sign_in
+  for route in ${ROUTES//,/ }; do
+    route_args "$route"; local a=("${ROUTE_ARGS[@]}")
+    lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc 4 --duration 2 >/dev/null # warm up
+    for c in 1 16; do
+      local before=0 after=0 res
+      [ "$route" = post_message ] && before=$(room_rows "$app")
+      res=$(taskset -c "$LOADGEN_CPUS" python3 "$BENCH/lib/cpurun.py" "$cg" -- "$LOADGEN" http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$c" --duration "$SECS")
+      [ "$route" = post_message ] && after=$(room_rows "$app")
+      rows=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); r=json.loads(sys.argv[2]); r["route"]=sys.argv[3]; r["rows_written"]=int(sys.argv[4])-int(sys.argv[5]); a.append(r); print(json.dumps(a))' "$rows" "$res" "$route" "$after" "$before")
+      log "$app rep $rep: $route c=$c $(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); c=r["cost"]; print(r["rps"], "rps; server", c["server_cpu_us_per_req"], "us/req (user", c["server_user_us_per_req"], "sys", c["server_system_us_per_req"], ",", c["server_cores_busy"], "cores); loadgen", c["loadgen_cpu_us_per_req"], "us/req (", c["loadgen_cores_busy"], "cores);", r["statuses"], "err", r["errors"])' "$res")"
+    done
+  done
+  python3 - "$OUT/$app-$rep.json" "$app" "$rep" "$load_start" "$rows" <<'PY'
+import json, sys
+f, app, rep, load, rows = sys.argv[1:]
+json.dump({"app": app, "rep": int(rep), "loadavg_start": load, "runs": json.loads(rows)}, open(f, "w"), indent=1)
+PY
+  drop_app_dir "$app"
+}
+
+# A tool container in the app's PID namespace, on the load generator's CPUs.
+tool() {
+  docker run --rm --user "$(id -u):$(id -g)" --pid "container:$CONTAINER" -v "$DIAG_DIR:/tmp" -v "$TOOLS_DIR:/tools" \
+    -e HOME=/tmp -e DOTNET_ROOT=/opt/dotnet -e DOTNET_ROLL_FORWARD=Major -e DOTNET_NOLOGO=1 --cpuset-cpus "$LOADGEN_CPUS" "$TOOL_IMAGE" "$@"
+}
+# The same without the PID namespace (conversion needs only the files).
+tool_offline() {
+  docker run --rm --user "$(id -u):$(id -g)" -v "$DIAG_DIR:/tmp" -v "$TOOLS_DIR:/tools" \
+    -e HOME=/tmp -e DOTNET_ROOT=/opt/dotnet -e DOTNET_ROLL_FORWARD=Major -e DOTNET_NOLOGO=1 --cpuset-cpus "$LOADGEN_CPUS" "$TOOL_IMAGE" "$@"
+}
+
+profile_route() {
+  local route=$1; route_args "$route"; local a=("${ROUTE_ARGS[@]}")
+  lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc 4 --duration 3 >/dev/null
+  rm -f "$DIAG_DIR"/*.nettrace "$DIAG_DIR"/*.speedscope.json "$DIAG_DIR"/counters*
+  lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc 16 --duration $((SECS + 6)) > "$DIAG_DIR/lg.json" &
+  local lgpid=$!
+  sleep 2
+  tool /tools/dotnet-counters collect -p 1 --format csv --refresh-interval 1 --counters System.Runtime -o /tmp/counters --duration "00:00:$(printf %02d "$SECS")" >/dev/null 2>&1 &
+  local cpid=$!
+  tool /tools/dotnet-trace collect -p 1 --duration "00:00:$(printf %02d "$SECS")" -o /tmp/trace.nettrace --profile dotnet-sampled-thread-time >/dev/null 2>&1
+  wait "$cpid" "$lgpid"
+  tool_offline /tools/dotnet-trace convert /tmp/trace.nettrace --format Speedscope -o /tmp/trace >/dev/null 2>&1
+  python3 "$BENCH/lib/layers.py" "$DIAG_DIR/trace.speedscope.json" "$DIAG_DIR/counters.csv" "$DIAG_DIR/lg.json" "$route" > "$OUT/profile-$route.json"
+  log "profile $route: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("busy", r["busy_ms"], "ms; ", ", ".join(f"{k} {v}%" for k, v in list(r["layers_pct"].items())[:6]))' "$OUT/profile-$route.json")"
+}
+
+perf_route() {
+  local route=$1 app=$2; route_args "$route"; local a=("${ROUTE_ARGS[@]}")
+  lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration 6 >/dev/null
+  rm -f "$DIAG_DIR/perf.data" "$DIAG_DIR/perf.script"
+  lg http --base "$BASE" --cookie "$COOKIE" "${a[@]}" --conc "$CONC" --duration $((SECS + 6)) > "$DIAG_DIR/lg.json" &
+  local lgpid=$!
+  sleep 2
+  sudo perf record -F 999 -g -p "$PERF_PID" -o "$DIAG_DIR/perf.data" -- sleep "$SECS" >/dev/null 2>&1
+  wait "$lgpid"
+  [ "$app" = fsharp ] && sudo cp "$DIAG_DIR/perf-1.map" "/tmp/perf-$PERF_PID.map"
+  sudo perf script -i "$DIAG_DIR/perf.data" -F comm,tid,ip,sym,dso --no-inline 2>/dev/null > "$DIAG_DIR/perf.script"
+  local flag=(); [ "$app" = rust ] && flag=(--rust)
+  python3 "$BENCH/lib/perf_layers.py" "${flag[@]}" "$DIAG_DIR/perf.script" "$DIAG_DIR/lg.json" "$route" "$SECS" > "$OUT/perf-$app-$route-c$CONC.json"
+  sudo rm -f "$DIAG_DIR/perf.data" "$DIAG_DIR/perf.script" "/tmp/perf-$PERF_PID.map"
+  log "perf $app $route: $(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["us_per_request"], "us/req,", r["cores"], "cores;", ", ".join(f"{k} {v}%" for k, v in list(r["layers_pct"].items())[:5]))' "$OUT/perf-$app-$route-c$CONC.json")"
+}
+
+case "$MODE" in
+  perf)
+    OUT=${OUT:-$BENCH/results/breakdown-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$OUT"
+    mkdir -p "$DIAG_DIR"; find "$DIAG_DIR" -mindepth 1 -delete; chmod 1777 "$DIAG_DIR"
+    sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0 >/dev/null
+    DOCKER_EXTRA_ARGS=(-v "$DIAG_DIR:/tmp")
+    for app in ${APPS//,/ }; do
+      [ "$app" = fsharp ] && FSHARP_EXTRA_ENV="DOTNET_PerfMapEnabled=1 DOTNET_EnableWriteXorExecute=0"
+      wait_for_quiet
+      start_app "$app" >/dev/null
+      PERF_PID=$(docker inspect -f '{{.State.Pid}}' "$CONTAINER")
+      sleep 5
+      sign_in
+      for route in ${ROUTES//,/ }; do perf_route "$route" "$app"; done
+      drop_app_dir "$app"
+    done
+    ;;
+  cpu)
+    OUT=${OUT:-$BENCH/results/breakdown-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$OUT"
+    ORDER=(${APPS//,/ })
+    for rep in $(seq "$FIRST_REP" $((FIRST_REP + REPS - 1))); do
+      apps=("${ORDER[@]}")
+      if [ $((rep % 2)) -eq 0 ]; then apps=(); for ((i = ${#ORDER[@]} - 1; i >= 0; i--)); do apps+=("${ORDER[$i]}"); done; fi
+      for app in "${apps[@]}"; do cpu_unit "$app" "$rep"; done
+    done
+    ;;
+  profile)
+    OUT=${OUT:-$BENCH/results/breakdown-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$OUT"
+    mkdir -p "$DIAG_DIR"; find "$DIAG_DIR" -mindepth 1 -delete; chmod 1777 "$DIAG_DIR"
+    DOCKER_EXTRA_ARGS=(-v "$DIAG_DIR:/tmp")
+    wait_for_quiet
+    start_app fsharp >/dev/null
+    sleep 5
+    sign_in
+    for route in ${ROUTES//,/ }; do profile_route "$route"; done
+    drop_app_dir fsharp
+    ;;
+  report)
+    python3 "$BENCH/lib/breakdown_report.py" "$@"
+    ;;
+  *) echo "usage: bench/breakdown cpu|profile|perf|report ..." >&2; exit 2 ;;
+esac

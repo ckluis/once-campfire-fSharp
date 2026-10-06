@@ -103,7 +103,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 OUT=${OUT:-$BENCH/results/$(date +%Y%m%d-%H%M%S)}
-mkdir -p "$OUT"
 WORK=${WORK:-$BENCH/.work}
 CONTAINER=bench-campfire-$PORT
 
@@ -206,8 +205,12 @@ start_sampler() {
   SAMPLER=$!
 }
 
+# Extra `docker run` arguments for the app's container (bench/breakdown mounts a trace directory with them).
+DOCKER_EXTRA_ARGS=()
+
 start_app() {
-  local app=$1 dir=$WORK/$app
+  local app=$1
+  local dir=$WORK/$app
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   rm -rf "$dir"; mkdir -p "$dir/db" "$dir/storage"
   cp -a --reflink=auto "$SEED/db/." "$dir/db/"; cp -a --reflink=auto "$SEED/storage/." "$dir/storage/"
@@ -226,7 +229,7 @@ start_app() {
   local scratch=()
   if [ "$app" = reference ] && [ "$(id -u)" != 1000 ]; then scratch=(--tmpfs /rails/tmp:mode=1777 --tmpfs /rails/log:mode=1777); fi
   docker run -d --name "$CONTAINER" --cpuset-cpus "$SERVER_CPUS" --user "$(id -u):$(id -g)" \
-    "${net[@]}" "${scratch[@]}" "${args[@]}" \
+    "${net[@]}" "${scratch[@]}" "${args[@]}" "${DOCKER_EXTRA_ARGS[@]}" \
     -v "$dir/db:/rails/storage/db" -v "$dir/storage:/rails/storage/files" \
     "$(image_for "$app")" >/dev/null
   for _ in $(seq 1 3000); do
@@ -372,6 +375,9 @@ write_env() {
   echo "loadgen: $LOADGEN ($(stat -c %y "$LOADGEN" | cut -d. -f1)), built with $RUST_BUILD_IMAGE"
   echo "schedule: apps ${APPS}, reps ${REPS}; suites: ${SUITES}; http secs ${HTTP_SECS}, concs ${HTTP_CONCS}"
 }
+# `BENCH_RUN_LIB=1 source bench/run` stops here with the functions above defined (bench/breakdown uses them).
+if [ -n "${BENCH_RUN_LIB:-}" ]; then return 0 2>/dev/null || exit 0; fi
+mkdir -p "$OUT"
 [ -s "$OUT/env.txt" ] || write_env > "$OUT/env.txt"
 cat "$OUT/env.txt" >&2
 
