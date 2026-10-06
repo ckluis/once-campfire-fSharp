@@ -197,6 +197,25 @@ let ``bypassed requests repeat vary`` () =
         do! server2.Stop()
     }
 
+[<Fact>]
+let ``no vary is added when compression is off`` () =
+    task {
+        // Rust's `add_vary` is part of `Compression::apply`, which runs only when compression is on.
+        let! server, _ = startApp [ "GZIP_COMPRESSION_ENABLED", "false" ]
+        let post = "POST /headers HTTP/1.1\r\nHost: chat.test\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+        let! bypassed = exchange server.Http post
+        Assert.Equal(some "bypass", bypassed.Get "x-cache")
+        Assert.Equal<string list>([], bypassed.All "vary")
+        let! page = exchange server.Http "GET /page HTTP/1.1\r\nHost: chat.test\r\nConnection: close\r\nAccept-Encoding: gzip\r\n\r\n"
+        Assert.Equal(200, page.Status)
+        Assert.Equal(None, page.Get "content-encoding")
+        Assert.Equal<string list>([], page.All "vary")
+        // What the app says about Vary is its own, and stays.
+        let! cached = exchange server.Http (getRequest "/public" "Accept-Encoding: gzip\r\n")
+        Assert.Equal<string list>([ "Accept-Encoding" ], cached.All "vary")
+        do! server.Stop()
+    }
+
 let private unzstd (bytes: byte[]) : byte[] =
     use input = new MemoryStream(bytes)
     use zstd = new ZstdSharp.DecompressionStream(input)

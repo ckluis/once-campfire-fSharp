@@ -192,7 +192,8 @@ type FrontResponse
         match record with
         | null -> ()
         | state -> state.Headers <- FrontHeaders.snapshot headers
-        FrontHeaders.addVary headers merge
+        // Only `Compression::apply` adds it in Rust, and Thruster installs gzhttp only when compression is on.
+        if services.CompressionEnabled then FrontHeaders.addVary headers merge
         match compress with
         | null -> ()
         | state ->

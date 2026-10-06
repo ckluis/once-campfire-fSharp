@@ -77,6 +77,8 @@ module FrontConfig =
         | _ -> ValueNone
 
     /// `strconv.Atoi`: an optional sign and decimal digits, nothing else.
+    let private maxTimeoutSeconds = 49L * 24L * 3600L
+
     let private parseInt (value: string) : int64 voption =
         match Int64.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture) with
         | true, n -> ValueSome n
@@ -122,9 +124,12 @@ module FrontConfig =
         let port (key: string) (fallback: int) =
             let n = int key (int64 fallback)
             if n >= 0L && n <= 65535L then Operators.int n else fallback
+        // Rust takes any u64 of seconds. Here a value past MaxTimeout (49 days, which is as long as
+        // CancellationTokenSource.CancelAfter and Task.Delay can wait) is MaxTimeout, which is
+        // as good as never, rather than an OverflowException that keeps the server from starting.
         let seconds (key: string) (fallback: int64) =
             match find key |> ValueOption.bind parseInt with
-            | ValueSome s -> TimeSpan.FromSeconds(float (max s 0L))
+            | ValueSome s -> TimeSpan.FromSeconds(float (min (max s 0L) maxTimeoutSeconds))
             | ValueNone -> TimeSpan.FromSeconds(float fallback)
         let boolean (key: string) (fallback: bool) =
             find key |> ValueOption.bind parseBool |> ValueOption.defaultValue fallback

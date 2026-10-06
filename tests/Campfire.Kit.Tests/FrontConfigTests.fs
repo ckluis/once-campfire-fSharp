@@ -51,6 +51,19 @@ let ``unparseable values fall back to the default`` () =
     Assert.True(c.LogRequests && c.H2cEnabled)
 
 [<Fact>]
+let ``huge timeouts are clamped instead of failing`` () =
+    // Rust takes Duration::from_secs(s as u64); TimeSpan.FromSeconds throws past about 9.2e11.
+    let c = config [ "HTTP_IDLE_TIMEOUT", "9999999999999"; "HTTP_READ_TIMEOUT", "9223372036854775807"; "HTTP_WRITE_TIMEOUT", "86400" ]
+    Assert.Equal(TimeSpan.FromDays 49.0, c.HttpIdleTimeout)
+    Assert.Equal(TimeSpan.FromDays 49.0, c.HttpReadTimeout)
+    Assert.Equal(TimeSpan.FromDays 1.0, c.HttpWriteTimeout)
+    // Negative values are still zero (no timeout).
+    Assert.Equal(TimeSpan.Zero, (config [ "HTTP_IDLE_TIMEOUT", "-5" ]).HttpIdleTimeout)
+    // The longest a CancellationTokenSource waits is more than the clamp.
+    use cts = new Threading.CancellationTokenSource()
+    cts.CancelAfter c.HttpIdleTimeout
+
+[<Fact>]
 let ``tls domains turn off forwarded headers`` () =
     let c = config [ "TLS_DOMAIN", " chat.example.com, ,other.example.com " ]
     Assert.Equal<string list>([ "chat.example.com"; "other.example.com" ], c.TlsDomains)
