@@ -233,8 +233,10 @@ module Boot =
             (app.Db :> IDisposable).Dispose()
         }
 
-    /// SQLite's online backup of the live database at `source` into a new file at `target`.
-    let private copyDatabase (source: string) (target: string) : unit =
+    /// SQLite's online backup of the live database at `source` into a new file at `target`: `sqlite3_backup_step(-1)`
+    /// (every page in one step), retried `attempts` times, `delay` apart, while the source is busy or locked
+    /// (`copy_database`). `busyTimeout` is the source connection's own busy handler, in milliseconds.
+    let internal copyDatabaseWith (busyTimeout: int) (attempts: int) (delay: TimeSpan) (source: string) (target: string) : unit =
         let open' (path: string) (mode: SqliteOpenMode) =
             let builder = SqliteConnectionStringBuilder()
             builder.DataSource <- path
@@ -245,11 +247,31 @@ module Boot =
             connection
         use source = open' source SqliteOpenMode.ReadOnly
         use command = source.CreateCommand()
-        command.CommandText <- "PRAGMA busy_timeout = 5000"
+        command.CommandText <- $"PRAGMA busy_timeout = {busyTimeout}"
         command.ExecuteNonQuery() |> ignore
         use target = open' target SqliteOpenMode.ReadWriteCreate
-        // `backup.step(-1)`: every page in one step; a busy or locked source is retried.
-        source.BackupDatabase target
+        let fail (message: string) (code: int) : exn = SqliteException(message, code)
+        let backup = SQLitePCL.raw.sqlite3_backup_init (target.Handle, "main", source.Handle, "main")
+        if isNull backup then
+            raise (fail ((SQLitePCL.raw.sqlite3_errmsg target.Handle).utf8_to_string()) (SQLitePCL.raw.sqlite3_errcode target.Handle))
+        try
+            let mutable tried = 0
+            let mutable finished = false
+            while not finished do
+                match SQLitePCL.raw.sqlite3_backup_step (backup, -1) with
+                | rc when rc = SQLitePCL.raw.SQLITE_DONE -> finished <- true
+                | rc when (rc = SQLitePCL.raw.SQLITE_BUSY || rc = SQLitePCL.raw.SQLITE_LOCKED) ->
+                    if tried < attempts then
+                        tried <- tried + 1
+                        Threading.Thread.Sleep delay
+                    else
+                        raise (fail "backup did not finish: source is busy or locked" rc)
+                | rc -> raise (fail ((SQLitePCL.raw.sqlite3_errmsg source.Handle).utf8_to_string()) rc)
+        finally
+            SQLitePCL.raw.sqlite3_backup_finish backup |> ignore
+
+    let private copyDatabase (source: string) (target: string) : unit =
+        copyDatabaseWith 5000 50 (TimeSpan.FromMilliseconds 100.0) source target
 
     /// `script/admin/prepare-backup`: `SQLite3::Backup` of the live database, all pages in one step,
     /// into `storage/backups/<database file name>`.
@@ -303,6 +325,27 @@ module Boot =
                 .AddFilter("thruster", front)
             |> ignore)
 
+    /// Run a command; a failure is `Error: <message>` on stderr and exit code 1, as `anyhow`'s `main` ends.
+    let internal execute (config: AppConfig) (loggers: ILoggerFactory) (command: string option) : int =
+        try
+            match command with
+            | None
+            | Some "server" ->
+                match Server.raiseOpenFileLimit () with
+                | ValueSome limit -> (loggers.CreateLogger "campfire").LogInformation("open files limit={Limit}", limit)
+                | ValueNone -> ()
+                (serve config loggers).GetAwaiter().GetResult()
+                0
+            | Some "backup" ->
+                backup config (loggers.CreateLogger "campfire")
+                0
+            | Some other ->
+                eprintfn "Error: unknown command %A\n%s" other Usage
+                1
+        with ex ->
+            eprintfn "Error: %s" ex.Message
+            1
+
     /// The binary's entry point.
     ///
     /// - `campfire` / `campfire server`: serve the app behind the front server, as `bin/boot` did with
@@ -325,17 +368,4 @@ module Boot =
                 1
             | Ok config ->
                 use loggers = createLoggerFactory config
-                match command with
-                | None
-                | Some "server" ->
-                    match Server.raiseOpenFileLimit () with
-                    | ValueSome limit -> (loggers.CreateLogger "campfire").LogInformation("open files limit={Limit}", limit)
-                    | ValueNone -> ()
-                    (serve config loggers).GetAwaiter().GetResult()
-                    0
-                | Some "backup" ->
-                    backup config (loggers.CreateLogger "campfire")
-                    0
-                | Some other ->
-                    eprintfn "Error: unknown command %A\n%s" other Usage
-                    1
+                execute config loggers command

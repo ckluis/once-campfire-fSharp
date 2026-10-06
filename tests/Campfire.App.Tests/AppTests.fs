@@ -551,3 +551,86 @@ let ``concurrent message posts all complete`` () =
         Assert.True(obj.ReferenceEquals(finished, afterReply), "the server stopped answering")
         Assert.Equal(200, afterReply.Result.Status)
     }
+
+/// A rollback-journal database with one row, at a path in a fresh directory.
+let private scratchDatabase () : string * string =
+    let dir = Path.Combine(Path.GetTempPath(), "campfire-backup-" + Guid.NewGuid().ToString("N"))
+    Directory.CreateDirectory dir |> ignore
+    let path = Path.Combine(dir, "source.sqlite3")
+    let builder = SqliteConnectionStringBuilder()
+    builder.DataSource <- path
+    builder.Pooling <- false
+    use connection = new SqliteConnection(builder.ToString())
+    connection.Open()
+    use command = connection.CreateCommand()
+    command.CommandText <- "CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (7)"
+    command.ExecuteNonQuery() |> ignore
+    dir, path
+
+let private holdExclusive (path: string) : SqliteConnection =
+    let builder = SqliteConnectionStringBuilder()
+    builder.DataSource <- path
+    builder.Pooling <- false
+    let holder = new SqliteConnection(builder.ToString())
+    holder.Open()
+    use command = holder.CreateCommand()
+    command.CommandText <- "BEGIN EXCLUSIVE"
+    command.ExecuteNonQuery() |> ignore
+    holder
+
+[<Fact>]
+let ``backup retries a busy source until it is free`` () =
+    let dir, source = scratchDatabase ()
+    try
+        let target = Path.Combine(dir, "copy.sqlite3")
+        let holder = holdExclusive source
+        // The source's own busy handler is off, so only the step loop can wait the lock out.
+        let release = Task.Run(fun () -> Threading.Thread.Sleep 400; holder.Dispose())
+        Boot.copyDatabaseWith 0 50 (TimeSpan.FromMilliseconds 100.0) source target
+        release.GetAwaiter().GetResult()
+        let builder = SqliteConnectionStringBuilder()
+        builder.DataSource <- target
+        builder.Pooling <- false
+        use copy = new SqliteConnection(builder.ToString())
+        copy.Open()
+        use command = copy.CreateCommand()
+        command.CommandText <- "SELECT n FROM t"
+        Assert.Equal(7L, Convert.ToInt64(command.ExecuteScalar()))
+    finally
+        Directory.Delete(dir, true)
+
+[<Fact>]
+let ``backup gives up on a source that stays busy`` () =
+    let dir, source = scratchDatabase ()
+    try
+        use _holder = holdExclusive source
+        let ex =
+            Assert.Throws<SqliteException>(fun () ->
+                Boot.copyDatabaseWith 0 3 (TimeSpan.FromMilliseconds 10.0) source (Path.Combine(dir, "copy.sqlite3")))
+        Assert.Contains("backup did not finish", ex.Message)
+    finally
+        Directory.Delete(dir, true)
+
+[<Fact>]
+let ``a failed backup prints the error and exits 1 instead of throwing`` () =
+    let dir = Path.Combine(Path.GetTempPath(), "campfire-backup-" + Guid.NewGuid().ToString("N"))
+    Directory.CreateDirectory dir |> ignore
+    try
+        let config =
+            match AppConfig.fromLookup (fun name -> match name with "SECRET_KEY_BASE" -> "abc" | "CAMPFIRE_STORAGE_PATH" -> dir | _ -> null) with
+            | Ok config -> config
+            | Error e -> failwith e
+        let originalError = Console.Error
+        use captured = new StringWriter()
+        Console.SetError captured
+        let code =
+            try
+                use loggers = Boot.createLoggerFactory config
+                Boot.execute config loggers (Some "backup")
+            finally
+                Console.SetError originalError
+        Assert.Equal(1, code)
+        Assert.Contains("Error: ", captured.ToString())
+        Assert.DoesNotContain("Unhandled", captured.ToString())
+    finally
+        Directory.Delete(dir, true)
