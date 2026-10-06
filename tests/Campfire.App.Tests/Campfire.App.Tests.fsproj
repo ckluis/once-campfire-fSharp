@@ -14,6 +14,7 @@
     <Compile Include="JobsTests.fs" />
     <Compile Include="MiscTests.fs" />
     <Compile Include="FragmentGlueTests.fs" />
+    <Compile Include="PresentersTests.fs" />
     <Compile Include="PaginationTests.fs" />
     <Compile Include="GuardTests.fs" />
     <Compile Include="RqrcodeTests.fs" />
