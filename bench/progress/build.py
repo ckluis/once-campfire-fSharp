@@ -201,15 +201,16 @@ def page():
     pts = [(when(r), overall(v, r.get("rust") or stored), r, v, m) for r, v, m in rows]
     pts = [p for p in pts if p[0] and p[1] is not None]
     kept = [p for p in pts if p[2].get("kept", True)]
-    W, H, L, R, T, B = 1000, 420, 56, 80, 28, 56
+    W, H, L, R, T, B = 1000, 440, 56, 80, 28, 70
+    # Evenly spaced by run order, not by clock: each dot gets the same room, labelled with its time and day.
+    order = {id(p[2]): i for i, p in enumerate(pts)}
+    n = max(len(pts) - 1, 1)
     if pts:
-        t0 = min(p[0].timestamp() for p in pts)
-        span = max(max(p[0].timestamp() for p in pts) - t0, 3600)
         vals = [p[1] for p in pts]
         lo, hi = min(0.6, min(vals) - 0.04), max(1.15, max(vals) + 0.04)
     else:
-        t0, span, lo, hi = 0, 3600, 0.6, 1.15
-    X = lambda t: L + (W - L - R) * (t.timestamp() - t0) / span
+        lo, hi = 0.6, 1.15
+    X = lambda r: L + (W - L - R) * ((order[id(r)] / n) if len(pts) > 1 else 0.5)
     Y = lambda v: H - B - (H - T - B) * (v - lo) / (hi - lo)
 
     svg = ['<svg viewBox="0 0 %d %d" aria-hidden="true">' % (W, H)]
@@ -222,18 +223,21 @@ def page():
     svg.append('<line x1="%d" x2="%d" y1="%.1f" y2="%.1f" class="rust"/><text x="%d" y="%.1f" class="rustlabel">Rust</text>'
                % (L, W - R, Y(1), Y(1), W - R + 10, Y(1) + 5))
     if kept:
-        line = " ".join("%.1f,%.1f" % (X(t), Y(v)) for t, v, *_ in kept)
-        svg.append('<polygon class="area" points="%.1f,%d %s %.1f,%d"/>' % (X(kept[0][0]), H - B, line, X(kept[-1][0]), H - B))
+        line = " ".join("%.1f,%.1f" % (X(r), Y(v)) for t, v, r, *_ in kept)
+        svg.append('<polygon class="area" points="%.1f,%d %s %.1f,%d"/>' % (X(kept[0][2]), H - B, line, X(kept[-1][2]), H - B))
         svg.append('<polyline class="climb" points="%s"/>' % line)
-        for t, v, *_ in kept[:: max(1, len(kept) // 8)] + [kept[-1]]:
-            svg.append('<text x="%.1f" y="%d" class="tick" text-anchor="middle">%s</text>' % (X(t), H - B + 20, t.strftime("%H:%M")))
+    step = max(1, -(-len(pts) // 24))  # label every dot until there are more than 24
+    for i, (t, v, r, *_) in enumerate(pts):
+        if i % step == 0 or i == len(pts) - 1:
+            svg.append('<text x="%.1f" y="%d" class="tick" text-anchor="middle">%s</text><text x="%.1f" y="%d" class="day" text-anchor="middle">%s</text>'
+                       % (X(r), H - B + 20, t.strftime("%H:%M"), X(r), H - B + 36, t.strftime("%a %-d %b")))
     svg.append("</svg>")
 
     dots = []
     for i, (t, v, r, view, measured) in enumerate(pts):
         isk = r.get("kept", True)
         last = isk and kept and r is kept[-1][2]
-        left, top = X(t) / W * 100, Y(v) / H * 100
+        left, top = X(r) / W * 100, Y(v) / H * 100
         side = "flip" if left > 58 else ""
         dots.append('<span class="dot %s %s %s" tabindex="0" role="button" style="left:%.2f%%;top:%.2f%%" aria-label="%s, %.2f times Rust">%s</span>'
                     % ("kept" if isk else "dropped", "last" if last else "", side, left, top,
@@ -264,9 +268,9 @@ main{{max-width:1100px;margin:0 auto;padding:28px 16px 48px}} h1{{font-size:30px
 .stats{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}}
 .stats div{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}}
 .stats b{{display:block;font-size:26px;letter-spacing:-.02em}} .stats span{{color:var(--mute);font-size:13px}}
-.chart{{position:relative;background:var(--card);border:1px solid var(--line);border-radius:14px;aspect-ratio:1000/420}}
+.chart{{position:relative;background:var(--card);border:1px solid var(--line);border-radius:14px;aspect-ratio:1000/440}}
 .chart svg{{position:absolute;inset:0;width:100%;height:100%}}
-.grid{{stroke:var(--line)}} .axis,.tick{{fill:var(--mute);font-size:12px}}
+.grid{{stroke:var(--line)}} .axis,.tick{{fill:var(--mute);font-size:12px}} .day{{fill:var(--mute);font-size:10.5px;opacity:.75}}
 .rust{{stroke:var(--ink);stroke-width:2;stroke-dasharray:8 6;opacity:.7}} .rustlabel{{fill:var(--ink);font-weight:700;font-size:15px}}
 .climb{{fill:none;stroke:var(--acc);stroke-width:4;stroke-linejoin:round;stroke-linecap:round}} .area{{fill:var(--acc);opacity:.1}}
 .dot{{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;border:3px solid var(--acc);background:var(--card);padding:0;cursor:pointer}}
@@ -287,7 +291,7 @@ main{{max-width:1100px;margin:0 auto;padding:28px 16px 48px}} h1{{font-size:30px
 @media (max-width:640px){{.pre-grid{{grid-template-columns:1fr}} .stats{{grid-template-columns:repeat(2,minmax(0,1fr))}} .chart{{aspect-ratio:auto;height:300px}}}}
 </style></head><body><main>
 <h1>F# climbing toward Rust</h1>
-<p class="sub">Phase 7 tuning. Each dot is a measured run; hover or tap it for everything about that run. The line is the geometric mean of F#/Rust across the five workloads at 16 connections against the stored Rust numbers; hollow grey dots are reverted experiments. Built {now}.</p>
+<p class="sub">Phase 7 tuning. Each dot is a measured run; hover or tap it for everything about that run. The line is the geometric mean of F#/Rust across the five workloads at 16 connections; dots are spaced evenly in the order they ran, labelled with time and day; hollow grey dots are reverted experiments. Built {now}.</p>
 {prelude(hist)}
 {stats}
 <div class="chart">{"".join(svg)}{"".join(dots)}</div>
