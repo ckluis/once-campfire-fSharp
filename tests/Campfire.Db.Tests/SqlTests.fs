@@ -163,3 +163,11 @@ let ``a stored value that cannot be converted is an error, not an exception`` ()
     | other -> failwith $"escaped as {other.GetType().Name}: {other.Message}"
     // The statement that raised is dropped and the connection still works.
     Assert.Equal(1L, conn.Count("SELECT COUNT(*) FROM things WHERE id = 1", [||]))
+
+[<Fact>]
+let ``the library runs without its memory statistics mutex`` () =
+    use conn = Conn.OpenInMemory()
+    table conn
+    conn.Execute("INSERT INTO things (id, name) VALUES (?, ?)", [| I 1L; S "x" |]) |> ignore
+    // With SQLITE_CONFIG_MEMSTATUS off (Library.ensureConfigured, before the first connection) SQLite keeps no count.
+    Assert.Equal(0L, SQLitePCL.raw.sqlite3_memory_used ())

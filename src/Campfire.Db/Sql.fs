@@ -116,6 +116,22 @@ type Row internal (stmt: sqlite3_stmt) =
                 found <- i
         if found < 0 then raise (ArgumentOutOfRangeException(nameof name, name, "no such column")) else found
 
+module internal Library =
+    /// What rusqlite's `SQLITE_OPEN_NO_MUTEX` and the build it bundles give Rust, for every connection of the process: each
+    /// connection is used by one thread at a time (`Conn` is not safe for concurrent use, a reader is handed from thread to
+    /// thread under the read queue's lock), so SQLite's per-connection mutex (`SQLITE_CONFIG_MULTITHREAD`, taken on every API
+    /// call) and the memory statistics' global mutex (`SQLITE_CONFIG_MEMSTATUS` off, taken on every allocation, shared by all
+    /// readers) are pure cost. Microsoft.Data.Sqlite opens the connections (`Conn.Raw` has to stay its connection) without
+    /// the flag, so it is set library-wide, before the first connection initializes SQLite; a library already initialized
+    /// refuses it and the connections keep SQLite's defaults.
+    let private configure =
+        lazy
+            (Batteries_V2.Init()
+             SQLitePCL.raw.sqlite3_config 2 |> ignore
+             SQLitePCL.raw.sqlite3_config (9, 0) |> ignore)
+
+    let ensureConfigured () : unit = configure.Force()
+
 /// A prepared statement and the number of `?` it has.
 [<Sealed; AllowNullLiteral>]
 type internal Prepared(stmt: sqlite3_stmt, parameters: int) =
@@ -235,6 +251,7 @@ type Conn(raw: SqliteConnection, capacity: int) =
     /// Opens a connection to the database file at `path` (created if it doesn't exist), or an
     /// in-memory database for `":memory:"`. The statement cache holds `capacity` statements.
     static member Open(path: string, ?capacity: int) : Conn =
+        Library.ensureConfigured ()
         let builder = SqliteConnectionStringBuilder()
         builder.DataSource <- path
         builder.Mode <- SqliteOpenMode.ReadWriteCreate
