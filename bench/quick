@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A fast before/after runner for Rust and F# only (Phase 7's tuning loop). Run inside colima, like bench/run:
 #
-#   bench/quick [--reps 3] [--apps rust,fsharp] [--only APP:REP] [--out DIR] [--secs 8] [--warmup 20] [--warmup-max 60] [--concs "1 16"] [--routes a,b]
+#   bench/quick [--reps 3] [--apps rust,fsharp] [--only APP:REP] [--out DIR] [--secs 8] [--warmup 20] [--warmup-max 60] [--concs "1 16"] [--routes a,b] [--part K/N]
 #   bench/quick report DIR                            # bench/report again, on any bench/run or bench/quick directory
 #   bench/quick cpu [--reps 1] [--secs 6] [--warmup 20] [--out DIR]   # CPU per request only (bench/breakdown cpu on the five workloads)
 #
@@ -23,6 +23,10 @@
 # `--reps 1 --secs 5 --warmup 10 --warmup-max 10` is the 4-minute smoke version (a fixed 10 s warm-up, two apps, one rep each): the
 # plumbing check, not a number to compare with a full run.
 #
+# One app-rep of F# can take longer than a foreground call allows (up to 10 x (60 + 8 + 3) s when its JIT is slow to settle):
+# --part K/N runs the Kth of N slices of the route list (in a fresh container, merged into the rep's file), so the unit
+# is `--only fsharp:1 --part 1/2` then `--only fsharp:1 --part 2/2`; the report treats the two as one rep.
+#
 # Same seed (a copy of parity/.seed/default per app and rep), same images: FSHARP_IMAGE and RUST_IMAGE as in bench/run.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -33,7 +37,7 @@ if [ "${1:-}" = report ]; then shift; exec "$ROOT/bench/report" "$@"; fi
 MODE=run
 if [ "${1:-}" = cpu ]; then MODE=cpu; shift; fi
 
-APPS=rust,fsharp REPS=3 OUT="" ONLY="" SECS="" WARMUP="" WARMUP_MAX="" CONCS="1 16" ROUTES="room_show,messages_page,sidebar,search,post_message"
+APPS=rust,fsharp REPS=3 OUT="" ONLY="" SECS="" WARMUP="" WARMUP_MAX="" PART="" CONCS="1 16" ROUTES="room_show,messages_page,sidebar,search,post_message"
 [ "$MODE" = cpu ] && REPS=1
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -46,6 +50,7 @@ while [ $# -gt 0 ]; do
     --warmup-max) WARMUP_MAX=$2; shift 2 ;;
     --concs) CONCS=$2; shift 2 ;;
     --routes) ROUTES=$2; shift 2 ;;
+    --part) PART=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -53,6 +58,18 @@ OUT=${OUT:-$ROOT/bench/results/quick-$(date +%Y%m%d-%H%M%S)}
 [ -z "$WARMUP" ] || export WARMUP_SECS=$WARMUP
 [ -z "$WARMUP_MAX" ] || export WARMUP_MAX_SECS=$WARMUP_MAX
 
+if [ -n "$PART" ]; then
+  # The Kth of N slices of the route list: the first ceil(len/N) routes are part 1, and so on.
+  ROUTES=$(python3 - "$ROUTES" "$PART" <<'PY'
+import math, sys
+routes, (k, n) = sys.argv[1].split(","), map(int, sys.argv[2].split("/"))
+size = math.ceil(len(routes) / n)
+print(",".join(routes[(k - 1) * size:k * size]))
+PY
+)
+  export MERGE_PART=1
+  [ "${PART%/*}" != 1 ] || rm -f "$OUT/${ONLY/:/-}.json"   # part 1 starts the rep's file afresh
+fi
 case "$MODE" in
   run)
     export SUITES=http HTTP_CONCS="$CONCS" HTTP_ROUTES="${ROUTES//,/ }" HTTP_SECS=${SECS:-8} IDLE_SECS=${IDLE_SECS:-5}

@@ -400,14 +400,29 @@ run_rep() {
   local cg_peak; cg_peak=$(( $(cat "$cg/memory.peak" 2>/dev/null || echo 0) / 1048576 ))
   kill "$SAMPLER" 2>/dev/null || true; SAMPLER=""
   python3 - "$f" "$app" "$rep" "$cold_ms" "$idle_cur" "$idle_anon" "$peak" "$cg_peak" "$http_json" "$cable_json" "$upload_json" "$load_start" "$(cat /proc/loadavg)" "$rows_json" "$probe_json" "$probe_start" "$(host_probe)" <<'PY'
-import json, sys
+import json, os, sys
 f, app, rep, cold, idle_cur, idle_anon, peak, cg_peak, http, cable, upload, load0, load, rows, probe, host0, host1 = sys.argv[1:]
-json.dump({
+result = {
   "app": app, "rep": int(rep), "cold_start_ms": int(cold),
   "memory": {"idle_current_mb": int(idle_cur), "idle_anon_mb": int(idle_anon), **json.loads(peak), "cgroup_peak_mb": int(cg_peak)},
   "http": json.loads(http), "cable": json.loads(cable), "upload": json.loads(upload), "loadavg_start": load0, "loadavg_end": load,
   "post_rows": json.loads(rows), "probe": json.loads(probe), "host_probe_start": json.loads(host0), "host_probe_end": json.loads(host1),
-}, open(f, "w"), indent=1)
+}
+# MERGE_PART=1 (bench/quick --part): this run measured some of the routes of a rep that an earlier part of the same unit started;
+# its routes join that file's (a route already there is replaced), the rest of the earlier part stays.
+if os.environ.get("MERGE_PART") == "1" and os.path.exists(f):
+    old = json.load(open(f))
+    redone = {h["route"] for h in result["http"]}
+    result["http"] = [h for h in old["http"] if h["route"] not in redone] + result["http"]
+    result["probe"] = [x for x in old["probe"] if x["route"] not in redone] + result["probe"]
+    result["post_rows"] = old["post_rows"] + result["post_rows"] if "post_message" not in redone else result["post_rows"]
+    for k in ("peak_current_mb", "peak_anon_mb", "cgroup_peak_mb"):
+        result["memory"][k] = max(old["memory"].get(k, 0), result["memory"].get(k, 0))
+    result["parts"] = old.get("parts", 1) + 1
+    for k in ("cold_start_ms", "loadavg_start", "host_probe_start"):
+        result[k] = old[k]
+    result["memory"]["idle_current_mb"], result["memory"]["idle_anon_mb"] = old["memory"]["idle_current_mb"], old["memory"]["idle_anon_mb"]
+json.dump(result, open(f, "w"), indent=1)
 PY
   docker rm -f "$CONTAINER" >/dev/null
   rm -rf "$WORK/$app"
