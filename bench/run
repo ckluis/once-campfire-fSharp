@@ -441,7 +441,7 @@ write_env() {
   echo "repo HEAD: $(git -C "$ROOT" rev-parse --short HEAD) (dirty: $(git -C "$ROOT" status --porcelain -- src rust Cargo.toml Cargo.lock | wc -l) files under src/ and rust/)"
   echo "work dir (seed copies): $WORK ($(findmnt -T "$WORK" -n -o FSTYPE))"
   echo "loadgen: $LOADGEN ($(stat -c %y "$LOADGEN" | cut -d. -f1)), built with $RUST_BUILD_IMAGE"
-  echo "schedule: apps ${APPS}, reps ${REPS}; suites: ${SUITES}; http secs ${HTTP_SECS}, concs ${HTTP_CONCS}, routes ${HTTP_ROUTES}, warm-up ${WARMUP_SECS}s at each route and concentration, idle ${IDLE_SECS}s"
+  echo "schedule: apps ${APPS}, reps ${REPS}; suites: ${SUITES}; http secs ${HTTP_SECS}, concs ${HTTP_CONCS}, routes ${SCHEDULE_ROUTES:-$HTTP_ROUTES}, warm-up ${WARMUP_SECS}s at each route and concentration, idle ${IDLE_SECS}s"
   echo "log retention: ${LOG_MAX_FILE} x ${LOG_MAX_SIZE} (json-file)"
 }
 # `BENCH_RUN_LIB=1 source bench/run` stops here with the functions above defined (bench/breakdown uses them).

@@ -59,6 +59,7 @@ OUT=${OUT:-$ROOT/bench/results/quick-$(date +%Y%m%d-%H%M%S)}
 [ -z "$WARMUP" ] || export WARMUP_SECS=$WARMUP
 [ -z "$WARMUP_MAX" ] || export WARMUP_MAX_SECS=$WARMUP_MAX
 
+export SCHEDULE_ROUTES="${ROUTES//,/ }${PART:+ (in parts, --part $PART is one slice of them)}"
 if [ -n "$PART" ]; then
   # The Kth of N slices of the route list: the first ceil(len/N) routes are part 1, and so on.
   ROUTES=$(python3 - "$ROUTES" "$PART" <<'PY'
