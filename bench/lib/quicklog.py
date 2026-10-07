@@ -154,7 +154,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("compare"); c.add_argument("dir")
-    l = sub.add_parser("log"); l.add_argument("dir"); l.add_argument("--unit", required=True, choices=["database", "runtime", "crypto-logging", "post", "final"])
+    l = sub.add_parser("log"); l.add_argument("dir"); l.add_argument("--unit", required=True, choices=["database", "runtime", "crypto-logging", "post", "final", "threadpool"])
     l.add_argument("--tier", type=int, required=True, choices=[2, 3]); l.add_argument("--change", required=True)
     l.add_argument("--kept", required=True, choices=["true", "false"]); l.add_argument("--build", default="mounted"); l.add_argument("--commit")
     a = ap.parse_args()
