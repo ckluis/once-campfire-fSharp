@@ -116,7 +116,7 @@ def journal_info(path):
                 a = info['agents'].setdefault(aid, {})
                 a['finished'] = True
                 if isinstance(r, dict) and 'findings' in r:
-                    c = collections.Counter(x.get('severity') for x in r.get('findings') or [])
+                    c = collections.Counter((x.get('severity') if isinstance(x, dict) else 'note') for x in r.get('findings') or [])
                     a['findings'] = {s: c.get(s, 0) for s in ('critical', 'major', 'minor')}
     info['state'] = 'done' if started and results == started else ('running' if started else 'unknown')
     return info

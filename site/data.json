@@ -693,17 +693,17 @@
           "key": "phase6",
           "n": "6",
           "title": "Parity loop",
-          "status": "pending",
+          "status": "done",
           "target": "parity/bin/compare, lean then the full matrix, fix, repeat until no new failures. Done when the allowlist is no larger than Rust's.",
-          "result": null
+          "result": "F# matches the Rust port on all 214 parity cells across 5 seeds: 212 pass, 1 allowed, and 1 fail that Rust shares (the manifest logo URL). Captures are byte-identical to Rust's. The 191 'failures' first seen were the copied harness looking for the overrides at Rust's path."
         },
         {
           "key": "phase7",
           "n": "7",
           "title": "Performance",
-          "status": "in-progress",
+          "status": "done",
           "target": "Profile and optimize against bench/run. Aim: faster than Rust on all five workloads, rows verified for posts; close counts as a win and is reported as close. Known gaps: signed-cookie requests, identity bodies through Kestrel, Db row reads, rich text, plain-frame Cable fan-out, tail latency.",
-          "result": null
+          "result": "Same-session re-baseline (3 reps, Rust re-measured within 2.7% of its stored numbers): F# 1.24-1.33x Rust at c=16 and 1.22-1.31x at c=64, spending 8-23% less CPU per request. Unit 7.5 then turned off thread-pool hill climbing: p99 on the read pages fell to Rust's level and F# reached 1.22-1.40x at c=16. Rust still leads on c=1 CPU, memory, cold start and Cable fan-out."
         }
       ],
       "process_change": {
@@ -749,19 +749,19 @@
       "steps": [
         {
           "title": "Own repository",
-          "detail": "ckluis/once-campfire-fsharp, MIT, with this page on GitHub Pages.",
-          "status": "pending",
-          "link": null
+          "detail": "ckluis/once-campfire-fSharp, MIT, with this page on GitHub Pages: opened as a pull request for Chris to merge.",
+          "status": "in-progress",
+          "link": "https://github.com/ckluis/once-campfire-fSharp"
         },
         {
           "title": "README with results",
-          "detail": "Ratios to Rust from bench/run, with the method and the known differences.",
-          "status": "pending",
+          "detail": "Rails, Rust and F# from the same-session bench/run, with the method, the caveats and the known differences.",
+          "status": "done",
           "link": null
         },
         {
           "title": "Upstream README PR",
-          "detail": "A row in basecamp/once-campfire's \"Other implementations\" table, for them to review and host.",
+          "detail": "A row in basecamp/once-campfire's \"Other implementations\" table, for the maintainers to review, re-measure and host. Waits for Chris's review of the published repo and this page.",
           "status": "pending",
           "link": null
         }
@@ -1007,7 +1007,9 @@
       "phase5": "Phase 5: App",
       "phase5b": "Phase 5b: Baseline",
       "phase7": "Phase 7: Unit 7.0, the harness",
-      "phase7b": "Phase 7: Tuning"
+      "phase7b": "Phase 7: Tuning",
+      "phase6": "Phase 6: Parity",
+      "phase7c": "Phase 7: Unit 7.5, threads"
     },
     "harness": {
       "phase1": {
@@ -1070,32 +1072,32 @@
     ]
   },
   "tokens": {
-    "as_of": "2026-10-06T17:18:55.422Z",
+    "as_of": "2026-10-07T09:19:17.818Z",
     "rule": "usage summed once per API message id; processed = input + cache writes + cache reads + output; fresh = input + cache writes + output",
     "grand": {
-      "input": 7896,
-      "cache_write": 26902866,
-      "cache_read": 1231215573,
-      "output": 965652,
-      "calls": 3929,
-      "processed": 1259091987,
-      "fresh": 27876414
+      "input": 10070,
+      "cache_write": 41750613,
+      "cache_read": 1464923496,
+      "output": 1180584,
+      "calls": 5000,
+      "processed": 1507864763,
+      "fresh": 42941267
     },
     "main": {
       "totals": {
-        "input": 744,
-        "cache_write": 2989948,
-        "cache_read": 111141700,
-        "output": 316067,
-        "calls": 353,
-        "processed": 114448459,
-        "fresh": 3306759
+        "input": 1026,
+        "cache_write": 4433564,
+        "cache_read": 196639380,
+        "output": 406993,
+        "calls": 479,
+        "processed": 201480963,
+        "fresh": 4841583
       },
       "models": {
-        "Opus 5.5": 353
+        "Opus 5.5": 479
       },
       "first": "2026-10-05T14:47:25.428Z",
-      "last": "2026-10-06T17:16:53.273Z",
+      "last": "2026-10-07T09:19:17.818Z",
       "windows": [
         {
           "label": "Hand-over and M4 rebaseline",
@@ -1172,13 +1174,13 @@
           "chapter": "tuning",
           "from": "2026-10-06T11:58:00",
           "totals": {
-            "input": 200,
-            "cache_write": 630165,
-            "cache_read": 51409797,
-            "output": 99547,
-            "calls": 97,
-            "processed": 52139709,
-            "fresh": 729912
+            "input": 482,
+            "cache_write": 2073781,
+            "cache_read": 136907477,
+            "output": 190473,
+            "calls": 223,
+            "processed": 139172213,
+            "fresh": 2264736
           }
         }
       ]
@@ -2073,7 +2075,7 @@
         "script": "campfire-fs-phase7b.js",
         "key": "phase7b",
         "title": "Phase 7: Tuning",
-        "state": "running",
+        "state": "done",
         "agents": [
           {
             "id": "a8632e7b721c91aa5",
@@ -2081,33 +2083,347 @@
             "role": "tune",
             "model": "Sonnet 5.5",
             "first": "2026-10-06T15:15:46.792Z",
-            "last": "2026-10-06T17:18:23.270Z",
+            "last": "2026-10-06T17:19:11.600Z",
             "totals": {
-              "input": 260,
-              "cache_write": 2255891,
-              "cache_read": 31645855,
-              "output": 1030,
-              "calls": 130,
-              "processed": 33903036,
-              "fresh": 2257181
+              "input": 262,
+              "cache_write": 2256802,
+              "cache_read": 32041588,
+              "output": 5751,
+              "calls": 131,
+              "processed": 34304403,
+              "fresh": 2262815
             },
-            "final_context": 395735,
-            "final_output": 5,
-            "finished": false
+            "final_context": 396646,
+            "final_output": 4721,
+            "finished": true
+          },
+          {
+            "id": "ae210ab9a46a2d391",
+            "label": "tune:runtime",
+            "role": "tune",
+            "model": "Sonnet 5.5",
+            "first": "2026-10-06T17:19:14.380Z",
+            "last": "2026-10-06T20:56:16.283Z",
+            "totals": {
+              "input": 222,
+              "cache_write": 3618441,
+              "cache_read": 15384562,
+              "output": 4704,
+              "calls": 111,
+              "processed": 19007929,
+              "fresh": 3623367
+            },
+            "final_context": 256282,
+            "final_output": 3553,
+            "finished": true
+          },
+          {
+            "id": "acf01a6bdddeb6335",
+            "label": "tune:crypto-logging",
+            "role": "tune",
+            "model": "Sonnet 5.5",
+            "first": "2026-10-06T20:56:19.032Z",
+            "last": "2026-10-06T22:44:21.361Z",
+            "totals": {
+              "input": 316,
+              "cache_write": 1921658,
+              "cache_read": 33644502,
+              "output": 5594,
+              "calls": 158,
+              "processed": 35572070,
+              "fresh": 1927568
+            },
+            "final_context": 344266,
+            "final_output": 4180,
+            "finished": true
+          },
+          {
+            "id": "aef90e1d95bc54119",
+            "label": "tune:post",
+            "role": "tune",
+            "model": "Sonnet 5.5",
+            "first": "2026-10-06T22:44:24.879Z",
+            "last": "2026-10-07T00:54:32.698Z",
+            "totals": {
+              "input": 396,
+              "cache_write": 3183505,
+              "cache_read": 43900380,
+              "output": 11399,
+              "calls": 198,
+              "processed": 47095680,
+              "fresh": 3195300
+            },
+            "final_context": 387939,
+            "final_output": 4229,
+            "finished": true
+          },
+          {
+            "id": "a54cd89035d583819",
+            "label": "verify:phase7",
+            "role": "verify",
+            "model": "Opus 5.5",
+            "first": "2026-10-07T00:54:36.487Z",
+            "last": "2026-10-07T01:28:48.694Z",
+            "totals": {
+              "input": 140,
+              "cache_write": 599223,
+              "cache_read": 10351830,
+              "output": 3288,
+              "calls": 70,
+              "processed": 10954481,
+              "fresh": 602651
+            },
+            "final_context": 207613,
+            "final_output": 2389,
+            "finished": true,
+            "findings": {
+              "critical": 0,
+              "major": 0,
+              "minor": 4
+            }
+          },
+          {
+            "id": "a519c8bf87446825c",
+            "label": "fix:phase7",
+            "role": "fix",
+            "model": "Sonnet 5.5",
+            "first": "2026-10-07T01:28:51.561Z",
+            "last": "2026-10-07T01:56:05.384Z",
+            "totals": {
+              "input": 90,
+              "cache_write": 255050,
+              "cache_read": 4124191,
+              "output": 3828,
+              "calls": 45,
+              "processed": 4383159,
+              "fresh": 258968
+            },
+            "final_context": 132158,
+            "final_output": 2426,
+            "finished": true
+          },
+          {
+            "id": "a13790ae952e0d49e",
+            "label": "rebaseline+review",
+            "role": "rebaseline+review",
+            "model": "Opus 5.5",
+            "first": "2026-10-07T01:56:07.584Z",
+            "last": "2026-10-07T06:40:10.026Z",
+            "totals": {
+              "input": 154,
+              "cache_write": 2175168,
+              "cache_read": 9800810,
+              "output": 13325,
+              "calls": 77,
+              "processed": 11989457,
+              "fresh": 2188647
+            },
+            "final_context": 252046,
+            "final_output": 4049,
+            "finished": true
           }
         ],
         "totals": {
-          "input": 260,
-          "cache_write": 2255891,
-          "cache_read": 31645855,
-          "output": 1030,
-          "calls": 130,
-          "processed": 33903036,
-          "fresh": 2257181
+          "input": 1580,
+          "cache_write": 14009847,
+          "cache_read": 149247863,
+          "output": 47889,
+          "calls": 790,
+          "processed": 163307179,
+          "fresh": 14059316
         },
-        "final_context_sum": 395735,
+        "final_context_sum": 1976950,
         "first": "2026-10-06T15:15:46.792Z",
-        "last": "2026-10-06T17:18:23.270Z",
+        "last": "2026-10-07T06:40:10.026Z",
+        "harness": null
+      },
+      {
+        "id": "wf_2752a147-431",
+        "script": "campfire-fs-phase6.js",
+        "key": "phase6",
+        "title": "Phase 6: Parity",
+        "state": "done",
+        "agents": [
+          {
+            "id": "aa8c46bf57aa80d9e",
+            "label": "triage",
+            "role": "triage",
+            "model": "Opus 5.5",
+            "first": "2026-10-07T06:40:56.491Z",
+            "last": "2026-10-07T07:13:45.663Z",
+            "totals": {
+              "input": 136,
+              "cache_write": 381645,
+              "cache_read": 5235345,
+              "output": 4672,
+              "calls": 68,
+              "processed": 5621798,
+              "fresh": 386453
+            },
+            "final_context": 117555,
+            "final_output": 3787,
+            "finished": true
+          },
+          {
+            "id": "a6717e6ee510d4d02",
+            "label": "fix:harness-overrides-mask-path",
+            "role": "fix",
+            "model": "Sonnet 5.5",
+            "first": "2026-10-07T07:13:48.597Z",
+            "last": "2026-10-07T07:15:36.391Z",
+            "totals": {
+              "input": 36,
+              "cache_write": 54964,
+              "cache_read": 791216,
+              "output": 3379,
+              "calls": 18,
+              "processed": 849595,
+              "fresh": 58379
+            },
+            "final_context": 54966,
+            "final_output": 1061,
+            "finished": true
+          },
+          {
+            "id": "ad64aa8235adbf947",
+            "label": "fix:manifest-allowlist-gap-custom_styles",
+            "role": "fix",
+            "model": "Sonnet 5.5",
+            "first": "2026-10-07T07:15:37.675Z",
+            "last": "2026-10-07T07:16:15.663Z",
+            "totals": {
+              "input": 16,
+              "cache_write": 31333,
+              "cache_read": 329157,
+              "output": 1829,
+              "calls": 8,
+              "processed": 362335,
+              "fresh": 33178
+            },
+            "final_context": 50420,
+            "final_output": 844,
+            "finished": true
+          },
+          {
+            "id": "ae5ff8211984ba524",
+            "label": "fix:infra-oom-concurrent-compares",
+            "role": "fix",
+            "model": "Sonnet 5.5",
+            "first": "2026-10-07T07:16:16.684Z",
+            "last": "2026-10-07T07:17:12.779Z",
+            "totals": {
+              "input": 20,
+              "cache_write": 31697,
+              "cache_read": 414053,
+              "output": 1036,
+              "calls": 10,
+              "processed": 446806,
+              "fresh": 32753
+            },
+            "final_context": 50784,
+            "final_output": 938,
+            "finished": true
+          },
+          {
+            "id": "af8d951a1b433304c",
+            "label": "verify:phase6",
+            "role": "verify",
+            "model": "Opus 5.5",
+            "first": "2026-10-07T07:17:13.784Z",
+            "last": "2026-10-07T07:44:45.409Z",
+            "totals": {
+              "input": 94,
+              "cache_write": 161147,
+              "cache_read": 3452305,
+              "output": 2069,
+              "calls": 47,
+              "processed": 3615615,
+              "fresh": 163310
+            },
+            "final_context": 98282,
+            "final_output": 1376,
+            "finished": true
+          }
+        ],
+        "totals": {
+          "input": 302,
+          "cache_write": 660786,
+          "cache_read": 10222076,
+          "output": 12985,
+          "calls": 151,
+          "processed": 10896149,
+          "fresh": 674073
+        },
+        "final_context_sum": 372007,
+        "first": "2026-10-07T06:40:56.491Z",
+        "last": "2026-10-07T07:44:45.409Z",
+        "harness": null
+      },
+      {
+        "id": "wf_80cb3492-86e",
+        "script": "campfire-fs-phase7c.js",
+        "key": "phase7c",
+        "title": "Phase 7: Unit 7.5, threads",
+        "state": "done",
+        "agents": [
+          {
+            "id": "ab24801e5d091f1b8",
+            "label": "tune:7.5-threads-gc",
+            "role": "tune",
+            "model": "Opus 5.5",
+            "first": "2026-10-07T07:45:16.666Z",
+            "last": "2026-10-07T08:52:25.338Z",
+            "totals": {
+              "input": 74,
+              "cache_write": 535406,
+              "cache_read": 2295295,
+              "output": 3303,
+              "calls": 37,
+              "processed": 2834078,
+              "fresh": 538783
+            },
+            "final_context": 100279,
+            "final_output": 2949,
+            "finished": true
+          },
+          {
+            "id": "a6e7c7ef2c961b4dd",
+            "label": "check:7.5",
+            "role": "check",
+            "model": "Opus 5.5",
+            "first": "2026-10-07T08:52:28.029Z",
+            "last": "2026-10-07T09:18:27.049Z",
+            "totals": {
+              "input": 64,
+              "cache_write": 234744,
+              "cache_read": 1729818,
+              "output": 2545,
+              "calls": 32,
+              "processed": 1967171,
+              "fresh": 237353
+            },
+            "final_context": 80430,
+            "final_output": 2252,
+            "finished": true,
+            "findings": {
+              "critical": 0,
+              "major": 0,
+              "minor": 0
+            }
+          }
+        ],
+        "totals": {
+          "input": 138,
+          "cache_write": 770150,
+          "cache_read": 4025113,
+          "output": 5848,
+          "calls": 69,
+          "processed": 4801249,
+          "fresh": 776136
+        },
+        "final_context_sum": 180709,
+        "first": "2026-10-07T07:45:16.666Z",
+        "last": "2026-10-07T09:18:27.049Z",
         "harness": null
       }
     ],
@@ -2116,15 +2432,15 @@
         "label": "Redesign story page around the chart",
         "model": "Opus 5.5",
         "first": "2026-10-06T17:16:42.398Z",
-        "last": "2026-10-06T17:18:55.422Z",
+        "last": "2026-10-06T17:45:10.444Z",
         "totals": {
-          "input": 46,
-          "cache_write": 126088,
-          "cache_read": 2112498,
-          "output": 638,
-          "calls": 23,
-          "processed": 2239270,
-          "fresh": 126772
+          "input": 178,
+          "cache_write": 345327,
+          "cache_read": 18473544,
+          "output": 58952,
+          "calls": 88,
+          "processed": 18878001,
+          "fresh": 404457
         }
       },
       {
@@ -2157,27 +2473,27 @@
         }
       },
       "verify": {
-        "agents": 5,
+        "agents": 7,
         "totals": {
-          "input": 842,
-          "cache_write": 1398006,
-          "cache_read": 72656307,
-          "output": 20774,
-          "calls": 421,
-          "processed": 74075929,
-          "fresh": 1419622
+          "input": 1076,
+          "cache_write": 2158376,
+          "cache_read": 86460442,
+          "output": 26131,
+          "calls": 538,
+          "processed": 88646025,
+          "fresh": 2185583
         }
       },
       "fix": {
-        "agents": 5,
+        "agents": 9,
         "totals": {
-          "input": 552,
-          "cache_write": 697917,
-          "cache_read": 28070793,
-          "output": 19403,
-          "calls": 276,
-          "processed": 28788665,
-          "fresh": 717872
+          "input": 714,
+          "cache_write": 1070961,
+          "cache_read": 33729410,
+          "output": 29475,
+          "calls": 357,
+          "processed": 34830560,
+          "fresh": 1101150
         }
       },
       "reverify": {
@@ -2219,34 +2535,34 @@
     },
     "by_model": {
       "Opus 5.5": {
-        "agents": 13,
+        "agents": 19,
         "totals": {
-          "input": 2190,
-          "cache_write": 5803487,
-          "cache_read": 221657070,
-          "output": 410908,
-          "calls": 1076,
-          "processed": 227873655,
-          "fresh": 6216585
+          "input": 3266,
+          "cache_write": 11553675,
+          "cache_read": 356381199,
+          "output": 589350,
+          "calls": 1598,
+          "processed": 368527490,
+          "fresh": 12146291
         }
       },
       "Sonnet 5.5": {
-        "agents": 23,
+        "agents": 30,
         "totals": {
-          "input": 5706,
-          "cache_write": 21099379,
-          "cache_read": 1009558503,
-          "output": 554744,
-          "calls": 2853,
-          "processed": 1031218332,
-          "fresh": 21659829
+          "input": 6804,
+          "cache_write": 30196938,
+          "cache_read": 1108542297,
+          "output": 591234,
+          "calls": 3402,
+          "processed": 1139337273,
+          "fresh": 30794976
         }
       }
     },
-    "workflow_agents": 34
+    "workflow_agents": 47
   },
   "commits": {
-    "total": 144,
+    "total": 200,
     "by_phase_window": {
       "phase0": 1,
       "phase1": 12,
@@ -2256,7 +2572,9 @@
       "phase5": 28,
       "phase5b": 3,
       "phase7": 8,
-      "phase7b": 19,
+      "phase7b": 65,
+      "phase6": 3,
+      "phase7c": 7,
       "after": 0
     }
   }

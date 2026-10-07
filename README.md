@@ -34,9 +34,12 @@ in alternating order ([`bench/results/phase7-final.md`](bench/results/phase7-fin
 
 Every response was 2xx, every post's row was counted, and decoded bodies are identical to the Rust port's. F# spends
 8-23% less CPU per request than Rust at 16 and 64 connections. ¹ The room page settles about 6% lower after 80 s,
-when the thread pool grows (about 1.33×). Where Rust still leads: CPU per request at a single connection, p99 latency on
-the read pages, memory, cold start and Action Cable fan-out (see the results file). Part of the lead is how the request
-log is written: F# batches plain lines, the Rust port writes one coloured line per request.
+when the thread pool grows (about 1.33×). A last tuning unit then turned off the thread pool's hill climbing
+([`bench/results/phase7-unit-7.5.md`](bench/results/phase7-unit-7.5.md), F# re-measured against these Rust medians):
+p99 on the room, messages and sidebar pages fell to Rust's level (about 1.0-1.1 ms at 16 clients) and F# ran 1.22-1.40×
+Rust. Where Rust still leads: CPU per request at a single connection, memory, cold start and Action Cable fan-out (see
+the results files). Part of the lead is how the request log is written: F# batches plain lines, the Rust port writes one
+coloured line per request.
 
 ## Running it
 
