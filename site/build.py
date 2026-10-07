@@ -11,10 +11,13 @@ outside, keep focus inside while open, and give it back on close.
 
 bench/progress/build.py runs this after every logged tuning run, so the chart stays current.
 """
+import glob
+import hashlib
 import html
 import json
 import os
 import re
+import statistics
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -268,6 +271,122 @@ def hero(d, cl, f):
             'Hollow grey dots were tried and reverted. Latest: %s.</span>%s</figcaption></figure>'
             '<p class="btw" id="btw"><a href="#p-muse">(btw, Muse sucks)</a> <span>How this started, and why none of its numbers are on the chart.</span></p>'
             '</div></section>' % (head, live, tiles, cl['chart'], e(last_t), details('p-climb', 'How to read it')))
+
+
+# ---------------------------------------------------------------- same pixels, different engines
+
+def room_bench(where):
+    """Room page req/s per app and concurrency over a bench/run directory's reps: {app: {conc: (median, lo, hi)}}."""
+    reps = {}
+    for app in ('reference', 'rust', 'fsharp'):
+        for p in sorted(glob.glob(os.path.join(REPO, where, app + '-[0-9].json'))):
+            for run in json.load(open(p, encoding='utf-8'))['http']:
+                if run.get('route') == 'room_show' and run.get('gzip'):
+                    reps.setdefault(app, {}).setdefault(run['conc'], []).append(run['rps'])
+    return {a: {c: (statistics.median(v), min(v), max(v)) for c, v in cs.items()} for a, cs in reps.items()}
+
+
+def same_pixels_facts(d):
+    sp = d.get('same_pixels')
+    if not sp:
+        return None
+    b = sp['bench']
+    rb = room_bench(b['dir'])
+    apps = [dict(a, rate=rb.get(a['bench_app'], {}).get(b['conc'], (None,))[0]) for a in sp['apps']]
+    if any(a['rate'] is None for a in apps):
+        return None
+    # The badge is earned, not asserted: the committed thumbnails, one from each app's capture, must be the same bytes too.
+    files = {hashlib.sha256(open(os.path.join(REPO, a['thumb']), 'rb').read()).hexdigest() for a in apps}
+    same = sp['identical'] and len(files) == 1 and bool(sp.get('image')) and os.path.exists(os.path.join(REPO, sp['image']))
+    return dict(sp, apps=apps, rb=rb, files_identical=len(files) == 1, same=same)
+
+
+def same_pixels(sp):
+    """One screenshot (the three apps render it to the same pixels) beside the three engines, each counting at its rate."""
+    if not sp:
+        return ''
+    by = {a['key']: a for a in sp['apps']}
+    rails, rust = by['rails']['rate'], by['rust']['rate']
+    rows = []
+    for i, a in enumerate(sp['apps']):
+        vs = {'rails': 'the original',
+              'rust': '%.0f&times; Rails' % (a['rate'] / rails),
+              'fsharp': '%.2f&times; Rust &middot; %.0f&times; Rails' % (a['rate'] / rust, a['rate'] / rails)}.get(a['key'], '')
+        rows.append(
+            '<li class="sbs-row sbs-%s" style="--i:%d" data-rate="%.1f">'
+            '<p class="sbs-name"><b>%s</b><em class="sbs-tag">%s</em><span class="sbs-x">%s</span></p>'
+            '<p class="sbs-rate"><b class="sbs-n">%s</b><span class="sbs-u sbs-u-rate">requests a second</span>'
+            '<span class="sbs-u sbs-u-live">served while you watch, at %s a second</span></p>'
+            '<span class="sbs-lane" aria-hidden="true"></span></li>'
+            % (e(a['key']), i, a['rate'], e(a['name']), e(a['tag']), vs, n(round(a['rate'])), n(round(a['rate']))))
+    if sp['same']:
+        badge = ('<span class="sbs-badge"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9"/>'
+                 '<path d="M5.5 10.4l3 3 6-6.6"/></svg>Same pixels</span>')
+        shot = ('<figure class="sbs-shot reveal"><div class="sbs-frame"><img src="%s" width="1440" height="900" decoding="async" '
+                'alt="The All Talk room, signed in as David: the page Rails, Rust and F# each render to these same pixels."></div>'
+                '<figcaption>%s<span>One screenshot, because the three are one: Rails&#39;, Rust&#39;s and F#&#39;s captures of this page are byte-identical.</span>'
+                '</figcaption></figure>' % (e(sp['image']), badge))
+    else:
+        shot = ('<figure class="sbs-shot sbs-three reveal">%s<figcaption><span class="sbs-badge sbs-differ">The captures differ</span>'
+                '<span>Each app&#39;s own capture; the panel says where they differ.</span></figcaption></figure>'
+                % ''.join('<div class="sbs-frame"><img src="%s" width="640" height="400" decoding="async" alt="The All Talk room as %s renders it."></div>'
+                          % (e(a['thumb']), e(a['name'])) for a in sp['apps']))
+    return ('<section class="sbs" id="sbs" aria-labelledby="sbs-h"><div class="wrap sbs-grid">%s'
+            '<div class="sbs-copy reveal"><p class="kicker">Same pixels, different engines &middot; the room page</p>'
+            '<h2 id="sbs-h">Same software.</h2>'
+            '<ol class="sbs-rows">%s</ol>'
+            '<p class="sbs-cap"><span>Each counter ticks at that engine&#39;s measured rate for this page, signed in, at 16 connections.</span>%s</p>'
+            '</div></div></section>' % (shot, ''.join(rows), details('p-sbs', 'How we know')))
+
+
+def p_sbs(sp):
+    if not sp:
+        return ''
+    rb, b = sp['rb'], sp['bench']
+    cell = lambda v: '%s [%s&ndash;%s]' % (n(round(v[0])), n(round(v[1])), n(round(v[2])))
+    rows = []
+    for c in sorted(rb['fsharp']):
+        ra, ru, fs = rb['reference'][c], rb['rust'][c], rb['fsharp'][c]
+        rows.append('<tr><th scope="row">%d</th><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td><td class="num">%.2f&times;</td><td class="num">%.0f&times;</td></tr>'
+                    % (c, cell(ra), cell(ru), cell(fs), fs[0] / ru[0], fs[0] / ra[0]))
+    tbl = ('<div class="tw"><table><caption>Room page, requests a second: median [min&ndash;max] of 3 reps</caption><thead><tr>'
+           '<th scope="col">Connections</th><th scope="col" class="num">Rails</th><th scope="col" class="num">Rust</th><th scope="col" class="num">F#</th>'
+           '<th scope="col" class="num">F# / Rust</th><th scope="col" class="num">F# / Rails</th></tr></thead><tbody>%s</tbody></table></div>' % ''.join(rows))
+    thumbs = ''.join('<figure><div class="sbs-frame"><img src="%s" width="640" height="400" loading="lazy" decoding="async" alt="The All Talk room as %s renders it."></div>'
+                     '<figcaption><b>%s</b><span><code>parity/out/%s/%s</code></span><span>%s vs Rails &middot; PNG <code>%s&hellip;</code></span></figcaption></figure>'
+                     % (e(a['thumb']), e(a['name']), e(a['name']), e(a['run']), e(a['side']), e(a['harness_verdict']), e(a['capture_sha256'][:12]))
+                     for a in sp['apps'])
+    host = ''
+    rep = os.path.join(REPO, b['dir'], 'report.md')
+    if os.path.exists(rep):
+        txt = open(rep, encoding='utf-8').read()
+        m = re.search(r'^server cpus: ([^;\n]+);\s*loadgen cpus: ([^;\n]+)', txt, re.M)
+        if m:
+            host = ' The app ran on CPUs %s, the load generator on %s, inside the colima Linux VM.' % (e(m.group(1).split(' ')[0]), e(m.group(2).strip()))
+    verdict = ('<p><b>Same pixels, checked.</b> The three %s PNGs are byte-identical (SHA-256 <code>%s&hellip;</code>), and decoding them gives the same pixels '
+               '(SHA-256 of the RGB data <code>%s&hellip;</code>). The thumbnails above are made one from each app&#39;s own capture, resized to %s, lossless; '
+               'they come out the same bytes too, which <code>site/build.py</code> checks on every build before it shows the badge. '
+               'The big screenshot on the page is the Rails capture at full size, lossless, so it is the F# and Rust pixels as well.</p>'
+               % (e(sp['viewport']), e(sp['apps'][0]['capture_sha256'][:16]), e((sp.get('pixels_sha256') or '')[:16]), e(sp['thumb_size']))) if sp['same'] else \
+              '<p><b>The captures differ.</b> Compare the hashes under the thumbnails.</p>'
+    body = ''.join([
+        '<p class="lead">%s. Each picture is the parity harness&#39;s own capture of that page from one app: Chromium, %s, light scheme, '
+        'the default seed with the clock frozen, so nothing on the page depends on when it ran.</p>' % (e(sp['page']), e(sp['viewport'])),
+        '<div class="sbs-thumbs">%s</div>' % thumbs,
+        verdict,
+        '<p class="src">Rails and Rust come from one run (<code>PARITY_CANDIDATE_APP=rust parity/bin/candidate compare</code>), Rails and F# from another '
+        '(the default candidate), state <code>%s</code>, cell <code>%s</code>. A pass means every layer the harness compares, pixels, server HTML, live DOM, '
+        'accessibility tree, network and Cable, equal to Rails. Made by <a href="%s">site/same_pixels.py</a>.</p>' % (e(sp['state']), e(sp['cell']), e(src('site/same_pixels.py'))),
+        '<h3>The counters</h3>',
+        '<p>Each counter adds its engine&#39;s median requests a second for this page at %d connections, for every second the section is on screen, '
+        'and its row of dots moves at a speed in the same proportion. After ten seconds Rails has served about %s and F# about %s. '
+        'Without JavaScript, or with reduced motion, they show the rates and nothing moves.</p>'
+        % (b['conc'], n(round(sp['apps'][0]['rate'] * 10)), n(round(sp['apps'][-1]['rate'] * 10))),
+        tbl,
+        '<p class="src">Signed in as David, keep-alive, gzip, 8-second runs after a warm-up that waits for each app to settle.%s '
+        'Source: <a href="%s">%s/report.md</a>, the Phase 7 re-baseline with all three apps in the same run.</p>' % (host, e(src(b['dir'] + '/report.md')), e(b['dir'])),
+    ])
+    return panel('p-sbs', 'Same pixels, different engines', 'How we know', body, 'sbs')
 
 
 def numbers(d, f):
@@ -793,6 +912,41 @@ s.strike::after{content:"";position:absolute;left:-4%;right:-4%;top:47%;height:.
 .more-row{padding:40px 0 56px;border-top:1px solid var(--line-2)}.more-row .links{margin-top:0}
 .sheet-body h4{margin:22px 0 8px;font-size:16px}
 .sheet .vs{margin:22px 0}
+/* same pixels, different engines: one screenshot, three engines */
+.sbs{padding:clamp(36px,5vw,64px) 0 clamp(36px,5vw,64px);border-top:1px solid var(--line-2);scroll-margin-top:52px}
+.sbs-grid{display:grid;gap:clamp(24px,4vw,56px);align-items:center;grid-template-columns:minmax(0,1fr)}
+@media (min-width:900px){.sbs-grid{grid-template-columns:minmax(0,1.08fr) minmax(0,1fr)}}
+.sbs-shot,.sbs-copy{margin:0;min-width:0}
+.sbs-frame{border-radius:16px;overflow:hidden;border:1px solid var(--line);background:#fff;box-shadow:var(--shadow)}
+.sbs-frame img{display:block;width:100%;height:auto;aspect-ratio:8/5}
+.sbs-shot figcaption{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-top:14px;color:var(--muted);font-size:13.5px}
+.sbs-shot figcaption>span:last-child{flex:1 1 260px;min-width:0}
+.sbs-three{display:grid;gap:10px}
+.sbs h2{font:400 clamp(44px,6.4vw,84px)/.95 var(--display);letter-spacing:-.02em;margin:0 0 18px;text-wrap:balance}
+.sbs-badge{display:inline-flex;align-items:center;gap:8px;padding:7px 14px 7px 9px;border-radius:999px;font-weight:650;font-size:14.5px;color:var(--good);white-space:nowrap;
+  background:color-mix(in srgb,var(--good) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--good) 45%,var(--line))}
+.sbs-badge svg{width:19px;height:19px;flex:none}.sbs-badge circle{fill:var(--good)}.sbs-badge path{fill:none;stroke:var(--surface);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.sbs-badge.sbs-differ{color:var(--crit);border-color:var(--crit);background:var(--surface)}
+.sbs-rows{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:20px;background:var(--surface);box-shadow:var(--shadow);overflow:hidden}
+.sbs-row{--c:var(--muted);display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:4px 16px;padding:16px 18px 0}
+.sbs-row+.sbs-row{border-top:1px solid var(--line-2)}
+.sbs-rust{--c:var(--s1)}.sbs-fsharp{--c:var(--accent)}
+.sbs-name{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:0 0 6px;min-width:0}.sbs-name b{font-size:18px;letter-spacing:-.01em}
+.sbs-tag{font:700 11.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;padding:5px 9px;border-radius:999px;color:var(--c);
+  border:1px solid color-mix(in srgb,var(--c) 50%,var(--line));background:color-mix(in srgb,var(--c) 8%,var(--surface))}
+.sbs-x{flex-basis:100%;font-size:13px;font-weight:600;color:var(--ink-2)}
+.sbs-rate{display:flex;flex-direction:column;align-items:flex-end;text-align:right;margin:0 0 8px;min-width:0}
+.sbs-n{font:400 clamp(40px,4.2vw,58px)/1 var(--display);letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--ink)}
+.sbs-fsharp .sbs-n{background:linear-gradient(160deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sbs-u{color:var(--muted);font-size:12.5px}.sbs-u-live{display:none}.sbs.live .sbs-u-live{display:block}.sbs.live .sbs-u-rate{display:none}
+.sbs-lane{grid-column:1/-1;display:block;height:10px;margin:0 -18px;border-top:1px solid var(--line-2);background-color:color-mix(in srgb,var(--c) 7%,var(--surface));
+  background-image:radial-gradient(circle,var(--c) 0 2.2px,transparent 2.8px);background-size:16px 10px;background-repeat:repeat-x;background-position:0 0}
+.sbs-cap{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between;color:var(--muted);font-size:13.5px;margin:16px 0 0}
+.sbs-cap>span{flex:1 1 260px;min-width:0}
+.sbs-thumbs{display:grid;gap:10px;grid-template-columns:repeat(3,minmax(0,1fr));margin:18px 0}
+.sbs-thumbs figure{margin:0;min-width:0}.sbs-thumbs .sbs-frame{border-radius:10px;box-shadow:none}
+.sbs-thumbs figcaption{display:flex;flex-direction:column;gap:2px;margin-top:8px;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}.sbs-thumbs figcaption b{color:var(--ink);font-size:14px}
+@media (max-width:560px){.sbs-thumbs{grid-template-columns:minmax(0,1fr)}.sbs-row{grid-template-columns:minmax(0,1fr);gap:2px;padding:14px 14px 0}.sbs-lane{margin:0 -14px}.sbs-x{flex-basis:auto;margin-left:auto}.sbs-rate{align-items:flex-start;text-align:left}.sbs-n{font-size:40px}}
 /* footer */
 footer.site{border-top:1px solid var(--line-2);padding:40px 0 64px;color:var(--muted);font-size:14px}
 footer.site p{max-width:860px}
@@ -944,6 +1098,19 @@ JS = r"""
     var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){show(en.target);io.unobserve(en.target);}});},{rootMargin:'0px 0px -10% 0px',threshold:0.08});
     els.forEach(function(el){io.observe(el);});
   }else{els.forEach(show);}
+  // same pixels, different engines: each counter adds its engine's measured req/s for every second the section is on screen,
+  // and its row of dots moves at a speed in proportion. Without JS or with reduced motion the HTML shows the rates and nothing moves.
+  var sbs=document.getElementById('sbs');
+  if(sbs&&!reduce&&'IntersectionObserver' in window){
+    var lanes=[].slice.call(sbs.querySelectorAll('.sbs-row')).map(function(t){return {rate:parseFloat(t.getAttribute('data-rate'))||0,n:t.querySelector('.sbs-n'),lane:t.querySelector('.sbs-lane'),c:0,x:0};});
+    var peak=Math.max.apply(null,lanes.map(function(l){return l.rate;}))||1,running=false,last=0,raf=0;
+    var tick=function(t){var dt=last?Math.min((t-last)/1000,0.1):0;last=t;
+      lanes.forEach(function(l){l.c+=l.rate*dt;l.n.textContent=fmt(Math.floor(l.c),0);l.x=(l.x+160*dt*l.rate/peak)%1600;if(l.lane)l.lane.style.backgroundPosition=l.x.toFixed(2)+'px 0';});
+      if(running)raf=requestAnimationFrame(tick);};
+    new IntersectionObserver(function(es){var vis=es[es.length-1].isIntersecting;
+      if(vis&&!running){if(!sbs.classList.contains('live')){sbs.classList.add('live');lanes.forEach(function(l){l.n.textContent='0';});}running=true;last=0;raf=requestAnimationFrame(tick);}
+      else if(!vis&&running){running=false;cancelAnimationFrame(raf);}},{threshold:0.25}).observe(sbs.querySelector('.sbs-rows'));
+  }
   // on a phone the chart scrolls sideways: start at the latest run
   var sc=document.querySelector('.climb .cc-scroll');if(sc&&sc.scrollWidth>sc.clientWidth)sc.scrollLeft=sc.scrollWidth;
   // draw the climb line once
@@ -1001,17 +1168,18 @@ def build():
     cl = climb_chart.climb()
     f = facts(d, cl)
     phases = d['chapters']['build']['phases']
+    sp = same_pixels_facts(d)
     nav = ''.join('<li><a href="%s">%s</a></li>' % h for h in
-                  [('#climb', 'Climb'), ('#numbers', 'Numbers'), ('#b-port', 'Story'), ('#p-prompts', 'Prompts'), ('#p-tokens', 'Tokens')])
+                  [('#climb', 'Climb')] + ([('#sbs', 'Side by side')] if sp else []) + [('#numbers', 'Numbers'), ('#b-port', 'Story'), ('#p-prompts', 'Prompts'), ('#p-tokens', 'Tokens')])
     beats = [beat_port(d, f), beat_proof(d, f), beat_process(d), more_row()]
-    panels = [p_climb(cl), p_tokens(d), p_muse(d, cl), p_decision(d), p_routine(d, f)] + \
+    panels = [p_climb(cl), p_sbs(sp), p_tokens(d), p_muse(d, cl), p_decision(d), p_routine(d, f)] + \
              [p_phase(d, i, p) for i, p in enumerate(phases)] + \
              [p_proof(d), p_baseline(d), p_process(d), p_delivered(d), p_prompts(d, f)]
     body = ''.join([
         '<a class="skip" href="#main">Skip to content</a>',
         '<header class="bar"><div class="wrap"><a class="brand" href="#top">Campfire <span>in F#</span></a>'
         '<nav aria-label="Sections"><ol>%s</ol></nav><button class="theme" type="button" aria-label="Switch theme"></button></div></header>' % nav,
-        '<main id="main">', hero(d, cl, f), numbers(d, f), ''.join(beats), '</main>',
+        '<main id="main">', hero(d, cl, f), same_pixels(sp), numbers(d, f), ''.join(beats), '</main>',
         '<footer class="site"><div class="wrap"><p><b>Sources.</b> Muse: Ren&#39;s <code>STATUS.md</code>, <code>AI-ORIENTATION.md</code>, '
         '<code>campfire-fs/Program.fs</code> and <code>bench_official.sh</code> from the hand-off zip. Hand-over: the M4 logs '
         '<code>bench-mac-rebaseline.log</code> and <code>bench-mac-rebaseline-run1-badpost.log</code>. The build and tuning: '
