@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Regression test for the one-compare-at-a-time guard in parity/bin/candidate (two concurrent compares OOM-killed
+# Chromium in the colima VM). With a live holder's pid in the lock, `candidate compare` must refuse before starting
+# anything. Run it anywhere bash and the repo are; it touches only a scratch seed dir.
+set -euo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+scratch=$(mktemp -d); trap 'kill "${holder:-}" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+mkdir -p "$scratch/.compare.lock"; sleep 60 & holder=$!; echo "$holder" >"$scratch/.compare.lock/pid"
+out=$(PARITY_SEED_DIR=$scratch "$ROOT/parity/bin/candidate" compare --only nothing 2>&1) && { echo "FAIL: compare ran while another held the lock"; exit 1; }
+case $out in *"another compare is running (pid $holder)"*) echo "ok: second compare refused" ;; *) echo "FAIL: unexpected output: $out"; exit 1 ;; esac

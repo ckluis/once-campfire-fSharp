@@ -173,6 +173,9 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   costs ~500 MB of duplicated dependencies. Differential scripts delete both sides' outputs when the
   comparison passes and keep them only on failure. Run `bin/clean-rust-builds` when you're done measuring,
   and `bin/clean-docker` after rebuilding images (each rebuild leaves gigabytes of old layers in colima).
+- Run one parity compare at a time in colima (6 GB): two at once OOM-kill Chromium and cells error with "browser.newContext: Target
+  page, context or browser has been closed". `parity/bin/candidate compare` refuses a second one (`PARITY_ALLOW_CONCURRENT=1` overrides,
+  for a bigger VM); `parity/bin/test-compare-lock` tests the guard. An error status like that is the harness: re-run those cells with `--only`.
 - Commit each logical unit on the current branch with a message saying what and why. Don't push.
 - Toolchain: .NET SDK 10.0.401 in `~/.dotnet` (`export PATH="$HOME/.dotnet:$PATH"`).
 - Docker runs in colima. Run `parity/`, `bench/` and `reference-tools/` scripts inside the VM,

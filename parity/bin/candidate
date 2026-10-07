@@ -213,8 +213,27 @@ reset() {
   esac
 }
 
+# One compare at a time: two at once (a reference + candidate pair each, 16 workers, Chromium) overran the 6 GB
+# colima VM, the kernel OOM-killed chrome-headless, and cells reported "browser.newContext: Target page, context or
+# browser has been closed" for both targets. PARITY_ALLOW_CONCURRENT=1 skips the check (a bigger VM).
+compare_lock() {
+  [ -z "${PARITY_ALLOW_CONCURRENT:-}" ] || return 0
+  local lock=$SEEDS/.compare.lock holder
+  mkdir -p "$SEEDS"
+  if ! mkdir "$lock" 2>/dev/null; then
+    holder=$(cat "$lock/pid" 2>/dev/null || true)
+    if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+      die "another compare is running (pid $holder); two at once OOM-kill Chromium in the VM. Wait, or set PARITY_ALLOW_CONCURRENT=1"
+    fi
+    rm -rf "$lock"; mkdir "$lock" || die "can't take $lock"
+  fi
+  echo $$ >"$lock/pid"
+  COMPARE_LOCK=$lock
+}
+
 compare() {
   local ports=4111,4112 isolated=3 rest=() seed=${SEED:-default} time=${TIME:-}
+  compare_lock
   while [ $# -gt 0 ]; do
     case "$1" in
       --ports) ports=$2; shift 2 ;;
@@ -250,6 +269,7 @@ compare() {
 
 compare_teardown() {
   local p
+  [ -z "${COMPARE_LOCK:-}" ] || { rm -rf "$COMPARE_LOCK"; COMPARE_LOCK=""; }
   if [ -n "${COMPARE_PID:-}" ]; then kill -TERM "$COMPARE_PID" 2>/dev/null || true; wait "$COMPARE_PID" 2>/dev/null || true; fi
   for p in "${COMPARE_REF_PORTS[@]}"; do "$PARITY/bin/reference" down --port "$p" >/dev/null 2>&1 || true; done
   for p in "${COMPARE_CAND_PORTS[@]}"; do down "$p"; done
