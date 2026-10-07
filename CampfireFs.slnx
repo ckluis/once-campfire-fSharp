@@ -1,0 +1,29 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Campfire.App/Campfire.App.fsproj" />
+    <Project Path="src/Campfire.Assets.Build/Campfire.Assets.Build.fsproj" />
+    <Project Path="src/Campfire.Assets/Campfire.Assets.fsproj" />
+    <Project Path="src/Campfire.Cable/Campfire.Cable.fsproj" />
+    <Project Path="src/Campfire.Db/Campfire.Db.fsproj" />
+    <Project Path="src/Campfire.Kit/Campfire.Kit.fsproj" />
+    <Project Path="src/Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
+    <Project Path="src/Campfire.RichText/Campfire.RichText.fsproj" />
+    <Project Path="src/Campfire.Routes/Campfire.Routes.fsproj" />
+    <Project Path="src/Campfire.Ruby/Campfire.Ruby.fsproj" />
+    <Project Path="src/Campfire.Storage/Campfire.Storage.fsproj" />
+    <Project Path="src/Campfire.Views/Campfire.Views.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Campfire.App.Tests/Campfire.App.Tests.fsproj" />
+    <Project Path="tests/Campfire.Assets.Tests/Campfire.Assets.Tests.fsproj" />
+    <Project Path="tests/Campfire.Cable.Tests/Campfire.Cable.Tests.fsproj" />
+    <Project Path="tests/Campfire.Db.Tests/Campfire.Db.Tests.fsproj" />
+    <Project Path="tests/Campfire.Kit.Tests/Campfire.Kit.Tests.fsproj" />
+    <Project Path="tests/Campfire.RailsCompat.Tests/Campfire.RailsCompat.Tests.fsproj" />
+    <Project Path="tests/Campfire.RichText.Tests/Campfire.RichText.Tests.fsproj" />
+    <Project Path="tests/Campfire.Routes.Tests/Campfire.Routes.Tests.fsproj" />
+    <Project Path="tests/Campfire.Ruby.Tests/Campfire.Ruby.Tests.fsproj" />
+    <Project Path="tests/Campfire.Storage.Tests/Campfire.Storage.Tests.fsproj" />
+    <Project Path="tests/Campfire.Views.Tests/Campfire.Views.Tests.fsproj" />
+  </Folder>
+</Solution>

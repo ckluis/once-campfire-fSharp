@@ -1,0 +1,221 @@
+{
+ "comparable": [
+  {
+   "time": "2026-10-06T05:00:40Z",
+   "unit": "phase 5",
+   "tier": "quick",
+   "change": "First whole-app run: the F# port boots and serves all five workloads",
+   "description": "Unit 5.3 ported the room, message, boost, bot API and search controllers, wired to the fragment cache and gzip-spliced page parts as in Rust. A quick wrk check, 6 s per path, through Docker's published port on the Mac (so it includes the port proxy and is not the benchmark method), F# then Rust, each on a fresh default seed. Rough, but the first time the real port faced Rust end to end.",
+   "commit": "72b938e",
+   "build": "image (Docker port, wrk)",
+   "kept": true,
+   "workloads": {
+    "room_show": {
+     "c16": {
+      "rps": 9130
+     },
+     "c1": {
+      "rps": 1665
+     }
+    },
+    "messages_page": {
+     "c16": {
+      "rps": 9350
+     },
+     "c1": {
+      "rps": 2079
+     }
+    },
+    "sidebar": {
+     "c16": {
+      "rps": 10404
+     },
+     "c1": {
+      "rps": 2263
+     }
+    },
+    "search": {
+     "c16": {
+      "rps": 4321
+     },
+     "c1": {
+      "rps": 1722
+     }
+    },
+    "post_message": {
+     "c16": {
+      "rps": 427
+     },
+     "c1": {
+      "rps": 311
+     }
+    }
+   },
+   "rust": {
+    "room_show": {
+     "c16": {
+      "rps": 11285
+     },
+     "c1": {
+      "rps": 2487
+     }
+    },
+    "messages_page": {
+     "c16": {
+      "rps": 12452
+     },
+     "c1": {
+      "rps": 2673
+     }
+    },
+    "sidebar": {
+     "c16": {
+      "rps": 14237
+     },
+     "c1": {
+      "rps": 2879
+     }
+    },
+    "search": {
+     "c16": {
+      "rps": 5650
+     },
+     "c1": {
+      "rps": 2095
+     }
+    },
+    "post_message": {
+     "c16": {
+      "rps": 554
+     },
+     "c1": {
+      "rps": 449
+     }
+    }
+   }
+  },
+  {
+   "time": "2026-10-06T07:16:45Z",
+   "unit": "baseline",
+   "tier": "5b",
+   "change": "Whole-app baseline: bench/run, Rails vs Rust vs F#, 3 reps",
+   "description": "Plan step 5b, before any tuning. bench/run in the colima VM with the server pinned to CPUs 0-3 and the load generator to 4-7, host networking, 3 reps per app, every response checked (all 200), every post's row counted, decoded bytes identical to Rust's. A skeptical Opus review re-ran it and trimmed F#'s c=16 ratios slightly (room 0.71, messages 0.74) and flagged the 2 s warm-up, which the Phase 7 harness then lengthened. Falco measured at about 29 ns a request.",
+   "commit": "794dc8b",
+   "build": "image e111a4e (2 s warm-up)",
+   "kept": true,
+   "workloads": {
+    "room_show": {
+     "c16": {
+      "rps": 21003.0
+     },
+     "c1": {
+      "rps": 3329.4
+     }
+    },
+    "messages_page": {
+     "c16": {
+      "rps": 23097.3
+     },
+     "c1": {
+      "rps": 4043.9
+     }
+    },
+    "sidebar": {
+     "c16": {
+      "rps": 19115.0
+     },
+     "c1": {
+      "rps": 3738.5
+     }
+    },
+    "search": {
+     "c16": {
+      "rps": 19410.8
+     },
+     "c1": {
+      "rps": 3922.3
+     }
+    },
+    "post_message": {
+     "c16": {
+      "rps": 6186.1
+     },
+     "c1": {
+      "rps": 1909.3
+     }
+    }
+   },
+   "rust": {
+    "room_show": {
+     "c16": {
+      "rps": 28135.4
+     },
+     "c1": {
+      "rps": 6310.2
+     }
+    },
+    "messages_page": {
+     "c16": {
+      "rps": 29405.7
+     },
+     "c1": {
+      "rps": 6624.9
+     }
+    },
+    "sidebar": {
+     "c16": {
+      "rps": 27938.5
+     },
+     "c1": {
+      "rps": 6115.9
+     }
+    },
+    "search": {
+     "c16": {
+      "rps": 26049.1
+     },
+     "c1": {
+      "rps": 5491.1
+     }
+    },
+    "post_message": {
+     "c16": {
+      "rps": 6082.4
+     },
+     "c1": {
+      "rps": 2726.9
+     }
+    }
+   }
+  }
+ ],
+ "prelude": [
+  {
+   "label": "Muse, Ren's F# app (Linux box)",
+   "claim": "F# wins all 5",
+   "ratios": {
+    "Room page": "3.1\u00d7",
+    "Messages page": "7.3\u00d7",
+    "Sidebar": "5.9\u00d7",
+    "Search": "9.3\u00d7",
+    "Post a message": "1.31\u00d7"
+   },
+   "why": "Not comparable: F# served lighter pages than the Rust port, the messages workload hit a 404/204 in the official app, and the first post number came from unauthenticated redirects."
+  },
+  {
+   "label": "Same app, rebaselined on the M4 (5 Oct)",
+   "claim": "Harness bugs fixed",
+   "ratios": {
+    "Room page": "1.83\u00d7",
+    "Messages page": "1.93\u00d7",
+    "Sidebar": "5.4\u00d7",
+    "Search": "28\u00d7",
+    "Post a message": "1.74\u00d7"
+   },
+   "why": "Still not comparable: 50 vs 40 messages a page, a hardcoded timestamp, reversed search order and 30-60% smaller pages. So the work became a full, identical-in-use port, and every dot below renders the same bytes as Rust."
+  }
+ ],
+ "start_time": "2026-10-06T14:25:25Z",
+ "start_time_note": "When the third F# rep of the Phase 7 start finished (fsharp-3.json was written); a checkout resets file times, so it is recorded here.",
+ "start_description": "Unit 7.0 rebuilt the measuring before anyone optimized: container logs capped, every route warmed for at least 30 s until flat within 3%, the host's pinned CPUs probed before each window, CPU per request from the container's cgroup, and bench/quick for Rust and F# only. Rust was measured here once more, and these Rust medians are the stored reference every later dot compares against."
+}

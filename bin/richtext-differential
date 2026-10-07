@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Compares Campfire.RichText with the Rust richtext crate on generated inputs: how markup parses
+# (20 contexts each), and what a message body presents as, as plain text, as an editor value and
+# for its mentions. Any difference fails; the first few are printed.
+#   bin/richtext-differential              the default amounts
+#   bin/richtext-differential 2000 7       that many inputs of each kind, from that seed
+# CORPUS=path/to/big.json seeds the inputs from another corpus (reference-tools/richtext/run.sh).
+# Needs mise for the Rust toolchain (the version in rust/Dockerfile) and python3.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.dotnet:$PATH" DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+count="${1:-20000}"
+seed="${2:-1}"
+corpus="${CORPUS:-tests/Campfire.RichText.Tests/corpus/expected.json}"
+tool=reference-tools/richtext/differential
+out=target/richtext-differential
+mkdir -p "$out"
+
+CARGO_TARGET_DIR="$PWD/target/rust" mise exec rust@1.98.1 -- cargo build --release --quiet --manifest-path "$tool/Cargo.toml"
+dotnet build "$tool/fsharp" -c Release -v quiet -nologo -o "$out/fsharp"
+
+compare() { # kind mode
+  python3 "$tool/generate.py" "$1" "$count" "$seed" "$corpus" > "$out/$1.input"
+  RICHTEXT_CORPUS="$corpus" "target/rust/release/$2" < "$out/$1.input" > "$out/$1.rust"
+  if [ "$2" = parse ]; then
+    dotnet "$out/fsharp/Differential.dll" parse < "$out/$1.input" > "$out/$1.fsharp"
+  else
+    dotnet "$out/fsharp/Differential.dll" pipeline "$corpus" < "$out/$1.input" > "$out/$1.fsharp"
+  fi
+  python3 "$tool/compare.py" "$2" "$out/$1.rust" "$out/$1.fsharp" "$out/$1.input" | sed "s/^/$1: /"
+  local status=${PIPESTATUS[0]}
+  # Both sides' outputs run to gigabytes (depth alone is 1.2 GB each); keep them only to inspect a failure.
+  if [ "$status" -eq 0 ]; then rm -f "$out/$1.input" "$out/$1.rust" "$out/$1.fsharp"; else echo "$1: outputs kept in $out" >&2; fi
+  return "$status"
+}
+
+status=0
+compare fragments parse || status=1
+compare depth parse || status=1
+compare pipeline pipeline || status=1
+compare autolink pipeline || status=1
+exit $status

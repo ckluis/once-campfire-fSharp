@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Tier 1 on Linux: runs a bench/*-micro project in the toolchain image (Debian, OpenSSL, the CLR the app ships on), because crypto
+# and syscall costs on macOS are not the container's. Inside colima, or from the Mac (it re-enters colima):
+#
+#   bench/micro-linux crypto-micro [args of the project]
+#
+# The sources are rsynced into /var/tmp/campfire-micro (obj/ kept there, so the second run is incremental) and the project is run
+# pinned to two cores (the JIT tier-up thread needs a core of its own, or a hot loop stays in unoptimized code for seconds; tier-up starts at once, no PGO). Numbers compare variants only.
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+if [ "$(uname)" = Darwin ]; then
+  exec colima ssh -- bash -c "cd '$root' && bench/micro-linux $(printf '%q ' "$@")"
+fi
+[ $# -ge 1 ] || { echo "usage: bench/micro-linux <crypto-micro|db-micro|...> [args]" >&2; exit 2; }
+project="$1"; shift
+work=/var/tmp/campfire-micro
+mkdir -p "$work/src" "$work/bench"
+rsync -a --delete --exclude bin/ --exclude obj/ "$root/src/" "$work/src/"
+rsync -a --delete --exclude bin/ --exclude obj/ "$root/bench/$project/" "$work/bench/$project/"
+cp "$root/global.json" "$root/Directory.Build.props" "$root/Directory.Packages.props" "$work/"
+exec docker run --rm --cpuset-cpus 2-3 -e DOTNET_TieredPGO=0 -e DOTNET_TC_CallCountingDelayMs=0 \
+  -v "$work:/work" -v "$root/reference:/work/reference:ro" -v "$root/parity:/work/parity:ro" -v campfire-fsharp-nuget:/root/.nuget/packages \
+  -e DOTNET_NOLOGO=1 -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -w /work "${IMAGE:-campfire-fsharp-toolchain:latest}" \
+  dotnet run -c Release --project "bench/$project" -- "$@"

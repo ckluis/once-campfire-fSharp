@@ -1,0 +1,6 @@
+[submodule "reference"]
+	path = reference
+	url = https://github.com/basecamp/once-campfire
+[submodule "rust"]
+	path = rust
+	url = https://github.com/basecamp/once-campfire-rust

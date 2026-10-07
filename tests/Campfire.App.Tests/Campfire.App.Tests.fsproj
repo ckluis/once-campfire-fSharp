@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Shared/Repo.fs" Link="Repo.fs" />
+    <Compile Include="Support.fs" />
+    <Compile Include="ConfigTests.fs" />
+    <Compile Include="UserAgentTests.fs" />
+    <Compile Include="PlatformTests.fs" />
+    <Compile Include="RouteTableTests.fs" />
+    <Compile Include="AppTests.fs" />
+    <Compile Include="JobsTests.fs" />
+    <Compile Include="MiscTests.fs" />
+    <Compile Include="FragmentGlueTests.fs" />
+    <Compile Include="PresentersTests.fs" />
+    <Compile Include="PaginationTests.fs" />
+    <Compile Include="IntegrationsSupport.fs" />
+    <Compile Include="GuardTests.fs" />
+    <Compile Include="HttpTests.fs" />
+    <Compile Include="WebhookTests.fs" />
+    <Compile Include="WebPushTests.fs" />
+    <Compile Include="OpengraphTests.fs" />
+    <Compile Include="RqrcodeTests.fs" />
+    <Compile Include="ControllerTests.fs" />
+    <Compile Include="PresenterAccountsTests.fs" />
+    <Compile Include="AttachmentTests.fs" />
+    <Compile Include="RoomsTests.fs" />
+    <Compile Include="MessagesTests.fs" />
+    <Compile Include="SearchesTests.fs" />
+    <Compile Include="ChannelsSupport.fs" />
+    <Compile Include="ChannelsTests.fs" />
+    <Compile Include="BroadcastsTests.fs" />
+    <Compile Include="RevocationTests.fs" />
+    <Compile Include="ChannelsGoldenTests.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="testdata/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Campfire.App/Campfire.App.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+</Project>

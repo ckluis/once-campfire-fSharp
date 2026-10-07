@@ -1,0 +1,131 @@
+#!/usr/bin/env ruby
+# Check that inventory states resolve against a running instance.
+#
+#   parity/bin/check-inventory --port 3100 [--seed default] [--only REGEX] [-v]
+#
+# For every state in parity/screens.yml on that seed: interpolate {{table.label}} everywhere in the
+# state (a missing label fails), sign in as the state's user (or the captured actor) through the
+# sign-in form, GET the path with the state's user agent and headers, follow redirects, and expect
+# expect_status (default 200) without landing on the sign-in page. Steps aren't run: this checks
+# that the starting point of every state exists, not what the steps do. Fragments with a
+# non-GET `request:` are skipped.
+#
+# Sessions are reused: SessionsController allows 10 sign-ins per IP per 3 minutes, so each user signs
+# in once per run. (The capture engine has the same constraint.)
+require "yaml"
+require "json"
+require "net/http"
+require "uri"
+require "optparse"
+
+ROOT = File.expand_path("../..", __dir__)
+options = { seed: "default", only: nil, verbose: false }
+OptionParser.new do |o|
+  o.on("--port N", Integer) { |v| options[:port] = v }
+  o.on("--seed NAME") { |v| options[:seed] = v }
+  o.on("--only REGEX") { |v| options[:only] = Regexp.new(v) }
+  o.on("-v") { options[:verbose] = true }
+end.parse!
+abort "--port is required" unless options[:port]
+
+labels = JSON.parse(File.read(File.join(ROOT, "parity/.seed", options[:seed], "labels.json")))
+user_agents = YAML.load_file(File.join(ROOT, "parity/seeds/user_agents.yml"))
+states = YAML.load_file(File.join(ROOT, "parity/screens.yml"))
+BASE = URI("http://127.0.0.1:#{options[:port]}")
+
+def interpolate(value, labels, missing)
+  case value
+  when String then value.gsub(/\{\{([\w.]+)\}\}/) { labels.fetch($1) { missing << $1; "MISSING" }.to_s }
+  when Array  then value.map { |v| interpolate(v, labels, missing) }
+  when Hash   then value.transform_values { |v| interpolate(v, labels, missing) }
+  else value
+  end
+end
+
+class Browser
+  attr_reader :cookies
+
+  def initialize(user_agent:, headers: {}, cookies: {})
+    @user_agent, @headers, @cookies = user_agent, headers, cookies.dup
+  end
+
+  def request(method, path, form: nil, limit: 8)
+    uri = URI.join(BASE, path)
+    req = (method == :post ? Net::HTTP::Post : Net::HTTP::Get).new(uri)
+    req["User-Agent"] = @user_agent
+    @headers.each { |k, v| req[k] = v }
+    req["Cookie"] = @cookies.map { |k, v| "#{k}=#{v}" }.join("; ") if @cookies.any?
+    req.set_form_data(form) if form
+    res = Net::HTTP.start(uri.host, uri.port, read_timeout: 30) { |http| http.request(req) }
+    Array(res.get_fields("set-cookie")).each do |cookie|
+      name, value = cookie.split(";").first.split("=", 2)
+      value.to_s.empty? ? @cookies.delete(name) : @cookies[name] = value
+    end
+    if res.is_a?(Net::HTTPRedirection) && limit > 0
+      request(:get, URI(res["location"]).request_uri, limit: limit - 1)
+    else
+      [ res, uri ]
+    end
+  end
+
+  def sign_in(email, password)
+    res, _ = request(:get, "/session/new")
+    token = res.body[/name="authenticity_token" value="([^"]+)"/, 1] or raise "no CSRF token on /session/new"
+    res, uri = request(:post, "/session", form: { "authenticity_token" => token, "email_address" => email, "password" => password })
+    raise "sign in as #{email} failed (#{res.code} #{uri.path})" if uri.path == "/session" || uri.path == "/session/new"
+  end
+end
+
+failures = 0
+checked = 0
+sessions = {}
+states.each do |state|
+  next unless (state["seed"] || "default") == options[:seed]
+  next if options[:only] && state["id"] !~ options[:only]
+
+  missing = []
+  state = interpolate(state, labels, missing)
+  id = state["id"]
+  if missing.any?
+    failures += 1
+    puts "FAIL #{id}: missing labels #{missing.uniq.join(", ")}"
+    next
+  end
+
+  request = state["request"]
+  if request && request["method"].to_s.upcase != "GET"
+    puts "skip #{id}: #{request["method"]} fragment" if options[:verbose]
+    next
+  end
+
+  user = state["as"] || (state["actors"] && state["actors"][state["capture"]])
+  ua = state["user_agent"] ? (user_agents[state["user_agent"]] || state["user_agent"]) : user_agents.fetch("chrome_mac")
+  headers = (state["headers"] || {}).merge(request && request["headers"] || {})
+  begin
+    cookies = if user
+      sessions[user] ||= Browser.new(user_agent: user_agents.fetch("chrome_mac")).tap { |b|
+        b.sign_in(labels.fetch("emails.#{user}"), labels.fetch("passwords.all")) }.cookies
+    end
+    browser = Browser.new(user_agent: ua, headers: headers, cookies: cookies || {})
+    res, uri = browser.request(:get, state["path"])
+  rescue => e
+    failures += 1
+    puts "FAIL #{id}: #{e.class}: #{e.message}"
+    next
+  end
+
+  checked += 1
+  expected = (state["expect_status"] || 200).to_i
+  problems = []
+  problems << "status #{res.code}, expected #{expected}" if res.code.to_i != expected
+  problems << "landed on the sign-in page" if user && uri.path == "/session/new"
+  if problems.any?
+    failures += 1
+    puts "FAIL #{id}: #{problems.join("; ")} (#{state["path"]} -> #{uri.request_uri})"
+  elsif options[:verbose]
+    puts "ok   #{id}: #{res.code} #{uri.request_uri}"
+  end
+end
+
+puts "#{checked} states checked on seed #{options[:seed]}, #{failures} failed"
+exit(failures.zero? ? 0 : 1)

@@ -1,0 +1,472 @@
+#!/usr/bin/env bash
+# Benchmark the reference (Rails) app against the Rust and F# ports on the same seed and CPUs.
+#
+#   bench/run [--apps reference,rust[,fsharp][,rust-identity][,fsharp-identity]] [--reps 3] [--out DIR] [--user-agent UA]
+#   bench/run --apps reference,rust,fsharp --reps 3 --only fsharp:2 --out DIR   # one app's one rep, for DIR
+#   bench/report DIR            # median + spread table from a results dir
+#
+# Each rep, for each app in turn (never two at once; the order alternates between reps): a fresh
+# copy of parity/.seed/default, a fresh container pinned to SERVER_CPUS, then cold start, idle
+# memory, the HTTP suite, the Action Cable fan-out suite and the upload suite, with container
+# memory sampled throughout and each process's memory, by role, during the fan-out
+# (bench/lib/procmem.py). The load generator (bench/loadgen) runs pinned to LOADGEN_CPUS. Before
+# each app's run it waits (up to LOAD_WAIT_SECS) for the 1-minute load average to drop below
+# LOAD_MAX, and records it.
+#
+# `rust-identity` is the Rust image again, running only the HTTP suite with
+# `Accept-Encoding: identity`: the app's cost without gzip. `fsharp-identity` is the same for the F# port.
+#
+# `--only APP:REP` runs one app's one rep, in the place the full schedule would put it (--apps and --reps
+# still say what the schedule is, so the alternating order is the same), into --out, which a first full run
+# or an earlier --only run may have started: env.txt is kept if it exists and the report is left to
+# `bench/report`. It exists because a tool call that runs a whole 3-app, 3-rep matrix in the foreground
+# would outlive its time limit; each unit takes a few minutes.
+#
+# Validity, per app and rep (in the results JSON, and bench/report prints them): the status of every
+# response of every HTTP run, the average response bytes of every run, the rows `post_message` actually
+# wrote (messages in the write room, counted in the app's SQLite file, before and after every run of
+# the route against the 2xx answers the load generator saw), a one-request probe of each GET route
+# (status, Content-Encoding, wire and decoded bytes, gzip and identity: bench/lib/probe.py), and the
+# load average before the run.
+#
+# The load generator sends no User-Agent unless given one with --user-agent, which it then sends on
+# every request; a desktop Chrome, say:
+#   --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+#
+# Images (unmodified production images, not the parity ones: no libfaketime, no pinned cable pool,
+# the reference's own resque-pool.yml):
+#   REFERENCE_IMAGE  campfire-reference:app   (parity/bin/reference build)
+#   RUST_IMAGE       campfire-rust:app        (parity/bin/candidate build, from /Dockerfile)
+#   FSHARP_IMAGE     campfire-fsharp:app      (parity/bin/candidate build with the F# Dockerfile, or docker build)
+# The F# image runs exactly as the Rust one: the same environment, ports, CPU pinning, storage layout and
+# --network host. FSHARP_EXTRA_ENV (K=V, space-separated) is the F# container's RUST_EXTRA_ENV; it is empty.
+#
+# The load generator is built into target/rust/aarch64-unknown-linux-gnu/release/loadgen. With no cargo on the
+# machine (the colima VM has none) it is built by `cargo` in a rust:1.98.1-trixie container with the repo and
+# target/rust mounted (LOADGEN_BUILD=docker, the default there; LOADGEN_BUILD=native uses the cargo on PATH).
+#
+# WORK (default bench/.work) is where each run's copy of the seed lives: the database and the uploaded files. In
+# colima the repo is a virtiofs mount, where a message post costs ~8-10 ms (each commit's writes cross to the host);
+# WORK=/var/tmp/campfire-bench-work puts it on the VM's own disk, as the upstream measurement had its btrfs.
+#
+# Warm-up: before each measured run of a route at concurrency c the load generator runs that route at c (the measured
+# concurrency) until the app has settled: at least WARMUP_SECS (default 30; 0 skips it), then until the last three 2 s
+# windows are flat and not below their peak, at most WARMUP_MAX_SECS (default 90); bench/lib/warmup.py has the rule. It is the
+# same rule for every app. The CLR's tiered JIT reaches 0.9x of its steady throughput in 6-10 s of load and the last 5-8% only after
+# 25-45 s (bench/warmup draws the curves: the first 2 s window is 0.33-0.75x the plateau); a 2 s warm-up at c=4 left the first
+# measured seconds 13-20% slow. Rust and Rails are flat from the first window and stop at the minimum. Each run's JSON
+# records its warm-up (seconds, window rates, settled or not) and bench/report flags runs that did not settle.
+#
+# CPU: every measured run goes through bench/lib/cpurun.py, so each HTTP result also carries the container's CPU per
+# request (cgroup cpu.stat, user and system, unprofiled) and the load generator's; bench/report prints it.
+#
+# Knobs (env): SERVER_CPUS=8-11 LOADGEN_CPUS=12-15 HTTP_SECS=8 HTTP_CONCS="1 16 64" WARMUP_SECS=30 WARMUP_MAX_SECS=90 IDLE_SECS=10
+#   HTTP_ROUTES="room_show messages_page sidebar search avatar static_css up post_message" (a subset, in this order)
+#   CABLE_CLIENTS="100 500 1000" CABLE_TPUT_SECS=15 CABLE_POSTERS=4 UPLOAD_REPS=5 PORT=4390
+# The apps run with --network host: PORT and PORT+1 (and 6379, for the reference's Redis) must be
+# free on the host. NETWORK=bridge measures as the preliminary run did instead: the container on
+# Docker's bridge, reached through a published port (docker-proxy), with no DNS resolver.
+#   LOAD_MAX=1.5 LOAD_WAIT_SECS=900 PROCMEM_CPUS=0 SUITES="http cable upload"
+#
+# Host noise: the VM's load average cannot see the Mac. A build or test run on the host takes the cores the VM's vCPUs run on,
+# the pinned server and load generator slow down by tens of percent, and the load average inside the VM stays low (a Rust run
+# measured 17.6k req/s on a page it had just served at 26k in its warm-up, during another program's test run on the Mac).
+# bench/lib/hostprobe.py times a fixed spin on every pinned CPU; wait_for_quiet waits until it is within HOST_MAX_RATIO (1.10)
+# of the fastest it has ever been on this VM ($WORK/.hostprobe-baseline), every measured window is followed by a probe, and
+# the results (host_probe_start, host_probe_after per run) are in the JSON; bench/report flags runs that overlapped noise.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+BENCH=$ROOT/bench
+SEED=$ROOT/parity/.seed/default
+LABELS=$SEED/labels.json
+ENV_FILE=$ROOT/parity/.env.reference
+
+REFERENCE_IMAGE=${REFERENCE_IMAGE:-campfire-reference:app}
+RUST_IMAGE=${RUST_IMAGE:-campfire-rust:app}
+FSHARP_IMAGE=${FSHARP_IMAGE:-campfire-fsharp:app}
+SERVER_CPUS=${SERVER_CPUS:-8-11}
+LOADGEN_CPUS=${LOADGEN_CPUS:-12-15}
+HTTP_SECS=${HTTP_SECS:-8}
+HTTP_CONCS=${HTTP_CONCS:-1 16 64}
+HTTP_ROUTES=${HTTP_ROUTES:-room_show messages_page sidebar search avatar static_css up post_message}
+WARMUP_SECS=${WARMUP_SECS:-30}
+WARMUP_MAX_SECS=${WARMUP_MAX_SECS:-90}
+IDLE_SECS=${IDLE_SECS:-10}
+CABLE_CLIENTS=${CABLE_CLIENTS:-100 500 1000}
+CABLE_TPUT_SECS=${CABLE_TPUT_SECS:-15}
+CABLE_POSTERS=${CABLE_POSTERS:-4}
+UPLOAD_REPS=${UPLOAD_REPS:-5}
+PORT=${PORT:-4390}
+NETWORK=${NETWORK:-host}
+LOAD_MAX=${LOAD_MAX:-1.5}
+LOAD_WAIT_SECS=${LOAD_WAIT_SECS:-900}
+PROCMEM_CPUS=${PROCMEM_CPUS:-0}
+HOST_MAX_RATIO=${HOST_MAX_RATIO:-1.10}
+SUITES=${SUITES:-http cable upload}
+suite() { [[ " $SUITES " = *" $1 "* ]]; }
+# Extra environment for the Rust container only (space-separated K=V). The preliminary run
+# (results/prelim-20260926) used RAILS_MAX_THREADS=128 to dodge a writer/reader-pool deadlock that
+# 1c22a94 fixed; the app now runs as configured.
+RUST_EXTRA_ENV=${RUST_EXTRA_ENV-}
+FSHARP_EXTRA_ENV=${FSHARP_EXTRA_ENV-}
+# FSHARP_MOUNT=DIR (bench/quick --mounted): a published build of the app (bin/publish-mounted) mounted over /opt/campfire in the F#
+# image, which then supplies only the runtime environment, libvips and ffmpeg; the tier 2 build, no image rebuild.
+FSHARP_MOUNT=${FSHARP_MOUNT-}
+BASE=http://127.0.0.1:$PORT
+LOADGEN_TARGET=aarch64-unknown-linux-gnu
+LOADGEN=$ROOT/target/rust/$LOADGEN_TARGET/release/loadgen
+RUST_BUILD_IMAGE=${RUST_BUILD_IMAGE:-rust:1.98.1-trixie}
+
+APPS=reference,rust REPS=3 OUT="" ONLY="" USER_AGENT_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --apps) APPS=$2; shift 2 ;;
+    --reps) REPS=$2; shift 2 ;;
+    --out)  OUT=$2; shift 2 ;;
+    --only) ONLY=$2; shift 2 ;;
+    --user-agent) USER_AGENT_ARGS=(--user-agent "$2"); shift 2 ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
+done
+OUT=${OUT:-$BENCH/results/$(date +%Y%m%d-%H%M%S)}
+WORK=${WORK:-$BENCH/.work}
+CONTAINER=bench-campfire-$PORT
+
+log() { echo "[$(date +%T)] $*" >&2; }
+label() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$LABELS" "$1"; }
+lg() { taskset -c "$LOADGEN_CPUS" "$LOADGEN" "$@" "${USER_AGENT_ARGS[@]}"; }
+# The same, with the container's CPU over the run (cgroup $1, then the load generator's arguments): the result gains `cost`.
+lgc() { local cg=$1; shift; taskset -c "$LOADGEN_CPUS" python3 "$BENCH/lib/cpurun.py" "$cg" -- "$LOADGEN" "$@" "${USER_AGENT_ARGS[@]}"; }
+# Warm-up: route arguments (after the cookie) at concurrency $2, until settled (bench/lib/warmup.py); prints the load
+# generator's counters summed over the windows with a `warmup` object (seconds, window rates, settled or not).
+warm_up() {
+  local cookie=$1 conc=$2; shift 2
+  python3 "$BENCH/lib/warmup.py" --min "$WARMUP_SECS" --max "$WARMUP_MAX_SECS" --window 2 -- \
+    taskset -c "$LOADGEN_CPUS" "$LOADGEN" http --base "$BASE" --cookie "$cookie" "$@" --conc "$conc" "${USER_AGENT_ARGS[@]}"
+}
+
+teardown() {
+  [ -n "${SAMPLER:-}" ] && kill "$SAMPLER" 2>/dev/null || true
+  [ -n "${PROCMEM:-}" ] && kill "$PROCMEM" 2>/dev/null || true
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+}
+trap teardown EXIT INT TERM
+
+# The load generator, a Linux binary the machine this runs on can execute. Rebuilt when its sources are newer.
+build_loadgen() {
+  local mode=${LOADGEN_BUILD:-}
+  [ -n "$mode" ] || { if command -v cargo >/dev/null 2>&1; then mode=native; else mode=docker; fi; }
+  if [ -x "$LOADGEN" ] && [ -z "$(find "$BENCH/loadgen/src" "$BENCH/loadgen/Cargo.toml" "$BENCH/loadgen/Cargo.lock" -newer "$LOADGEN" 2>/dev/null)" ]; then
+    return
+  fi
+  log "building the load generator ($mode)"
+  case "$mode" in
+    native) (cd "$BENCH/loadgen" && CARGO_TARGET_DIR=$ROOT/target/rust cargo build --release --target "$LOADGEN_TARGET" -q) ;;
+    docker)
+      # Compiled as the invoking user, into the repo's shared target/rust; the registry cache lives there too.
+      mkdir -p "$ROOT/target/rust/cargo-home"
+      docker run --rm --user "$(id -u):$(id -g)" -v "$ROOT:$ROOT" -w "$BENCH/loadgen" \
+        -e CARGO_TARGET_DIR="$ROOT/target/rust" -e CARGO_HOME="$ROOT/target/rust/cargo-home" -e HOME=/tmp \
+        "$RUST_BUILD_IMAGE" cargo build --release --target "$LOADGEN_TARGET" -q ;;
+    *) echo "LOADGEN_BUILD must be native or docker" >&2; exit 2 ;;
+  esac
+}
+build_loadgen
+
+ROOM=$(label rooms.watercooler)        # the busy room (131 messages)
+WRITE_ROOM=$(label rooms.hq)           # writes and uploads go here, so the busy room stays put
+BEFORE=$(label messages.busy_060)      # a page in the middle of the busy room
+AVATAR=$(label avatar_tokens.jason)    # image avatar
+EMAIL=$(label emails.david)
+PASSWORD=$(label passwords.all)
+
+image_for() {
+  case "$1" in
+    reference) echo "$REFERENCE_IMAGE" ;;
+    rust|rust-identity) echo "$RUST_IMAGE" ;;
+    fsharp|fsharp-identity) echo "$FSHARP_IMAGE" ;;
+    *) echo "unknown app $1" >&2; return 1 ;;
+  esac
+}
+
+# Environment: parity/.env.reference, but with the reference's *default* process model for
+# SERVER_CPUS (config/puma.rb: workers = ceil(nproc * 0.666), JOB_CONCURRENCY the same, 5 threads;
+# config/resque-pool.yml: ceil(nproc * 0.5) Resque workers). The Rust app reads RAILS_MAX_THREADS
+# (reader pool) and JOB_CONCURRENCY (job workers) the same way; it is always one process, and so is the F# app.
+env_args() {
+  local ncpu; ncpu=$(taskset -c "$SERVER_CPUS" nproc)
+  local workers=$(( (ncpu * 666 + 999) / 1000 ))
+  grep -Ev '^(#|$|WEB_CONCURRENCY|JOB_CONCURRENCY|RAILS_MAX_THREADS|RAILS_LOG_LEVEL)' "$ENV_FILE" | sed 's/^/-e\n/'
+  printf '%s\n' -e "WEB_CONCURRENCY=$workers" -e "JOB_CONCURRENCY=$workers" -e RAILS_MAX_THREADS=5 -e RAILS_LOG_LEVEL=warn
+  local e
+  if [[ "${1:-}" = rust* ]]; then for e in $RUST_EXTRA_ENV; do printf '%s\n' -e "$e"; done; fi
+  if [[ "${1:-}" = fsharp* ]]; then for e in $FSHARP_EXTRA_ENV; do printf '%s\n' -e "$e"; done; fi
+}
+
+# Web Push and webhook deliveries to the seed's real endpoints (fcm.googleapis.com, ...) go to a
+# closed local port instead, so they fail fast without leaving the box (host networking rules out
+# the --dns 127.0.0.1 this used to rely on).
+neuter_deliveries() {
+  python3 - "$1" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("UPDATE push_subscriptions SET endpoint = 'https://127.0.0.1:9/push/' || id")
+db.execute("UPDATE webhooks SET url = 'http://127.0.0.1:9/hook/' || id")
+db.commit()
+PY
+}
+
+# The container's cgroup: under system.slice with Docker's systemd cgroup driver, under docker/ with cgroupfs
+# (colima's VM).
+cgroup_dir() {
+  local id d; id=$(docker inspect -f '{{.Id}}' "$CONTAINER")
+  for d in "/sys/fs/cgroup/system.slice/docker-$id.scope" "/sys/fs/cgroup/docker/$id"; do
+    [ -d "$d" ] && { echo "$d"; return; }
+  done
+  echo "no cgroup for container $id" >&2; return 1
+}
+mem_anon() { awk '$1=="anon"{print $2}' "$1/memory.stat"; }
+
+# Samples memory.current and anon every 200ms, keeping the maxima in $1.
+start_sampler() {
+  local cg=$1 out=$2
+  ( max_cur=0 max_anon=0
+    while [ -d "$cg" ]; do
+      cur=$(cat "$cg/memory.current" 2>/dev/null || echo 0); an=$(mem_anon "$cg" 2>/dev/null || echo 0)
+      [ "$cur" -gt "$max_cur" ] && max_cur=$cur; [ "$an" -gt "$max_anon" ] && max_anon=$an
+      echo "{\"peak_current_mb\": $((max_cur / 1048576)), \"peak_anon_mb\": $((max_anon / 1048576))}" > "$out.tmp" && mv "$out.tmp" "$out"
+      sleep 0.2
+    done ) &
+  SAMPLER=$!
+}
+
+# Extra `docker run` arguments for the app's container (bench/breakdown mounts a trace directory with them).
+DOCKER_EXTRA_ARGS=()
+# Every app logs a line per request (the work both ports do, kept on); only the retention is capped. The default
+# json-file driver wrote 9 GB for one Rust run and filled the Mac's disk. `docker logs` still works (the last
+# LOG_MAX_FILE files of LOG_MAX_SIZE each).
+LOG_MAX_SIZE=${LOG_MAX_SIZE:-10m}
+LOG_MAX_FILE=${LOG_MAX_FILE:-2}
+DOCKER_LOG_ARGS=(--log-driver json-file --log-opt "max-size=$LOG_MAX_SIZE" --log-opt "max-file=$LOG_MAX_FILE")
+
+start_app() {
+  local app=$1
+  local dir=$WORK/$app
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  rm -rf "$dir"; mkdir -p "$dir/db" "$dir/storage"
+  cp -a --reflink=auto "$SEED/db/." "$dir/db/"; cp -a --reflink=auto "$SEED/storage/." "$dir/storage/"
+  neuter_deliveries "$dir/db/production.sqlite3"
+  local args=(); mapfile -t args < <(env_args "$app")
+  sync
+  local t0; t0=$(date +%s.%N)
+  # --network host: no docker-proxy between the load generator and the app (it only exists for
+  # published ports reached from the host, and cost up to ~20% of a request; see
+  # plans/perf-attribution.md §1). Both front servers (Thruster, the Rust app's own) listen on
+  # HTTP_PORT, their app on TARGET_PORT; the reference's Redis takes the host's 6379.
+  local net=(--network host -e "HTTP_PORT=$PORT" -e "TARGET_PORT=$((PORT + 1))")
+  [ "$NETWORK" = bridge ] && net=(--dns 127.0.0.1 -p "127.0.0.1:$PORT:80")
+  # The reference image's /rails/tmp and /rails/log belong to uid 1000 and Rails writes its pid file and caches
+  # there; run as anyone else (the colima user is 501) they are tmpfs instead. Rust and F# write nothing there.
+  local scratch=()
+  if [ "$app" = reference ] && [ "$(id -u)" != 1000 ]; then scratch=(--tmpfs /rails/tmp:mode=1777 --tmpfs /rails/log:mode=1777); fi
+  local mount=()
+  if [[ "$app" = fsharp* ]] && [ -n "$FSHARP_MOUNT" ]; then mount=(-v "$FSHARP_MOUNT:/opt/campfire:ro"); fi
+  docker run -d --name "$CONTAINER" --cpuset-cpus "$SERVER_CPUS" --user "$(id -u):$(id -g)" \
+    "${mount[@]}" "${DOCKER_LOG_ARGS[@]}" "${net[@]}" "${scratch[@]}" "${args[@]}" "${DOCKER_EXTRA_ARGS[@]}" \
+    -v "$dir/db:/rails/storage/db" -v "$dir/storage:/rails/storage/files" \
+    "$(image_for "$app")" >/dev/null
+  for _ in $(seq 1 3000); do
+    if curl -fsS -o /dev/null "$BASE/up" 2>/dev/null; then break; fi
+    sleep 0.02
+  done
+  curl -fsS -o /dev/null "$BASE/up" || { docker logs "$CONTAINER" | tail -30 >&2; return 1; }
+  python3 -c "import sys; print(round((float(sys.argv[2]) - float(sys.argv[1])) * 1000))" "$t0" "$(date +%s.%N)"
+}
+
+# A JSON line: the time of a fixed spin on every pinned CPU against the quietest this VM has shown (bench/lib/hostprobe.py);
+# with an argument, exit status 1 when the ratio is above it.
+host_probe() { python3 "$BENCH/lib/hostprobe.py" "$SERVER_CPUS,$LOADGEN_CPUS" "$WORK/.hostprobe-baseline" "$@"; }
+
+# Waits for the 1-minute load average to drop below LOAD_MAX (the previous run's load decays with
+# a one-minute time constant), for at most LOAD_WAIT_SECS.
+wait_for_quiet() {
+  local waited=0
+  while awk -v max="$LOAD_MAX" '{exit !($1 >= max)}' /proc/loadavg && [ "$waited" -lt "$LOAD_WAIT_SECS" ]; do
+    sleep 10; waited=$((waited + 10))
+  done
+  log "load before run: $(cut -d' ' -f1-3 /proc/loadavg) (waited ${waited}s)"
+  # The host's share of the CPUs: wait for a probe within HOST_MAX_RATIO of the quietest ever seen, up to LOAD_WAIT_SECS in all.
+  while ! HOST_PROBE=$(host_probe "$HOST_MAX_RATIO") && [ "$waited" -lt "$LOAD_WAIT_SECS" ]; do
+    log "host busy: $HOST_PROBE"; sleep 10; waited=$((waited + 10))
+  done
+  log "host probe before run: $HOST_PROBE (waited ${waited}s)"
+}
+
+# Messages in the write room, counted in the running app's SQLite file (WAL mode: a reader sees every commit).
+room_rows() {
+  python3 - "$WORK/$1/db/production.sqlite3" "$WRITE_ROOM" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1], timeout=30)
+print(db.execute("SELECT count(*) FROM messages WHERE room_id = ?", (int(sys.argv[2]),)).fetchone()[0])
+PY
+}
+
+run_rep() {
+  local app=$1 rep=$2 f=$OUT/$app-$rep.json
+  wait_for_quiet
+  local load_start; load_start=$(cat /proc/loadavg) probe_start=$HOST_PROBE
+  log "$app rep $rep: starting (load: $(cut -d' ' -f1-3 /proc/loadavg))"
+  local cold_ms; cold_ms=$(start_app "$app")
+  local cg; cg=$(cgroup_dir)
+  sleep "$IDLE_SECS"
+  local idle_cur idle_anon
+  idle_cur=$(( $(cat "$cg/memory.current") / 1048576 )); idle_anon=$(( $(mem_anon "$cg") / 1048576 ))
+  start_sampler "$cg" "$OUT/.$app-$rep.mem"
+  log "$app rep $rep: cold start ${cold_ms}ms, idle ${idle_cur}MB (anon ${idle_anon}MB)"
+
+  local cookie scrape csrf streams css
+  cookie=$(lg login --base "$BASE" --email "$EMAIL" --password "$PASSWORD" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cookie"])')
+  scrape=$(lg scrape --base "$BASE" --cookie "$cookie" --room "$ROOM")
+  csrf=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["csrf"] or "")' "$scrape")
+  streams=$(python3 -c 'import json,sys; print(",".join(json.loads(sys.argv[1])["streams"]))' "$scrape")
+  css=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["css"])' "$scrape")
+
+  local routes=(
+    "room_show|/rooms/$ROOM"
+    "messages_page|/rooms/$ROOM/messages?before=$BEFORE"
+    "sidebar|/users/me/sidebar"
+    "search|/searches?q=coffee"
+    "avatar|/users/$AVATAR/avatar"
+    "static_css|$css"
+    "up|/up"
+    "post_message|POST"
+  )
+  local wanted=() known
+  for known in "${routes[@]}"; do [[ " $HTTP_ROUTES " = *" ${known%%|*} "* ]] && wanted+=("$known"); done
+  routes=("${wanted[@]}")
+  local http_json="[]" rows_json="[]" probe_json="[]" r name path args enc=()
+  [[ "$app" = *-identity ]] && enc=(--gzip 0)
+  suite http || routes=()
+  # One request to each GET route, gzip and identity: status, Content-Encoding, wire and decoded bytes.
+  if suite http; then
+    probe_json=$(python3 "$BENCH/lib/probe.py" "$BASE" "$cookie" "${routes[@]}")
+  fi
+  for r in "${routes[@]}"; do
+    name=${r%%|*}; path=${r#*|}
+    if [ "$path" = POST ]; then args=(--post-room "$WRITE_ROOM" --csrf "$csrf"); else args=(--path "$path"); fi
+    args+=("${enc[@]}")
+    # Rows written, for the route that writes: the messages of the write room in the app's own SQLite file
+    # before and after each warm-up and each run, against the answers below 400 the load generator saw.
+    local before=0 after=0 wres res probe_after
+    for c in $HTTP_CONCS; do
+      [ "$path" = POST ] && before=$(room_rows "$app")
+      wres=$(warm_up "$cookie" "$c" "${args[@]}")
+      if [ "$path" = POST ]; then
+        after=$(room_rows "$app")
+        rows_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); w=json.loads(sys.argv[2]); a.append({"phase":"warm-up","conc":int(sys.argv[5]),"ok":w["ok"],"statuses":w["statuses"],"rows":int(sys.argv[3])-int(sys.argv[4])}); print(json.dumps(a))' "$rows_json" "$wres" "$after" "$before" "$c")
+        before=$after
+      fi
+      res=$(lgc "$cg" http --base "$BASE" --cookie "$cookie" "${args[@]}" --conc "$c" --duration "$HTTP_SECS")
+      probe_after=$(host_probe)
+      if [ "$path" = POST ]; then
+        after=$(room_rows "$app")
+        rows_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); w=json.loads(sys.argv[2]); a.append({"phase":"run","conc":w["conc"],"ok":w["ok"],"statuses":w["statuses"],"rows":int(sys.argv[3])-int(sys.argv[4])}); print(json.dumps(a))' "$rows_json" "$res" "$after" "$before")
+      fi
+      res=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); r["route"]=sys.argv[2]; r["warmup"]=json.loads(sys.argv[3])["warmup"]; r["host_probe_after"]=json.loads(sys.argv[4]); print(json.dumps(r))' "$res" "$name" "$wres" "$probe_after")
+      http_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); a.append(json.loads(sys.argv[2])); print(json.dumps(a))' "$http_json" "$res")
+      log "$app rep $rep: $name c=$c $(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); w=r["warmup"]; print(r["rps"], "rps p50", r["latency"].get("p50_ms"), "p99", r["latency"].get("p99_ms"), r["statuses"], "err", r["errors"], "cpu", r["cost"].get("server_cpu_us_per_req"), "us/req; warm-up", w["secs"], "s", w["reason"], "tail", w["tail_rps"], "host", r["host_probe_after"]["ratio"])' "$res")"
+    done
+  done
+
+  local cable_json="[]" n upload_json='{}'
+  if [[ "$app" = *-identity ]] || ! suite cable; then CABLE_CLIENTS_RUN=""; else CABLE_CLIENTS_RUN=$CABLE_CLIENTS; fi
+  for n in $CABLE_CLIENTS_RUN; do
+    local pm=$OUT/.$app-$rep-cable$n
+    taskset -c "$PROCMEM_CPUS" python3 "$BENCH/lib/procmem.py" sample "$cg" "$pm.jsonl" & PROCMEM=$!
+    local res; res=$(lg cable --base "$BASE" --cookie "$cookie" --room "$ROOM" --csrf "$csrf" --streams "$streams" \
+      --clients "$n" --tput-secs "$CABLE_TPUT_SECS" --posters "$CABLE_POSTERS" 2> "$pm.stderr")
+    sleep 0.5; kill "$PROCMEM" 2>/dev/null || true; wait "$PROCMEM" 2>/dev/null || true; PROCMEM=""
+    res=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); r["process_memory"]=json.loads(sys.argv[2]); print(json.dumps(r))' \
+      "$res" "$(python3 "$BENCH/lib/procmem.py" phases "$pm.jsonl" "$pm.stderr")")
+    cable_json=$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); a.append(json.loads(sys.argv[2])); print(json.dumps(a))' "$cable_json" "$res")
+    log "$app rep $rep: cable $n clients $(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); print("ready", r["ready"], "lat all p50", r["latency"]["all_clients"].get("p50_ms"), "p99", r["latency"]["all_clients"].get("p99_ms"), "tput", r["throughput"]["delivered_msgs_per_sec"], "msg/s", r["throughput"]["complete"], "/", r["throughput"]["posted"])' "$res")"
+    sleep 2
+  done
+
+  if [[ "$app" != *-identity ]] && suite upload; then
+    upload_json=$(lg upload --base "$BASE" --cookie "$cookie" --room "$WRITE_ROOM" --csrf "$csrf" \
+      --file "$ROOT/reference/test/fixtures/files/black_hole.jpg" --reps "$UPLOAD_REPS")
+    log "$app rep $rep: upload median $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["median_total_ms"])' "$upload_json")ms"
+  fi
+
+  sleep 0.5
+  local peak; peak=$(cat "$OUT/.$app-$rep.mem")
+  local cg_peak; cg_peak=$(( $(cat "$cg/memory.peak" 2>/dev/null || echo 0) / 1048576 ))
+  kill "$SAMPLER" 2>/dev/null || true; SAMPLER=""
+  python3 - "$f" "$app" "$rep" "$cold_ms" "$idle_cur" "$idle_anon" "$peak" "$cg_peak" "$http_json" "$cable_json" "$upload_json" "$load_start" "$(cat /proc/loadavg)" "$rows_json" "$probe_json" "$probe_start" "$(host_probe)" <<'PY'
+import json, os, sys
+f, app, rep, cold, idle_cur, idle_anon, peak, cg_peak, http, cable, upload, load0, load, rows, probe, host0, host1 = sys.argv[1:]
+result = {
+  "app": app, "rep": int(rep), "cold_start_ms": int(cold),
+  "memory": {"idle_current_mb": int(idle_cur), "idle_anon_mb": int(idle_anon), **json.loads(peak), "cgroup_peak_mb": int(cg_peak)},
+  "http": json.loads(http), "cable": json.loads(cable), "upload": json.loads(upload), "loadavg_start": load0, "loadavg_end": load,
+  "post_rows": json.loads(rows), "probe": json.loads(probe), "host_probe_start": json.loads(host0), "host_probe_end": json.loads(host1),
+}
+# MERGE_PART=1 (bench/quick --part): this run measured some of the routes of a rep that an earlier part of the same unit started;
+# its routes join that file's (a route already there is replaced), the rest of the earlier part stays.
+if os.environ.get("MERGE_PART") == "1" and os.path.exists(f):
+    old = json.load(open(f))
+    redone = {h["route"] for h in result["http"]}
+    result["http"] = [h for h in old["http"] if h["route"] not in redone] + result["http"]
+    result["probe"] = [x for x in old["probe"] if x["route"] not in redone] + result["probe"]
+    result["post_rows"] = old["post_rows"] + result["post_rows"] if "post_message" not in redone else result["post_rows"]
+    for k in ("peak_current_mb", "peak_anon_mb", "cgroup_peak_mb"):
+        result["memory"][k] = max(old["memory"].get(k, 0), result["memory"].get(k, 0))
+    result["parts"] = old.get("parts", 1) + 1
+    for k in ("cold_start_ms", "loadavg_start", "host_probe_start"):
+        result[k] = old[k]
+    result["memory"]["idle_current_mb"], result["memory"]["idle_anon_mb"] = old["memory"]["idle_current_mb"], old["memory"]["idle_anon_mb"]
+json.dump(result, open(f, "w"), indent=1)
+PY
+  # The last request log lines the app wrote (a sample, that logging is on and what it says; the driver keeps only 2 x LOG_MAX_SIZE).
+  docker logs --tail 12 "$CONTAINER" > "$OUT/$app-$rep-logtail.txt" 2>&1 || true
+  docker rm -f "$CONTAINER" >/dev/null
+  rm -rf "$WORK/$app"
+  log "$app rep $rep: done -> $f"
+}
+
+write_env() {
+  echo "date: $(date -Is)"
+  echo "host: $(uname -r), $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs), $(nproc) threads, $(free -g | awk '/Mem:/{print $2}')GB"
+  echo "server cpus: $SERVER_CPUS (nproc $(taskset -c "$SERVER_CPUS" nproc)); loadgen cpus: $LOADGEN_CPUS; network: $NETWORK"
+  echo "env: $(env_args | grep -E 'WEB_CONC|JOB_CONC|MAX_THREADS' | tr '\n' ' ')"
+  echo "rust extra env: $RUST_EXTRA_ENV"
+  echo "fsharp extra env: $FSHARP_EXTRA_ENV"
+  echo "user agent: ${USER_AGENT_ARGS[1]:-(none)}"
+  for app in ${APPS//,/ }; do echo "$app image: $(image_for "$app") $(docker image inspect -f '{{.Id}} {{.Created}}' "$(image_for "$app")") built from commit: $(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(image_for "$app")")"; done
+  [ -z "$FSHARP_MOUNT" ] || echo "fsharp build: MOUNTED $FSHARP_MOUNT over /opt/campfire ($(cat "$FSHARP_MOUNT/.built-from" 2>/dev/null || echo 'no .built-from'))"
+  echo "repo HEAD: $(git -C "$ROOT" rev-parse --short HEAD) (dirty: $(git -C "$ROOT" status --porcelain -- src rust Cargo.toml Cargo.lock | wc -l) files under src/ and rust/)"
+  echo "work dir (seed copies): $WORK ($(findmnt -T "$WORK" -n -o FSTYPE))"
+  echo "loadgen: $LOADGEN ($(stat -c %y "$LOADGEN" | cut -d. -f1)), built with $RUST_BUILD_IMAGE"
+  echo "schedule: apps ${APPS}, reps ${REPS}; suites: ${SUITES}; http secs ${HTTP_SECS}, concs ${HTTP_CONCS}, routes ${SCHEDULE_ROUTES:-$HTTP_ROUTES}, warm-up ${WARMUP_SECS}s at each route and concentration, idle ${IDLE_SECS}s"
+  echo "log retention: ${LOG_MAX_FILE} x ${LOG_MAX_SIZE} (json-file)"
+}
+# `BENCH_RUN_LIB=1 source bench/run` stops here with the functions above defined (bench/breakdown uses them).
+if [ -n "${BENCH_RUN_LIB:-}" ]; then return 0 2>/dev/null || exit 0; fi
+mkdir -p "$OUT"
+[ -s "$OUT/env.txt" ] || write_env > "$OUT/env.txt"
+cat "$OUT/env.txt" >&2
+
+ORDER=(${APPS//,/ })
+for rep in $(seq 1 "$REPS"); do
+  apps=("${ORDER[@]}")
+  if [ $((rep % 2)) -eq 0 ]; then apps=(); for ((i = ${#ORDER[@]} - 1; i >= 0; i--)); do apps+=("${ORDER[$i]}"); done; fi
+  for app in "${apps[@]}"; do
+    [ -z "$ONLY" ] || [ "$ONLY" = "$app:$rep" ] || continue
+    echo "$(date +%T) $app rep $rep start: $(uptime)" >> "$OUT/uptime.log"
+    run_rep "$app" "$rep"
+    echo "$(date +%T) $app rep $rep end:   $(uptime)" >> "$OUT/uptime.log"
+  done
+done
+[ -n "$ONLY" ] || "$BENCH/report" "$OUT" | tee "$OUT/report.md"

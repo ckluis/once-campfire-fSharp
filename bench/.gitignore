@@ -1,0 +1,12 @@
+.work/
+# Bulky or regenerable profiler output: raw profiles, folded stacks, per-request traces, fetched
+# pages. The committed results keep the rendered flamegraphs (.svg), rollups (.top.md, .txt) and
+# JSON summaries.
+results/**/raw/
+results/**/*.folded
+results/**/trace-*.txt
+results/**/io-*.log
+results/**/*.html
+__pycache__/
+# bench/run's per-run scratch beside the results JSON (memory samples, per-phase process memory, loadgen stderr).
+results/**/.*

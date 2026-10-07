@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# Compare two servers state by state, inside the pinned Playwright image.
+#
+#   parity/bin/compare --expected http://127.0.0.1:3100 --actual http://127.0.0.1:3200 [OPTIONS]
+#   parity/bin/compare --recompare DIR [--expected-name A --actual-name B] [OPTIONS]
+#   parity/bin/compare --self-parity [--runs N] [--ports 4301,4302] [OPTIONS]
+#
+# --matrix lean (the default) compares every state's server output (server HTML, live DOM,
+# accessibility tree, every response, every cable frame) with thin pixel coverage; --matrix full
+# is the whole support matrix, for release checks (parity/SCREENS.md, "Matrix").
+#
+# --self-parity is the Phase 0 gate: for each seed the selected states use (or --seed NAME), it
+# starts two fresh reference instances (parity/bin/reference) at that seed's clock, compares them,
+# repeats that --runs times (default 1 with the lean matrix, 2 with the full one), and then
+# compares the first run's captures with the last run's. Seeds run in parallel, seed i on
+# --ports P + 10 * i, each with its own log (DIR/<seed>.log); the default seed gets the workers
+# (PARITY_WORKERS, default 16), the others 2 each. Any difference fails; parity/allowlist.yml is
+# ignored. --reference-env KEY=VALUE (repeatable) is passed to `parity/bin/reference up` as -e.
+# Each capture of a `mutates: true` state gets fresh instances of its own, --isolated N (default 6)
+# at a time, on ports P + 1000 * (k + 1) (see parity/capture/run.ts isolatedUrl).
+#
+# OPTIONS are those of parity/bin/capture, plus --out DIR, --allowlist FILE | --no-allowlist and
+# --report NAME. Exit status is 1 if any cell fails or errors. The report is DIR/report.html.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/../capture/sandbox/run.sh"
+
+seed_given="" mode=compare runs="" ports=4301,4302 seed=default time="" out="" recompare="" reset_host="" isolated=6 matrix=lean workers=""
+args=() ref_env=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --self-parity) mode=self-parity; shift ;;
+    --recompare)   mode=recompare; recompare=$2; shift 2 ;;
+    --runs)        runs=$2; shift 2 ;;
+    --ports)       ports=$2; shift 2 ;;
+    --seed)        seed=$2; seed_given=1; args+=(--seed "$2"); shift 2 ;;
+    --time)        time=$2; shift 2 ;;
+    --out)         out=$2; shift 2 ;;
+    --reset-host)  reset_host=$2; shift 2 ;;
+    --reference-env) ref_env+=(-e "$2"); shift 2 ;;
+    --isolated)    isolated=$2; shift 2 ;;
+    --matrix)      matrix=$2; args+=(--matrix "$2"); shift 2 ;;
+    --workers)     workers=$2; shift 2 ;;
+    *)             args+=("$1"); shift ;;
+  esac
+done
+
+mkdir -p "$PARITY/out"
+REFERENCE=$PARITY/bin/reference
+UP_PORTS=()
+cleanup() {
+  parity_cleanup
+  for port in "${UP_PORTS[@]}"; do "$REFERENCE" down --port "$port" >/dev/null 2>&1 || true; done
+}
+trap cleanup EXIT INT TERM
+
+seed_time() {
+  local labels=$PARITY/.seed/$seed/labels.json
+  [ -f "$labels" ] || die "no seed $seed at $labels; run parity/bin/seed $seed"
+  node -e 'const l=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log(l["clock.now"] ?? l.clock?.now ?? "")' "$labels"
+}
+
+[ -n "$runs" ] || { if [ "$matrix" = full ]; then runs=2; else runs=1; fi; }
+[ -z "$workers" ] || [ "$mode" = self-parity ] || args+=(--workers "$workers")
+
+# One seed's self-parity runs (in a background subshell of --self-parity): two reference
+# instances on PORT_A and PORT_B, --runs times, then run 1 against the last run.
+self_parity_seed() (
+  local seed=$1 port_a=$2 port_b=$3 seed_workers=$4
+  local seed_clock out=$root/$1 failed=() scratch=() i k port
+  UP_PORTS=()
+  trap cleanup EXIT INT TERM
+  seed_clock=${time:-$(seed_time)}
+  [ -n "$seed_clock" ] || die "seed $seed records no clock.now; pass --time"
+  # Every server's clock is frozen at the seed's instant (--freeze, which runs Puma in single
+  # mode), as the browsers' are with page.clock: anything a server derives from its clock
+  # (transfer link expiries and the QR codes encoding them, the timestamps and avatar ?v= cache
+  # busters of records a mutating state writes) is then the same on both servers and in every
+  # run, however long the run takes. A mutating state also gets fresh instances of its own per
+  # capture.
+  up() { "$REFERENCE" up --seed "$seed" --port "$1" --time "$seed_clock" --freeze "${ref_env[@]}" >/dev/null; }
+  start_reset_loop "'$REFERENCE' down --port {port} >/dev/null && '$REFERENCE' up --seed '$seed' --port {port} --time '$seed_clock' --freeze ${ref_env[*]} >/dev/null"
+  for k in $(seq 1 "$isolated"); do scratch+=($((port_a + 1000 * k)) $((port_b + 1000 * k))); done
+  for i in $(seq 1 "$runs"); do
+    echo "self-parity [$seed] run $i/$runs: reference :$port_a vs reference :$port_b (clock $seed_clock)"
+    UP_PORTS=("$port_a" "$port_b" "${scratch[@]}")
+    up "$port_a" & local pid_a=$!
+    up "$port_b" & local pid_b=$!
+    wait "$pid_a" && wait "$pid_b" || die "reference instances did not come up"
+    run_in_image compare --seed "$seed" --expected "http://127.0.0.1:$port_a" --actual "http://127.0.0.1:$port_b" \
+      --expected-name "run-$i/expected" --actual-name "run-$i/actual" --out "$out" --time "$seed_clock" \
+      --no-allowlist --report "report-run-$i" --reset "$RESET_ARG" --isolated "$isolated" --workers "$seed_workers" "${pass[@]}" || failed+=("run $i")
+    for port in "${UP_PORTS[@]}"; do "$REFERENCE" down --port "$port" >/dev/null; done
+    UP_PORTS=()
+  done
+  stop_reset_loop
+  if [ "$runs" -gt 1 ]; then
+    echo "self-parity [$seed] across runs: run 1 vs run $runs"
+    run_in_image recompare --seed "$seed" --out "$out" --expected-name run-1/expected --actual-name "run-$runs/expected" \
+      --time "$seed_clock" --no-allowlist --report report-across-runs "${pass[@]}" || failed+=("across runs")
+  fi
+  [ ${#failed[@]} -eq 0 ] || { echo "SELF-PARITY [$seed] FAILED: ${failed[*]}"; exit 1; }
+)
+
+case "$mode" in
+  compare)
+    [ -n "$time" ] && args+=(--time "$time")
+    [ -n "$out" ] && args+=(--out "$out")
+    if [ -n "$reset_host" ]; then start_reset_loop "$reset_host"; args+=(--reset "$RESET_ARG" --isolated "$isolated"); fi
+    run_in_image compare "${args[@]}"
+    ;;
+
+  recompare)
+    [ -n "$time" ] && args+=(--time "$time")
+    run_in_image recompare --out "$recompare" "${args[@]}"
+    ;;
+
+  self-parity)
+    root=${out:-$PARITY/out/self-parity-$(date -u +%Y%m%dT%H%M%SZ)}
+    mkdir -p "$root"
+    IFS=, read -r port_a port_b <<<"$ports"
+    if [ -z "$seed_given" ]; then
+      seeds=$(run_in_image seeds "${args[@]}")          # every seed the selected states need
+    else
+      seeds=$seed
+    fi
+    # Drop --seed from the pass-through; each seed gets its own instances below.
+    pass=() skip=""
+    for a in "${args[@]}"; do
+      if [ -n "$skip" ]; then skip=""; continue; fi
+      if [ "$a" = --seed ]; then skip=1; continue; fi
+      pass+=("$a")
+    done
+    pids=() names=() index=0
+    for seed in $seeds; do
+      seed_workers=${workers:-$([ "$seed" = default ] && echo "${PARITY_WORKERS:-16}" || echo 2)}
+      self_parity_seed "$seed" $((port_a + 10 * index)) $((port_b + 10 * index)) "$seed_workers" >"$root/$seed.log" 2>&1 &
+      pids+=($!) names+=("$seed") index=$((index + 1))
+      echo "self-parity [$seed] started (log: $root/$seed.log)"
+    done
+    trap 'kill -TERM "${pids[@]}" 2>/dev/null; wait; cleanup' INT TERM
+    failed=()
+    for i in "${!pids[@]}"; do
+      wait "${pids[$i]}" || failed+=("${names[$i]}")
+      grep -E "^self-parity|cells:" "$root/${names[$i]}.log" | sed "s/^/  /" || true
+    done
+    echo "reports: $root/<seed>/report-*.html"
+    if [ ${#failed[@]} -gt 0 ]; then echo "SELF-PARITY FAILED: ${failed[*]}"; exit 1; fi
+    echo "SELF-PARITY PASSED: zero diffs"
+    ;;
+esac

@@ -1,0 +1,115 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>campfire</AssemblyName>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Config.fs" />
+    <Compile Include="Concerns/UserAgent.fs" />
+    <Compile Include="Concerns/Platform.fs" />
+    <Compile Include="Channels/Identity.fs" />
+    <Compile Include="Channels/Revocation.fs" />
+    <Compile Include="Channels/Connection.fs" />
+    <Compile Include="Channels/ReadRooms.fs" />
+    <Compile Include="Channels/UnreadRooms.fs" />
+    <Compile Include="Channels/Broadcasts.fs" />
+    <Compile Include="Channels/RoomChannel.fs" />
+    <Compile Include="Channels/Presence.fs" />
+    <Compile Include="Channels/RoomMessages.fs" />
+    <Compile Include="Channels/TypingNotifications.fs" />
+    <Compile Include="Channels/Registry.fs" />
+    <Compile Include="Integrations/Net.fs" />
+    <Compile Include="Integrations/Guard.fs" />
+    <Compile Include="Integrations/Http.fs" />
+    <Compile Include="Integrations/WebPushEncryption.fs" />
+    <Compile Include="Integrations/Vapid.fs" />
+    <Compile Include="Integrations/WebPush.fs" />
+    <Compile Include="Integrations/WebPushPool.fs" />
+    <Compile Include="Integrations/Webhook.fs" />
+    <Compile Include="Jobs.fs" />
+    <Compile Include="AppState.fs" />
+    <Compile Include="Current.fs" />
+    <Compile Include="FragmentGlue.fs" />
+    <Compile Include="Presenters/Common.fs" />
+    <Compile Include="Presenters/RichText.fs" />
+    <Compile Include="Presenters/Attachments.fs" />
+    <Compile Include="Presenters/Pagination.fs" />
+    <Compile Include="Presenters/Accounts.fs" />
+    <Compile Include="Presenters/ViewContext.fs" />
+    <Compile Include="Presenters/Page.fs" />
+    <Compile Include="Presenters/EmojiRanges.fs" />
+    <Compile Include="Presenters/Presenter.fs" />
+    <Compile Include="Concerns.fs" />
+    <Compile Include="ActiveStorage.fs" />
+    <Compile Include="Presenters/AttachmentWrites.fs" />
+    <Compile Include="RichText.fs" />
+    <Compile Include="CoreJobs.fs" />
+    <Compile Include="Integrations/OpengraphEntities.fs" />
+    <Compile Include="Integrations/OpengraphHtml.fs" />
+    <Compile Include="Integrations/OpengraphDocument.fs" />
+    <Compile Include="Integrations/OpengraphFetch.fs" />
+    <Compile Include="Integrations/OpengraphLocation.fs" />
+    <Compile Include="Integrations/OpengraphMetadata.fs" />
+    <Compile Include="Integrations/Opengraph.fs" />
+    <Compile Include="Integrations/SearchWordRanges.fs" />
+    <Compile Include="Integrations/Search.fs" />
+    <Compile Include="Controllers/Sessions.fs" />
+    <Compile Include="Controllers/Welcome.fs" />
+    <Compile Include="Controllers/Sessions/Transfers.fs" />
+    <Compile Include="Controllers/FirstRuns.fs" />
+    <Compile Include="Controllers/Pwa.fs" />
+    <Compile Include="Controllers/Accounts.fs" />
+    <Compile Include="Controllers/Accounts/Bots.fs" />
+    <Compile Include="Controllers/Accounts/BotKeys.fs" />
+    <Compile Include="Controllers/Accounts/CustomStyles.fs" />
+    <Compile Include="Controllers/Accounts/JoinCodes.fs" />
+    <Compile Include="Controllers/Accounts/Users.fs" />
+    <Compile Include="Controllers/Users.fs" />
+    <Compile Include="Controllers/Users/Avatars.fs" />
+    <Compile Include="Controllers/Accounts/Logos.fs" />
+    <Compile Include="Controllers/Users/Bans.fs" />
+    <Compile Include="Controllers/Users/Profiles.fs" />
+    <Compile Include="Controllers/Users/Sidebars.fs" />
+    <Compile Include="Controllers/Users/PushSubscriptions.fs" />
+    <Compile Include="Controllers/Users/TestNotifications.fs" />
+    <Compile Include="Controllers/Autocompletable.fs" />
+    <Compile Include="Controllers/QrCode/Rqrcode.fs" />
+    <Compile Include="Controllers/QrCode.fs" />
+    <Compile Include="Controllers/UnfurlLinks.fs" />
+    <Compile Include="Controllers/Messages.fs" />
+    <Compile Include="Controllers/Messages/Boosts.fs" />
+    <Compile Include="Controllers/Messages/ByBots.fs" />
+    <Compile Include="Controllers/Messages/BoostsByBots.fs" />
+    <Compile Include="Integrations/IntegrationJobs.fs" />
+    <Compile Include="Controllers/Rooms.fs" />
+    <Compile Include="Controllers/Rooms/Opens.fs" />
+    <Compile Include="Controllers/Rooms/Closeds.fs" />
+    <Compile Include="Controllers/Rooms/Directs.fs" />
+    <Compile Include="Controllers/Rooms/Involvements.fs" />
+    <Compile Include="Controllers/Rooms/Refreshes.fs" />
+    <Compile Include="Controllers/Searches.fs" />
+    <Compile Include="Controllers.fs" />
+    <Compile Include="Boot.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
+    <ProjectReference Include="../Campfire.Ruby/Campfire.Ruby.fsproj" />
+    <ProjectReference Include="../Campfire.Kit/Campfire.Kit.fsproj" />
+    <ProjectReference Include="../Campfire.Routes/Campfire.Routes.fsproj" />
+    <ProjectReference Include="../Campfire.Db/Campfire.Db.fsproj" />
+    <ProjectReference Include="../Campfire.RichText/Campfire.RichText.fsproj" />
+    <ProjectReference Include="../Campfire.Storage/Campfire.Storage.fsproj" />
+    <ProjectReference Include="../Campfire.Cable/Campfire.Cable.fsproj" />
+    <ProjectReference Include="../Campfire.Assets/Campfire.Assets.fsproj" />
+    <ProjectReference Include="../Campfire.Views/Campfire.Views.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Falco" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.App.Tests" />
+  </ItemGroup>
+</Project>

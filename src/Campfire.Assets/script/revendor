@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Re-vendor gem-provided assets and regenerate the golden fixtures after a reference bump.
+#
+#   src/Campfire.Assets/script/revendor
+#
+# Uses the `campfire-reference` Docker image (whose build already ran assets:precompile) when
+# Docker is reachable. Otherwise it copies reference/ to a scratch directory, installs the bundle
+# (into $BUNDLE_PATH, default target/reference-bundle), precompiles there, and exports from that.
+# Either way, src/Campfire.Assets/script/export_reference.rb does the work inside the reference app.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+CRATE="$ROOT/src/Campfire.Assets"
+FIXTURES="$ROOT/tests/Campfire.Assets.Tests/reference"
+mkdir -p "$FIXTURES"
+REFERENCE_SHA="$(git -C "$ROOT/reference" rev-parse HEAD)"
+
+if docker info >/dev/null 2>&1 && docker image inspect campfire-reference:app >/dev/null 2>&1; then
+  docker run --rm -i --user "$(id -u):$(id -g)" \
+    -e RAILS_ENV=production -e SECRET_KEY_BASE_DUMMY=1 -e DISABLE_SSL=1 -e ASSETS_DIR=/work/assets -e FIXTURES_DIR=/work/fixtures -e REFERENCE_SHA="$REFERENCE_SHA" \
+    -v "$CRATE:/work/assets" -v "$FIXTURES:/work/fixtures" \
+    campfire-reference:app bin/rails runner /work/assets/script/export_reference.rb
+else
+  export PATH="$HOME/.local/share/gem/ruby/3.4.0/bin:$PATH"
+  export BUNDLE_PATH="${BUNDLE_PATH:-$ROOT/target/reference-bundle}" BUNDLE_WITHOUT="development:test"
+  export RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 DISABLE_SSL=1 ASSETS_DIR="$CRATE" FIXTURES_DIR="$FIXTURES" REFERENCE_SHA
+
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "$WORK"' EXIT
+  rsync -a --exclude /tmp --exclude /log --exclude /storage --exclude /public/assets "$ROOT/reference/" "$WORK/"
+  mkdir -p "$WORK/tmp" "$WORK/log"
+
+  cd "$WORK"
+  bundle check >/dev/null || bundle install
+  bin/rails assets:precompile >/dev/null 2> >(grep -v VIPS-WARNING >&2)
+  bin/rails runner "$CRATE/script/export_reference.rb" 2> >(grep -v VIPS-WARNING >&2)
+fi

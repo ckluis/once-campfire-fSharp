@@ -1,0 +1,21 @@
+# What the Rust views crate renders for the cases bin/views-differential generates, for the F# port to
+# be compared with, byte for byte. Not part of rust/'s workspace: the crates are path dependencies,
+# built where they are (into the shared target/rust).
+[package]
+name = "views-differential"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+campfire_views = { path = "../../../rust/crates/views" }
+campfire_routes = { path = "../../../rust/crates/routes" }
+rails_compat = { path = "../../../rust/crates/rails_compat" }
+ruby_compat = { path = "../../../rust/crates/ruby" }
+askama = { version = "0.14", features = ["blocks"] }
+base64 = "0.22"
+jiff = { version = "0.2", features = ["serde"] }
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[workspace]

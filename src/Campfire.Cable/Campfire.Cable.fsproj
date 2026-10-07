@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="Protocol.fs" />
+    <Compile Include="Naming.fs" />
+    <Compile Include="JsonText.fs" />
+    <Compile Include="Socket.fs" />
+    <Compile Include="Pubsub.fs" />
+    <Compile Include="Config.fs" />
+    <Compile Include="Channel.fs" />
+    <Compile Include="Server.fs" />
+    <Compile Include="Connection.fs" />
+    <Compile Include="Endpoint.fs" />
+    <Compile Include="Turbo.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
+    <ProjectReference Include="../Campfire.Ruby/Campfire.Ruby.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.Cable.Tests" />
+  </ItemGroup>
+</Project>

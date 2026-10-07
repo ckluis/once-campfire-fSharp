@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Checks that deleting an asset input rebuilds the embedded assets (cargo:rerun-if-changed does;
+# MSBuild Inputs/Outputs alone doesn't). Adds a temporary override, builds, deletes it, builds,
+# and fails if it is still embedded.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.dotnet:$PATH" DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+temp=src/Campfire.Assets/overrides/zz-incremental-check.svg
+embedded=src/Campfire.Assets/obj/assets/EmbeddedData.fs
+trap 'rm -f "$temp"' EXIT
+build() { dotnet build src/Campfire.Assets -c Release -v quiet -nologo >/dev/null; }
+cp src/Campfire.Assets/overrides/install-edge.svg "$temp"
+build
+grep -q zz-incremental-check "$embedded" || { echo "FAIL: added input was not embedded"; exit 1; }
+rm "$temp"
+build
+if grep -q zz-incremental-check "$embedded"; then echo "FAIL: deleted input is still embedded"; exit 1; fi
+build
+echo "ok: deleting an input rebuilds the embedded assets"

@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Summarize a bench/attrib results dir: one column per configuration, median [min–max] across
+reps. Writes report.md into the dir and prints it.
+
+  bench/attrib-report DIR [--baseline CONFIG]
+"""
+import glob, json, os, statistics, sys
+
+out = sys.argv[1]
+baseline = sys.argv[sys.argv.index("--baseline") + 1] if "--baseline" in sys.argv else None
+runs = {}
+for f in sorted(glob.glob(os.path.join(out, "*-[0-9]*.json"))):
+    r = json.load(open(f))
+    if "config" not in r:
+        continue
+    runs.setdefault(r["config"], []).append(r)
+order = [c for c in ("proxy-thruster", "proxy-direct", "host-thruster", "host-direct") if c in runs]
+order += sorted(c for c in runs if c not in order)
+baseline = baseline or order[0]
+lines = []
+
+
+def emit(s=""):
+    lines.append(s)
+
+
+def fmt(v):
+    return f"{v:,.0f}" if abs(v) >= 100 else f"{v:.1f}" if abs(v) >= 10 else f"{v:.2f}" if abs(v) >= 0.1 else f"{v:.3f}"
+
+
+def cell(vals):
+    vals = [v for v in vals if v is not None]
+    if not vals:
+        return None, "–"
+    m = statistics.median(vals)
+    return m, fmt(m) + (f" [{fmt(min(vals))}–{fmt(max(vals))}]" if len(vals) > 1 else "")
+
+
+def table(title, rows, higher_better=None):
+    emit(f"\n### {title}\n")
+    emit("| Metric | " + " | ".join(order) + " |")
+    emit("|---|" + "---|" * len(order))
+    for name, getter, hb in rows:
+        cells, meds = [], {}
+        for c in order:
+            vals = []
+            for r in runs[c]:
+                try:
+                    vals.append(getter(r))
+                except (KeyError, IndexError, TypeError, StopIteration, ZeroDivisionError):
+                    vals.append(None)
+            m, s = cell(vals)
+            meds[c] = m
+            cells.append(s)
+        if hb is not None and meds.get(baseline):
+            for i, c in enumerate(order):
+                if c != baseline and meds[c]:
+                    x = meds[c] / meds[baseline] if hb else meds[baseline] / meds[c]
+                    cells[i] += f" ({x:.2f}×)"
+        emit(f"| {name} | " + " | ".join(cells) + " |")
+
+
+def http(route, conc):
+    return lambda r: next(h for h in r["http"] if h["route"] == route and str(h["conc"]) == str(conc))
+
+
+emit("```")
+emit(open(os.path.join(out, "env.txt")).read().strip())
+emit("```")
+emit(f"\nReps per configuration: " + ", ".join(f"{c} {len(runs[c])}" for c in order) +
+     f". Cells: median [min–max]; (×) is the gain over {baseline} (>1 is better).")
+emit("Host load (1-min loadavg at start of each run): " +
+     ", ".join(f"{c} {'/'.join(r['load_start'][0] for r in runs[c])}" for c in order))
+
+routes, concs = [], []
+first = max((r for c in order for r in runs[c]), key=lambda r: len(r.get("http", [])))
+for h in first.get("http", []):
+    if h["route"] not in routes:
+        routes.append(h["route"])
+    if str(h["conc"]) not in concs:
+        concs.append(str(h["conc"]))
+
+for route in routes:
+    rows = []
+    for c in concs:
+        g = http(route, c)
+        rows.append((f"c={c} req/s", lambda r, g=g: g(r)["rps"], True))
+        rows.append((f"c={c} p50 ms", lambda r, g=g: g(r)["latency"]["p50_ms"], False))
+        rows.append((f"c={c} p99 ms", lambda r, g=g: g(r)["latency"]["p99_ms"], False))
+    for c in concs:
+        g = http(route, c)
+        rows.append((f"c={c} campfire CPU ms/req", lambda r, g=g: g(r)["cpu_ms_per_req"]["campfire"], False))
+        rows.append((f"c={c} thrust CPU ms/req", lambda r, g=g: g(r)["cpu_ms_per_req"]["thrust"], None))
+        rows.append((f"c={c} docker-proxy CPU ms/req", lambda r, g=g: g(r)["cpu_ms_per_req"]["docker-proxy"], None))
+        rows.append((f"c={c} loadgen cores busy", lambda r, g=g: g(r)["cpu_cores"]["loadgen"], None))
+        rows.append((f"c={c} campfire cores busy", lambda r, g=g: g(r)["cpu_cores"]["campfire"], None))
+    rows.append(("avg response bytes", lambda r, g=http(route, concs[0]): g(r)["avg_bytes"], None))
+    table(f"HTTP {route}", rows)
+
+cable_ns = [str(c["clients"]) for c in first.get("cable", [])]
+for n in cable_ns:
+    g = lambda r, n=n: next(c for c in r["cable"] if str(c["clients"]) == n)
+    rows = [
+        ("subscribed", lambda r, g=g: g(r)["ready"], None),
+        ("paced post→all p50 ms", lambda r, g=g: g(r)["latency"]["all_clients"]["p50_ms"], False),
+        ("paced post→all p99 ms", lambda r, g=g: g(r)["latency"]["all_clients"]["p99_ms"], False),
+        ("paced POST p50 ms", lambda r, g=g: g(r)["latency"]["post"]["p50_ms"], False),
+        ("max sustained msgs/s (to all)", lambda r, g=g: g(r)["throughput"]["delivered_msgs_per_sec"], True),
+        ("deliveries/s", lambda r, g=g: g(r)["throughput"]["frames_per_sec"], True),
+        ("saturated post→all p50 ms", lambda r, g=g: g(r)["throughput"]["all_clients"]["p50_ms"], False),
+        ("campfire CPU µs/delivery", lambda r, g=g: g(r)["cpu_us_per_delivery"]["campfire"], False),
+        ("thrust CPU µs/delivery", lambda r, g=g: g(r)["cpu_us_per_delivery"]["thrust"], None),
+        ("docker-proxy CPU µs/delivery", lambda r, g=g: g(r)["cpu_us_per_delivery"]["docker-proxy"], None),
+        ("loadgen CPU µs/delivery", lambda r, g=g: g(r)["cpu_us_per_delivery"]["loadgen"], None),
+    ]
+    for ph in ("before", "connected", "paced", "saturated", "saturated_posted", "saturated_drained"):
+        rows.append((f"RssAnon peak MB: {ph}", lambda r, g=g, ph=ph: g(r)["memory_by_phase"][ph]["peak_anon_mb"], None))
+    rows.append(("thrust RssAnon peak MB (saturated)", lambda r, g=g: g(r)["memory_by_phase"]["saturated"]["thrust_peak_anon_mb"], None))
+    rows.append(("container memory.current peak MB (saturated)", lambda r, g=g: g(r)["memory_by_phase"]["saturated"]["cgroup_peak_mb"], None))
+    rows.append(("peak threads", lambda r, g=g: max(v.get("peak_threads", 0) for v in g(r)["memory_by_phase"].values()), None))
+    table(f"Action Cable, {n} clients", rows)
+
+text = "\n".join(lines) + "\n"
+open(os.path.join(out, "report.md"), "w").write(text)
+print(text)

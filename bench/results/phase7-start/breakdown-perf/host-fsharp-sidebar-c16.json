@@ -1,0 +1,1 @@
+{"after_unprofiled_window": {"spin_ms": 58.38, "spin_ms_max_cpu": 61.05, "cpus": "0-3,4-7", "baseline_ms": 57.4, "ratio": 1.017}, "after_perf_window": {"spin_ms": 59.66, "spin_ms_max_cpu": 62.08, "cpus": "0-3,4-7", "baseline_ms": 57.4, "ratio": 1.039}}

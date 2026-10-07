@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="Format.fs" />
+    <Compile Include="KitClock.fs" />
+    <Compile Include="Response.fs" />
+    <Compile Include="Error.fs" />
+    <Compile Include="Params.fs" />
+    <Compile Include="Cookies.fs" />
+    <Compile Include="Session.fs" />
+    <Compile Include="Request.fs" />
+    <Compile Include="Exceptions.fs" />
+    <Compile Include="App.fs" />
+    <Compile Include="Multipart.fs" />
+    <Compile Include="Body.fs" />
+    <Compile Include="Ctx.fs" />
+    <Compile Include="Generations.fs" />
+    <Compile Include="Deflater.fs" />
+    <Compile Include="Splice.fs" />
+    <Compile Include="Actions.fs" />
+    <Compile Include="Adapter.fs" />
+    <Compile Include="Server.fs" />
+    <Compile Include="Front/Config.fs" />
+    <Compile Include="Front/Cache.fs" />
+    <Compile Include="Front/Compression.fs" />
+    <Compile Include="Front/Acme.fs" />
+    <Compile Include="Front/RequestLog.fs" />
+    <Compile Include="Front/Handler.fs" />
+    <Compile Include="Front/Tls.fs" />
+    <Compile Include="Front/Conn.fs" />
+    <Compile Include="Front/Front.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
+    <ProjectReference Include="../Campfire.Ruby/Campfire.Ruby.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Falco" />
+    <PackageReference Include="ZstdSharp.Port" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.Kit.Tests" />
+  </ItemGroup>
+</Project>

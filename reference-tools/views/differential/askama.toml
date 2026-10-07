@@ -1,0 +1,8 @@
+# The templates are the views crate's own, read from where they are; this crate only declares the
+# few that rust/crates/views has no struct for (partials it only includes).
+[general]
+dirs = ["../../../rust/crates/views/templates"]
+
+[[escaper]]
+path = "campfire_views::helpers::ErbEscaper"
+extensions = ["html", "svg", "json"]

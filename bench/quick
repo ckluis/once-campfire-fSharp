@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# A fast before/after runner for Rust and F# only (Phase 7's tuning loop). Run inside colima, like bench/run:
+#
+#   bench/quick [--reps 3] [--apps fsharp] [--remeasure-rust] [--mounted DIR] [--only APP:REP] [--out DIR] [--secs 8] [--warmup 30] [--warmup-max 90] [--concs "1 16"] [--routes a,b] [--part K/N]
+#   bench/quick compare DIR                           # F# in DIR against the stored Rust baseline (bench/results/phase7-start) and the F# start
+#   bench/quick log DIR --unit database --tier 2 --change "..." --kept true|false [--build mounted]   # append to phase7-log.jsonl, rebuild index.html
+#   bench/quick report DIR                            # bench/report again, on any bench/run or bench/quick directory
+#   bench/quick cpu [--reps 1] [--secs 6] [--warmup 30] [--out DIR]   # CPU per request only (bench/breakdown cpu on the five workloads)
+#
+# F# ONLY BY DEFAULT (Chris's rule for Phase 7): Rust is a fixed target, so a run measures F# alone and bench/quick compare prints it
+# against the stored Rust medians of bench/results/phase7-start/ ("vs stored Rust baseline"). --remeasure-rust (or --apps rust,fsharp)
+# measures Rust too; do that only at the re-baseline that closes a phase. --mounted DIR is the tier 2 build: DIR, published by
+# bin/publish-mounted, is mounted over /opt/campfire in campfire-fsharp:app, so there is no image rebuild; same env, seed copy, pinning and warm-up.
+#
+# The default is bench/run restricted to what a tuning unit needs: the five workloads (room page, messages page,
+# sidebar, search, post a message) at c=1 and c=16, the HTTP suite only (no Cable, upload or extra concurrencies),
+# 3 reps with the app order alternating (rust, fsharp, then fsharp, rust, ...), a fresh container and seed copy per app
+# and rep, the same warm-up (WARMUP_SECS at each route and concurrency), the same pinning (SERVER_CPUS=0-3,
+# LOADGEN_CPUS=4-7), and the same validity checks and report as bench/run: the status of every response, rows written
+# against posts, response bytes per route, load average before each run, a host-noise probe (bench/lib/hostprobe.py: a run
+# starts only when the pinned CPUs run a fixed spin at their quiet speed, and every window is probed after), and the container's CPU per request
+# (cgroup cpu.stat, unprofiled) next to each throughput. The result directory defaults to bench/results/quick-<stamp>.
+#
+# Time: each (route, c) costs its warm-up (at least WARMUP_SECS = 30 s, until the app is flat, at most WARMUP_MAX_SECS = 90 s:
+# Rust stops at the minimum, F# at 30-45 s), a probe of the host, and --secs 8, so one app-rep is about 10 x (30 + 8 + 3) s = 7
+# minutes for Rust and 8-10 for F#, plus start-up and the wait for the host to be quiet; the whole 2 apps x 3 reps matrix is
+# about an hour, which does not fit one foreground call. Run it a unit at a time, the schedule (and the alternating order)
+# staying the same (F# in two parts, below):
+#   bench/quick --only rust:1 --out DIR; bench/quick --only fsharp:1 --part 1/2 --out DIR; bench/quick --only fsharp:1 --part 2/2 --out DIR
+#   ... then fsharp:2 (two parts), rust:2, rust:3, fsharp:3 (two parts); bench/quick report DIR
+# `--reps 1 --secs 5 --warmup 10 --warmup-max 10` is the 4-minute smoke version (a fixed 10 s warm-up, two apps, one rep each): the
+# plumbing check, not a number to compare with a full run.
+#
+# One app-rep of F# can take longer than a foreground call allows (up to 10 x (90 + 8 + 3) s when its JIT is slow to settle):
+# --part K/N runs the Kth of N slices of the route list (in a fresh container, merged into the rep's file), so the unit
+# is `--only fsharp:1 --part 1/2` then `--only fsharp:1 --part 2/2`; the report treats the two as one rep.
+#
+# Same seed (a copy of parity/.seed/default per app and rep), same images: FSHARP_IMAGE and RUST_IMAGE as in bench/run.
+set -euo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+export SERVER_CPUS=${SERVER_CPUS:-0-3} LOADGEN_CPUS=${LOADGEN_CPUS:-4-7}
+export WORK=${WORK:-/var/tmp/campfire-bench-work}
+
+if [ "${1:-}" = report ]; then shift; exec "$ROOT/bench/report" "$@"; fi
+if [ "${1:-}" = compare ]; then shift; exec python3 "$ROOT/bench/lib/quicklog.py" compare "$@"; fi
+if [ "${1:-}" = log ]; then shift; exec python3 "$ROOT/bench/lib/quicklog.py" log "$@"; fi
+MODE=run
+if [ "${1:-}" = cpu ]; then MODE=cpu; shift; fi
+
+APPS=fsharp REPS=3 OUT="" ONLY="" SECS="" WARMUP="" WARMUP_MAX="" PART="" CONCS="1 16" ROUTES="room_show,messages_page,sidebar,search,post_message"
+[ "$MODE" = cpu ] && REPS=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --reps) REPS=$2; shift 2 ;;
+    --apps) APPS=$2; shift 2 ;;
+    --remeasure-rust) APPS=rust,fsharp; shift ;;
+    --mounted) export FSHARP_MOUNT=$2; shift 2 ;;
+    --only) ONLY=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;;
+    --secs) SECS=$2; shift 2 ;;
+    --warmup) WARMUP=$2; shift 2 ;;
+    --warmup-max) WARMUP_MAX=$2; shift 2 ;;
+    --concs) CONCS=$2; shift 2 ;;
+    --routes) ROUTES=$2; shift 2 ;;
+    --part) PART=$2; shift 2 ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
+done
+OUT=${OUT:-$ROOT/bench/results/quick-$(date +%Y%m%d-%H%M%S)}
+[ -z "$WARMUP" ] || export WARMUP_SECS=$WARMUP
+[ -z "$WARMUP_MAX" ] || export WARMUP_MAX_SECS=$WARMUP_MAX
+
+export SCHEDULE_ROUTES="${ROUTES//,/ }${PART:+ (in parts, --part $PART is one slice of them)}"
+if [ -n "$PART" ]; then
+  # The Kth of N slices of the route list: the first ceil(len/N) routes are part 1, and so on.
+  ROUTES=$(python3 - "$ROUTES" "$PART" <<'PY'
+import math, sys
+routes, (k, n) = sys.argv[1].split(","), map(int, sys.argv[2].split("/"))
+size = math.ceil(len(routes) / n)
+print(",".join(routes[(k - 1) * size:k * size]))
+PY
+)
+  export MERGE_PART=1
+  [ "${PART%/*}" != 1 ] || rm -f "$OUT/${ONLY/:/-}.json"   # part 1 starts the rep's file afresh
+fi
+case "$MODE" in
+  run)
+    export SUITES=http HTTP_CONCS="$CONCS" HTTP_ROUTES="${ROUTES//,/ }" HTTP_SECS=${SECS:-8} IDLE_SECS=${IDLE_SECS:-5}
+    only=(); [ -z "$ONLY" ] || only=(--only "$ONLY")
+    "$ROOT/bench/run" --apps "$APPS" --reps "$REPS" --out "$OUT" "${only[@]}"
+    case ",$APPS," in *,rust,*) ;; *) python3 "$ROOT/bench/lib/quicklog.py" compare "$OUT" | tee "$OUT/vs-stored-rust.md" ;; esac
+    ;;
+  cpu)
+    # bench/breakdown cpu runs each route at c=1 and c=16 (warm-up first) and prints the table that bench/breakdown report makes.
+    "$ROOT/bench/breakdown" cpu --apps "$APPS" --reps "$REPS" --routes "$ROUTES" --secs "${SECS:-6}" --out "$OUT"
+    "$ROOT/bench/breakdown" report "$OUT" | tee "$OUT/report.md"
+    ;;
+esac

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Phase 7 unit 7.3's check that batching the request log loses no line: runs the F# app (the image, or --mounted DIR) with an unbounded
+# log, sends N requests at 16 connections, stops the container with SIGTERM right after the last answer, and compares the number of
+# `Request path=` lines in `docker logs` with the number of requests sent (plus the readiness probes). Inside colima:
+#
+#   colima ssh -- bash -c "cd $PWD && bench/lib/logcount [--mounted DIR] [N]"
+set -euo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+MOUNT=()
+if [ "${1:-}" = --mounted ]; then MOUNT=(-v "$2:/opt/campfire:ro"); shift 2; fi
+N=${1:-20000}
+WORK=${WORK:-/var/tmp/campfire-logcount}
+PORT=4391
+rm -rf "$WORK"; mkdir -p "$WORK/db" "$WORK/storage"
+cp -a --reflink=auto "$ROOT/parity/.seed/default/db/." "$WORK/db/"; cp -a --reflink=auto "$ROOT/parity/.seed/default/storage/." "$WORK/storage/"
+args=(); while IFS= read -r line; do args+=("$line"); done < <(grep -Ev '^(#|$|WEB_CONCURRENCY|JOB_CONCURRENCY|RAILS_MAX_THREADS|RAILS_LOG_LEVEL)' "$ROOT/parity/.env.reference" | sed 's/^/-e\n/')
+docker rm -f campfire-logcount >/dev/null 2>&1 || true
+docker run -d --name campfire-logcount --cpuset-cpus 0-3 --user "$(id -u):$(id -g)" "${MOUNT[@]}" --log-driver json-file \
+  --network host -e HTTP_PORT=$PORT -e TARGET_PORT=$((PORT + 1)) "${args[@]}" -e RAILS_LOG_LEVEL=warn \
+  -v "$WORK/db:/rails/storage/db" -v "$WORK/storage:/rails/storage/files" campfire-fsharp:app >/dev/null
+probes=0
+for _ in $(seq 1 3000); do
+  probes=$((probes + 1))
+  if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/up" 2>/dev/null; then break; fi
+  sleep 0.02
+done
+python3 - "$PORT" "$N" <<'PY'
+import sys, threading, http.client
+port, n = int(sys.argv[1]), int(sys.argv[2])
+per = n // 16
+def worker():
+    c = http.client.HTTPConnection("127.0.0.1", port)
+    for i in range(per):
+        c.request("GET", f"/up?i={i}")
+        c.getresponse().read()
+ts = [threading.Thread(target=worker) for _ in range(16)]
+[t.start() for t in ts]; [t.join() for t in ts]
+PY
+sent=$((N / 16 * 16))
+docker stop -t 10 campfire-logcount >/dev/null
+logged=$(docker logs campfire-logcount 2>&1 | grep -c 'Request path=')
+# The probes that failed to connect are not requests; the one that answered is.
+echo "sent $sent requests (+1 answered readiness probe), logged $logged lines"
+docker logs campfire-logcount 2>&1 | grep -v 'Request path=' | tail -5
+docker rm -f campfire-logcount >/dev/null
+rm -rf "$WORK"
+[ "$logged" -eq $((sent + 1)) ] && echo OK || { echo "MISMATCH"; exit 1; }

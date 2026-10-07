@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="Time.fs" />
+    <Compile Include="Error.fs" />
+    <Compile Include="Events.fs" />
+    <Compile Include="Sql.fs" />
+    <Compile Include="Columns.fs" />
+    <Compile Include="RichText.fs" />
+    <Compile Include="Schema.fs" />
+    <Compile Include="Database.fs" />
+    <Compile Include="Sound.fs" />
+    <Compile Include="Session.fs" />
+    <Compile Include="Ban.fs" />
+    <Compile Include="Search.fs" />
+    <Compile Include="RichTextRecord.fs" />
+    <Compile Include="ActiveStorage.fs" />
+    <Compile Include="Account.fs" />
+    <Compile Include="Models.fs" />
+    <Compile Include="PushSubscription.fs" />
+    <Compile Include="FirstRun.fs" />
+    <Compile Include="Testing.fs" />
+    <Compile Include="Fixtures.fs" />
+    <EmbeddedResource Include="schema.sql" LogicalName="schema.sql" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Campfire.RailsCompat/Campfire.RailsCompat.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.Db.Tests" />
+  </ItemGroup>
+</Project>

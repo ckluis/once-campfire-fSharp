@@ -1,0 +1,21 @@
+# The app rust/crates/kit/tests/http.rs tests, served over HTTP, for bin/kit-differential http to send
+# requests to next to the same app on Campfire.Kit. The source of the binary is that test file's app,
+# cut out by gen_main.py; not part of rust/'s workspace: the crates are path dependencies.
+[package]
+name = "kit-http-differential"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "kit-http-differential"
+path = "../../../target/kit-http-differential/main.rs"
+
+[dependencies]
+campfire_kit = { path = "../../../rust/crates/kit" }
+rails_compat = { path = "../../../rust/crates/rails_compat" }
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[workspace]

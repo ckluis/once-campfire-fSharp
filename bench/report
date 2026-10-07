@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+"""Summarize a bench/run results dir: median [min–max] across reps, Rails vs Rust vs F#.
+
+  bench/report bench/results/<stamp>
+
+"Rust adv." is the Rust advantage over Rails and "F# adv." the F# advantage over Rust: >1 means the
+first is better (higher throughput, or lower latency/memory/time), computed from the medians. When the
+results include `rust-identity` or `fsharp-identity` runs (the image serving `Accept-Encoding:
+identity`), the HTTP table adds a "no gzip" column for each, with F# against Rust and each against its own
+gzip run. After the tables come the validity checks: the load average before each run, every response's
+status class, the rows `post_message` wrote against the answers it got, and the response bytes of each
+route per app (a smaller response is not a fair win).
+"""
+import glob, json, os, statistics, sys
+
+out = sys.argv[1]
+runs = {}
+for f in sorted(glob.glob(os.path.join(out, "*-*.json"))):
+    r = json.load(open(f))
+    runs.setdefault(r["app"], []).append(r)
+identity = {a: runs.pop(a) for a in ("rust-identity", "fsharp-identity") if a in runs}
+apps = [a for a in ("reference", "rust", "fsharp") if a in runs]
+NAME = {"reference": "Rails", "rust": "Rust", "fsharp": "F#", "rust-identity": "Rust, no gzip", "fsharp-identity": "F#, no gzip"}
+
+
+def cell(vals):
+    vals = [v for v in vals if v is not None]
+    if not vals:
+        return None, "–"
+    m = statistics.median(vals)
+    fmt = (lambda v: f"{v:,.0f}") if m >= 100 else (lambda v: f"{v:.1f}") if m >= 10 else (lambda v: f"{v:.2f}")
+    spread = f" [{fmt(min(vals))}–{fmt(max(vals))}]" if len(vals) > 1 else ""
+    return m, fmt(m) + spread
+
+
+def values(group, getter):
+    vals = []
+    for r in group:
+        try:
+            vals.append(getter(r))
+        except (KeyError, IndexError, TypeError, StopIteration):
+            vals.append(None)
+    return vals
+
+
+def ratio(a, b, higher_better, digits=1):
+    """a's advantage over b: >1 means a is better."""
+    if not a or not b:
+        return "–"
+    return f"{(a / b if higher_better else b / a):.{digits}f}×"
+
+
+def columns():
+    cols = [NAME[a] for a in apps]
+    if "reference" in apps and "rust" in apps:
+        cols.append("Rust adv.")
+    if "rust" in apps and "fsharp" in apps:
+        cols.append("F# adv.")
+    cols += [NAME[a] for a in identity]
+    if "rust-identity" in identity and "fsharp-identity" in identity:
+        cols.append("F# adv. (no gzip)")
+    for a in identity:
+        if a[: -len("-identity")] in apps:
+            cols.append(f"{NAME[a]} vs gzip")
+    return cols
+
+
+def row(name, getter, higher_better, with_identity=False):
+    meds, cells = {}, []
+    for a in apps:
+        m, c = cell(values(runs[a], getter))
+        meds[a] = m
+        cells.append(c)
+    if "reference" in apps and "rust" in apps:
+        cells.append(ratio(meds["rust"], meds["reference"], higher_better))
+    if "rust" in apps and "fsharp" in apps:
+        cells.append(ratio(meds["fsharp"], meds["rust"], higher_better, 2))
+    imeds = {}
+    if with_identity:
+        for a, group in identity.items():
+            m, c = cell(values(group, getter))
+            imeds[a] = m
+            cells.append(c)
+        if "rust-identity" in identity and "fsharp-identity" in identity:
+            cells.append(ratio(imeds["fsharp-identity"], imeds["rust-identity"], higher_better, 2))
+        for a in identity:
+            base = a[: -len("-identity")]
+            if base in apps:
+                cells.append(ratio(imeds[a], meds[base], higher_better, 2))
+    print(f"| {name} | " + " | ".join(cells) + " |")
+
+
+def header(title, with_identity=False, note=""):
+    print(f"\n### {title}\n")
+    if note:
+        print(note + "\n")
+    cols = columns()
+    if not with_identity:
+        cols = [c for c in cols if "no gzip" not in c and "vs gzip" not in c]
+    print("| Metric | " + " | ".join(cols) + " |")
+    print("|---|" + "---|" * len(cols))
+
+
+env = os.path.join(out, "env.txt")
+if os.path.exists(env):
+    print("```\n" + open(env).read().strip() + "\n```")
+print("\nReps: " + ", ".join(f"{a} {len(runs[a])}" for a in apps) + (", " + ", ".join(f"{a} {len(g)}" for a, g in identity.items()) if identity else "")
+      + ". Cells: median [min–max].")
+
+header("Startup and memory")
+row("cold start: docker run → /up 200 (ms)", lambda r: r["cold_start_ms"], False)
+row("idle memory.current (MB)", lambda r: r["memory"]["idle_current_mb"], False)
+row("idle anon (MB)", lambda r: r["memory"]["idle_anon_mb"], False)
+row("peak memory.current under load (MB)", lambda r: r["memory"]["peak_current_mb"], False)
+row("peak anon under load (MB)", lambda r: r["memory"]["peak_anon_mb"], False)
+
+first = runs[apps[0]][0]
+routes = []
+for h in first["http"]:
+    if (h["route"], h["conc"]) not in routes:
+        routes.append((h["route"], h["conc"]))
+
+
+def http(route, conc, key):
+    def get(r):
+        h = next(h for h in r["http"] if h["route"] == route and h["conc"] == conc)
+        if h["latency"].get("n", 0) == 0 or h["ok"] == 0:
+            return None
+        if key == "cpu":
+            return h["cost"]["server_cpu_us_per_req"]
+        return h["rps"] if key == "rps" else h["latency"][key]
+    return get
+
+
+wi = bool(identity)
+has_cpu = any("cost" in h for a in apps for r in runs[a] for h in r["http"])
+header("HTTP (signed in as david; keep-alive; c = concurrent connections)", wi,
+       note="`CPU µs/req` is the container's CPU (cgroup cpu.stat, user + system, unprofiled) over the run divided by its requests; "
+            "for CPU a ratio below 1 means the first app spends more per request." if has_cpu else "")
+for route, conc in routes:
+    row(f"{route} c={conc} req/s", http(route, conc, "rps"), True, wi)
+    if has_cpu:
+        row(f"{route} c={conc} CPU µs/req", http(route, conc, "cpu"), False, wi)
+    row(f"{route} c={conc} p50 ms", http(route, conc, "p50_ms"), False, wi)
+    row(f"{route} c={conc} p99 ms", http(route, conc, "p99_ms"), False, wi)
+
+if first["cable"]:
+    header("Action Cable fan-out (one room; chatter.js subscriptions per client)")
+for i, c in enumerate(first["cable"]):
+    n = c["clients"]
+    row(f"{n} clients: subscribed", lambda r, i=i: r["cable"][i]["ready"], True)
+    row(f"{n} clients: connect+subscribe all (s)", lambda r, i=i: r["cable"][i]["connect_secs"], False)
+    row(f"{n} clients: paced post→one client p50 ms", lambda r, i=i: r["cable"][i]["latency"]["per_client"]["p50_ms"], False)
+    row(f"{n} clients: paced post→all clients p50 ms", lambda r, i=i: r["cable"][i]["latency"]["all_clients"]["p50_ms"], False)
+    row(f"{n} clients: paced post→all clients p99 ms", lambda r, i=i: r["cable"][i]["latency"]["all_clients"]["p99_ms"], False)
+    row(f"{n} clients: max sustained msgs/s (delivered to all)", lambda r, i=i: r["cable"][i]["throughput"]["delivered_msgs_per_sec"], True)
+    row(f"{n} clients: deliveries/s (client×message)", lambda r, i=i: r["cable"][i]["throughput"]["frames_per_sec"], True)
+    row(f"{n} clients: saturated post→all p50 ms", lambda r, i=i: r["cable"][i]["throughput"]["all_clients"]["p50_ms"], False)
+    row(f"{n} clients: saturated POST p50 ms", lambda r, i=i: r["cable"][i]["throughput"]["post"]["p50_ms"], False)
+
+if first.get("upload"):
+    header("Upload + thumbnail (black_hole.jpg, 505 KB)")
+    med = lambda key: (lambda r: statistics.median([x[key] for x in r["upload"]["runs"] if key in x]))
+    row("POST with attachment (ms)", med("post_ms"), False)
+    row("then GET thumb → 200 (ms)", med("thumb_ms"), False)
+    row("POST → thumbnail served (ms)", lambda r: r["upload"]["median_total_ms"], False)
+
+
+def procmem(n, phase, what):
+    def get(r):
+        c = next(c for c in r["cable"] if c["clients"] == n)
+        p = c["process_memory"][phase]
+        roles = p["roles"]
+        if what == "app":
+            return roles["puma" if r["app"] == "reference" else "campfire"]["peak_pss_mb"]
+        if what == "app_anon":
+            return roles["puma" if r["app"] == "reference" else "campfire"]["peak_anon_mb"]
+        if what == "serving":  # everything that takes part in a cable delivery
+            keys = ["puma", "redis", "thrust"] if r["app"] == "reference" else ["campfire"]
+            return sum(roles[k]["peak_pss_mb"] for k in keys if k in roles)
+        return p["peak_total_pss_mb"]
+    return get
+
+
+if first["cable"] and all("process_memory" in c for a in apps for r in runs[a] for c in r["cable"]):
+    header("Memory during cable fan-out, by process (MB, peak within the phase)", note=(
+        "App process: Rails' Puma master and workers (Action Cable runs in them), or the Rust and F# ports' one campfire\n"
+        "process (its front server included). Pss counts pages shared between forked workers once;\n"
+        "RssAnon counts them in every process."))
+    for c in first["cable"]:
+        n = c["clients"]
+        for phase, label in (("connected", "all subscribed, idle"), ("saturated", "saturated fan-out")):
+            row(f"{n} clients, {label}: app process Pss", procmem(n, phase, "app"), False)
+            row(f"{n} clients, {label}: app process RssAnon", procmem(n, phase, "app_anon"), False)
+            row(f"{n} clients, {label}: app + Redis + Thruster Pss", procmem(n, phase, "serving"), False)
+            row(f"{n} clients, {label}: whole container Pss", procmem(n, phase, "total"), False)
+
+# ---------------------------------------------------------------------------------------------
+# Validity: what the numbers above were checked against.
+
+every = [(a, r) for a in apps + list(identity) for r in (runs.get(a) or identity.get(a))]
+
+print("\n## Validity\n")
+print("### Load average before each run (1, 5, 15 minutes; the run waited for the 1-minute figure to fall below LOAD_MAX)\n")
+print("| App | Rep | Before | After |")
+print("|---|---|---|---|")
+for a, r in every:
+    print(f"| {NAME[a]} | {r['rep']} | {' '.join(r['loadavg_start'].split()[:3])} | {' '.join(r['loadavg_end'].split()[:3])} |")
+
+if any("host_probe_start" in r for a, r in every):
+    print("\n### Host CPU probe (a fixed spin timed on every pinned CPU, against the quietest this VM has shown; bench/lib/hostprobe.py)\n")
+    print("The VM's load average cannot see another program on the Mac taking the cores its vCPUs run on; this can. A ratio of 1.00 is a quiet host, "
+          "above 1.10 the pinned server and load generator were slowed by something outside the run. `After each window` probes the machine "
+          "right after every measured run of the rep.\n")
+    print("| App | Rep | Before the run | After the run | Windows probed above 1.10 | Highest after a window |")
+    print("|---|---|---|---|---|---|")
+    for a, r in every:
+        if "host_probe_start" not in r:
+            continue
+        after = [h["host_probe_after"]["ratio"] for h in r["http"] if "host_probe_after" in h]
+        bad = sum(1 for x in after if x > 1.10)
+        flag = " **noisy**" if bad or r["host_probe_start"]["ratio"] > 1.10 else ""
+        print(f"| {NAME[a]} | {r['rep']} | {r['host_probe_start']['ratio']:.2f} | {r['host_probe_end']['ratio']:.2f} | {bad}/{len(after)}{flag} | {max(after) if after else float('nan'):.2f} |")
+
+print("\n### Responses by status class, every HTTP run of every rep\n")
+print("| App | Route | 2xx | 3xx | 4xx | 5xx | Errors (no response) |")
+print("|---|---|---|---|---|---|---|")
+for a in apps + list(identity):
+    group = runs.get(a) or identity.get(a)
+    tally = {}
+    for r in group:
+        for h in r["http"]:
+            t = tally.setdefault(h["route"], [0, 0, 0, 0, 0])
+            for k, v in h["statuses"].items():
+                t[min(int(k) // 100, 5) - 2 if int(k) >= 200 else 0] += v
+            t[4] += h["errors"]
+    for route, t in tally.items():
+        flag = " **←**" if t[2] or t[3] or t[4] else ""
+        print(f"| {NAME[a]} | {route} | {t[0]:,} | {t[1]:,} | {t[2]:,} | {t[3]:,} | {t[4]:,}{flag} |")
+
+if any("warmup" in h for a in apps + list(identity) for r in (runs.get(a) or identity.get(a)) for h in r["http"]):
+    print("\n### Warm-up before each measured run (the app runs the route at the measured concurrency until its throughput is flat; bench/lib/warmup.py)\n")
+    print("`measured / warm-up tail` is the measured run's requests a second over the mean of the last three 2 s warm-up windows: well above 1 "
+          "would mean the app was still speeding up when measurement began, well below 1 that it was slowing down.\n")
+    print("| App | Route | c | warm-up seconds | settled | measured / warm-up tail |")
+    print("|---|---|---|---|---|---|")
+    for a in apps + list(identity):
+        group = runs.get(a) or identity.get(a)
+        seen = []
+        for h in group[0]["http"]:
+            if (h["route"], h["conc"]) not in seen:
+                seen.append((h["route"], h["conc"]))
+        for route, conc in seen:
+            hs = [next((h for h in r["http"] if h["route"] == route and h["conc"] == conc and "warmup" in h), None) for r in group]
+            hs = [h for h in hs if h]
+            if not hs:
+                continue
+            secs = [h["warmup"]["secs"] for h in hs]
+            ok = sum(1 for h in hs if h["warmup"]["settled"] in (True, None))
+            ratios = [h["rps"] / h["warmup"]["tail_rps"] for h in hs if h["warmup"].get("tail_rps")]
+            flag = " **←**" if ok < len(hs) else ""
+            print(f"| {NAME[a]} | {route} | {conc} | {cell(secs)[1]} | {ok}/{len(hs)}{flag} | {statistics.median(ratios) if ratios else float('nan'):.2f} |")
+
+print("\n### Rows written by `post_message` (messages of the write room counted in the app's SQLite file around each run)\n")
+print("| App | Rep | Phase | Posts answered below 400 | Rows written | Match |")
+print("|---|---|---|---|---|---|")
+for a in apps + list(identity):
+    for r in (runs.get(a) or identity.get(a)):
+        ok_total = rows_total = 0
+        for p in r.get("post_rows", []):
+            ok_total += p["ok"]; rows_total += p["rows"]
+            print(f"| {NAME[a]} | {r['rep']} | {p['phase']} c={p['conc']} | {p['ok']:,} | {p['rows']:,} | {'yes' if p['ok'] == p['rows'] else '**NO**'} |")
+        if r.get("post_rows"):
+            print(f"| {NAME[a]} | {r['rep']} | **all** | {ok_total:,} | {rows_total:,} | {'yes' if ok_total == rows_total else '**NO**'} |")
+
+print("\n### Response bytes, one request per route (gzip: wire / decoded; identity: bytes) and the average over the c=16 run\n")
+print("The probe is a single request after sign-in, before any load. Bodies carry per-request tokens and "
+      "the clock, so sizes of two apps agree to within a few bytes when they render the same page. "
+      "\"c=16 avg\" is what the load generator received per request on the wire (gzip unless the column says otherwise).\n")
+names = [a for a in apps]
+print("| Route | " + " | ".join(f"{NAME[a]} gzip wire / decoded" for a in names) + " | " + " | ".join(f"{NAME[a]} identity" for a in names)
+      + " | " + " | ".join(f"{NAME[a]} c=16 avg" for a in names) + " | F# vs Rust |")
+print("|---|" + "---|" * (3 * len(names) + 1))
+probe_routes = []
+for a in names:
+    for pr in runs[a][0].get("probe", []):
+        if pr["route"] not in probe_routes:
+            probe_routes.append(pr["route"])
+for route in probe_routes + ["post_message"]:
+    gz, idc, avg = [], [], []
+    for a in names:
+        pr = next((x for x in runs[a][0].get("probe", []) if x["route"] == route), None)
+        gz.append(f"{pr['gzip']['status']} {pr['gzip']['wire_bytes']:,} / {pr['gzip']['decoded_bytes']:,}" if pr else "–")
+        idc.append(f"{pr['identity']['status']} {pr['identity']['wire_bytes']:,}" if pr else "–")
+        v = values(runs[a], lambda r: next(h["avg_bytes"] for h in r["http"] if h["route"] == route and h["conc"] == 16))
+        avg.append(f"{statistics.median([x for x in v if x is not None]):,.0f}" if any(x is not None for x in v) else "–")
+    flag = "–"
+    if "rust" in names and "fsharp" in names:
+        pr = lambda a: next((x for x in runs[a][0].get("probe", []) if x["route"] == route), None)
+        r_, f_ = pr("rust"), pr("fsharp")
+        if r_ and f_:
+            d = f_["identity"]["wire_bytes"] - r_["identity"]["wire_bytes"]
+            g = f_["gzip"]["wire_bytes"] / max(r_["gzip"]["wire_bytes"], 1)
+            flag = f"identity {d:+,} B; gzip wire {100 * (g - 1):+.1f}%"
+        else:
+            va, vb = (statistics.median([x for x in values(runs[a], lambda r: next(h["avg_bytes"] for h in r["http"] if h["route"] == route and h["conc"] == 16)) if x is not None] or [0]) for a in ("rust", "fsharp"))
+            flag = f"c=16 avg {vb - va:+,.0f} B" if va else "–"
+    print(f"| {route} | " + " | ".join(gz) + " | " + " | ".join(idc) + " | " + " | ".join(avg) + f" | {flag} |")

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Runs a test project on Linux, in Dockerfile.toolchain (the .NET SDK on Debian, in colima), for the
+# tests that skip on macOS because the platform's TLS stack differs: front TLS session resumption by
+# ticket, for one (`FrontAcmeIntegrationTests`).
+#
+#   bin/linux-tests Kit                                   all of Campfire.Kit.Tests
+#   bin/linux-tests Kit --filter-method "*resume*"        extra arguments go to dotnet test
+#
+# The build runs on a private copy of the sources (without bin/, obj/, target/, rust/ and the parity seeds,
+# which the tests still read from the real repository through CAMPFIRE_ROOT), so it can't clash with the
+# host's obj/ and bin/, and the projects that generate files beside their sources (Campfire.Assets writes its
+# embedded assets under obj/) can build. A run starts from a clean build.
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ "$(uname)" = Darwin ]; then
+  exec colima ssh -- bash -c "cd '$root' && bin/linux-tests $(printf '%q ' "$@")"
+fi
+
+[ $# -ge 1 ] || { echo "usage: bin/linux-tests <Project> [dotnet test arguments]" >&2; exit 2; }
+project="$1"; shift
+image="${IMAGE:-campfire-fsharp-toolchain}"
+cd "$root"
+docker build --tag "$image" - < Dockerfile.toolchain
+exec docker run --rm \
+  --volume "$root:/repo:ro" \
+  --volume campfire-fsharp-nuget:/nuget \
+  --env NUGET_PACKAGES=/nuget \
+  --env CAMPFIRE_ROOT=/repo \
+  --env CAMPFIRE_REQUIRE_SEED \
+  "$image" \
+  bash -c 'set -euo pipefail
+    mkdir -p /work
+    cd /repo
+    # (tar exits 1 for files that changed as it read them, which virtiofs reports for the directory itself.)
+    { tar --exclude=bin --exclude=obj --exclude=./target --exclude=./.git --exclude=./rust --exclude=./parity/.seed --exclude=./parity/node_modules -cf - . || test $? -eq 1; } | tar -xf - -C /work
+    cd /work
+    exec dotnet test --project "tests/Campfire.$0.Tests" -c Release "$@"' "$project" "$@"

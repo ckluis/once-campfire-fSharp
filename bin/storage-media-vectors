@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Runs the Campfire.Storage tests with the byte comparisons of the storage vectors switched on:
+# in Dockerfile.toolchain (the .NET SDK beside libvips 8.16.1 and ffmpeg 7.1.5 built as the
+# reference image's are), with CAMPFIRE_REQUIRE_MEDIA_VECTORS=1, so a version mismatch fails
+# instead of skipping. Docker runs in colima, so from the host this goes through the VM.
+#
+#   bin/storage-media-vectors              check against vectors the reference image makes now, here
+#   bin/storage-media-vectors checked-in   check against vectors/storage.json
+#   bin/storage-media-vectors build        only build the image (it takes a while the first time)
+#
+# Why two sets: thumbnails, avatars and logos are made by libvips, which gives the same bytes on
+# every architecture, so they match vectors/storage.json anywhere. A video poster starts from a frame
+# ffmpeg draws, and ffmpeg's colour conversion differs between architectures: vectors/storage.json's
+# frame was made on another architecture than colima's (aarch64), and the reference image's own ffmpeg
+# draws what this port's does on this machine, not what the checked-in frame is. So on aarch64 `checked-in`
+# fails the four comparisons that start from that frame (the preview image and the three posters), and the
+# default regenerates the vectors with reference-tools/storage/generate.rb, which makes all of them
+# comparable. A frame is also compared with its posters in "posters are made from the reference frame",
+# which uses the checked-in frame and so holds on every architecture.
+#
+# What the pipeline test compared is written to target/media-vectors/storage.txt.
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ "$(uname)" = Darwin ]; then
+  exec colima ssh -- bash -c "cd '$root' && bin/storage-media-vectors $*"
+fi
+
+image="${IMAGE:-campfire-fsharp-toolchain}"
+cd "$root"
+
+# The build reads nothing from the repository, so its context is just the Dockerfile.
+docker build --tag "$image" - < Dockerfile.toolchain
+[ "${1:-}" = build ] && exit 0
+
+vectors=/src/target/media-vectors/fresh/storage.json
+if [ "${1:-}" = checked-in ]; then
+  vectors=/src/vectors/storage.json
+else
+  # The reference app makes the vectors again, with this machine's ffmpeg (what generate.rb does for
+  # vectors/, into target/ instead).
+  fresh="$root/target/media-vectors/fresh"
+  rm -rf "$fresh"
+  mkdir -p "$fresh"
+  docker run --rm --env-file parity/.env.reference -e OUT=/out -e RAILS_LOG_LEVEL=error \
+    --volume "$root/reference-tools/storage:/tools:ro" --volume "$fresh:/out" "${REFERENCE_IMAGE:-campfire-reference}" \
+    bash -c "bin/rails db:prepare > /dev/null && bin/rails runner /tools/generate.rb"
+fi
+
+mkdir -p target/media-vectors
+rm -f target/media-vectors/storage.txt
+# Build output goes outside the repository (--artifacts-path), so it can't clash with the host's
+# obj/ and bin/; CAMPFIRE_ROOT tells the tests where the repository is.
+status=0
+docker run --rm \
+  --volume "$root:/src:ro" \
+  --volume "$root/target/media-vectors:/report" \
+  --volume campfire-fsharp-nuget:/nuget \
+  --env NUGET_PACKAGES=/nuget \
+  --env CAMPFIRE_ROOT=/src \
+  --env CAMPFIRE_STORAGE_VECTORS="$vectors" \
+  --env CAMPFIRE_STORAGE_REPORT=/report/storage.txt \
+  "$image" \
+  dotnet test --project tests/Campfire.Storage.Tests -c Release --artifacts-path /artifacts || status=$?
+echo
+echo "target/media-vectors/storage.txt:"
+cat target/media-vectors/storage.txt
+exit $status

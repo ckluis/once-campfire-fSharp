@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="RubyString.fs" />
+    <Compile Include="Integer.fs" />
+    <Compile Include="Float.fs" />
+    <Compile Include="Uri.fs" />
+    <Compile Include="Erb.fs" />
+    <Compile Include="Rack.fs" />
+    <Compile Include="Ruby.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Campfire.Ruby.Tests" />
+  </ItemGroup>
+</Project>

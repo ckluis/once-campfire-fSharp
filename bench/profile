@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Profile the Rust app natively (no Docker, no Thruster) with in-process samplers, since
+kernel.perf_event_paranoid=2 rules out perf and samply for unprivileged users:
+
+  bench/profile cpu   --label base [--targets room_show,messages_page,post_message_c1,post_message,cable1000] [--secs 10]
+  bench/profile alloc --label base [--route room_show] [--requests 1000]
+  bench/profile heap  --label base [--clients 1000]
+  (all take --out DIR, default bench/results/profile-<stamp>, and --user-agent UA as in bench/attrib)
+
+cpu:   LD_PRELOAD gperftools' libprofiler.so (SIGPROF sampling at 1 kHz, libunwind stacks),
+       toggled with SIGUSR2 around each target's load window, then bench/lib/cpuprof.py renders
+       folded stacks, a flamegraph (inferno) and a rollup per target.
+alloc: LD_PRELOAD jemalloc with stats and full-rate allocation profiling; two runs (0 and N requests
+       of the route) give allocations per request (the difference over N) and, via jeprof --base,
+       the allocation sites.
+heap:  LD_PRELOAD jemalloc heap profiling with prof_gdump (a dump at every new peak of mapped
+       memory) during the cable fan-out; the last dump is the peak's live heap by allocation site.
+
+The binary comes from NATIVE_<LABEL>_BIN (build it with CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
+for symbols). Knobs: SERVER_CPUS, LOADGEN_CPUS, PORT as in bench/attrib.
+"""
+import argparse, glob, json, os, signal, subprocess, sys, time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib as b
+
+LIBPROFILER = os.environ.get("LIBPROFILER", "/usr/lib/libprofiler.so")
+LIBJEMALLOC = os.environ.get("LIBJEMALLOC", "/usr/lib/libjemalloc.so")
+
+p = argparse.ArgumentParser()
+p.add_argument("mode", choices=["cpu", "alloc", "heap"])
+p.add_argument("--label", default="base")
+p.add_argument("--targets", default="room_show,room_show_identity,messages_page,sidebar,post_message_c1,post_message,cable1000")
+p.add_argument("--secs", default="10")
+p.add_argument("--route", default="room_show")
+p.add_argument("--requests", type=int, default=1000)
+p.add_argument("--clients", default="1000")
+p.add_argument("--out")
+p.add_argument("--user-agent", help="User-Agent for every loadgen request (default: none)")
+a = p.parse_args()
+b.USER_AGENT = a.user_agent
+
+out = os.path.abspath(a.out or os.path.join(b.BENCH, "results", "profile-" + time.strftime("%Y%m%d-%H%M%S")))
+os.makedirs(out, exist_ok=True)
+b.build_loadgen()
+seed = b.WORK + "-seed"
+labels = b.snapshot_seed(seed)
+label = a.label.upper().replace("-", "_")
+config = f"native-{a.label}"
+binary = os.environ[f"NATIVE_{label}_BIN"]
+
+
+def with_preload(lib, env):
+    os.environ[f"NATIVE_{label}_PRELOAD"] = lib
+    return b.start(config, seed, env)
+
+
+def run_cable_toggled(app, sess, clients, on_phase):
+    """Runs the cable fan-out, calling on_phase(name) as loadgen reports each phase."""
+    args = [b.LOADGEN, "cable", "--base", app.base, "--cookie", sess["cookie"], "--room", sess["room"], "--csrf", sess["csrf"],
+            "--streams", sess["streams"], "--clients", clients, "--tput-secs", "15", "--posters", "4", *b.user_agent_args()]
+    proc = subprocess.Popen(["taskset", "-c", b.LOADGEN_CPUS, *map(str, args)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    for line in proc.stderr:
+        if line.startswith("PHASE "):
+            on_phase(line.split()[1])
+    res = json.loads(proc.stdout.read())
+    proc.wait()
+    return res
+
+
+def cpu():
+    raw = os.path.join(out, "raw")
+    os.makedirs(raw, exist_ok=True)
+    for f in glob.glob(os.path.join(raw, "cpu*")):
+        os.remove(f)
+    app = with_preload(LIBPROFILER, {"CPUPROFILE": os.path.join(raw, "cpu"), "CPUPROFILESIGNAL": "12", "CPUPROFILE_FREQUENCY": "1000",
+                                     # eh_frame unwinding through the signal frame; the default loses the callers of
+                                     # frame-pointer-less Rust code.
+                                     "TCMALLOC_STACKTRACE_METHOD": os.environ.get("PROFILER_UNWIND", "libgcc")})
+    pid = app.pids["campfire"]
+    toggle = lambda: os.kill(pid, signal.SIGUSR2)
+    done = []
+    try:
+        sess = b.session(app, labels)
+        rts = b.routes(sess)
+        rts["post_message_c1"] = rts["post_message"]
+        for t in a.targets.split(","):
+            if t.startswith("cable"):
+                n = t[len("cable"):]
+                state = {}
+
+                def on_phase(name):
+                    # Profile the saturated fan-out: posting plus draining to every client.
+                    if name == "saturated":
+                        toggle()
+                        state["on"] = True
+                    elif name == "saturated_drained" and state.get("on"):
+                        toggle()
+                        state["on"] = False
+
+                res = run_cable_toggled(app, sess, n, on_phase)
+                b.log(f"cable {n}: {res['throughput']['delivered_msgs_per_sec']} msg/s")
+            else:
+                conc = 1 if t.endswith("_c1") else 16
+                b.lg("http", "--base", app.base, "--cookie", sess["cookie"], *rts[t], "--conc", 4, "--duration", 1)
+                toggle()
+                r = b.http(app, sess, rts[t], conc, a.secs)
+                toggle()
+                b.log(f"{t} c={conc}: {r['rps']} rps, campfire {r['cpu_ms_per_req']['campfire']} CPU ms/req")
+            done.append(t)
+            time.sleep(0.5)
+    finally:
+        app.stop()
+    time.sleep(0.5)
+    for i, t in enumerate(done):
+        f = os.path.join(raw, f"cpu.{i}")
+        if os.path.exists(f):
+            subprocess.run([sys.executable, os.path.join(b.BENCH, "lib", "cpuprof.py"), f, "--out", os.path.join(out, f"cpu-{t}"),
+                            "--title", f"campfire {a.label}: {t}"], check=True)
+
+
+def jemalloc_stats(stderr_text):
+    """Total allocation requests and bytes from jemalloc's JSON stats_print at exit."""
+    start = stderr_text.find("{\n\"jemalloc\"")
+    if start < 0:
+        start = stderr_text.find('{"jemalloc"')
+    j = json.loads(stderr_text[start:stderr_text.rindex("}") + 1])["jemalloc"]
+    m = j["stats.arenas"]["merged"]
+    small, large = m["small"], m["large"]
+    return {"nrequests": small["nrequests"] + large["nrequests"], "nmalloc": small["nmalloc"] + large["nmalloc"]}
+
+
+def alloc():
+    results = {}
+    heaps = {}
+    for n in (0, a.requests):
+        prefix = os.path.join(out, "raw", f"alloc-{a.route}-{n}")
+        os.makedirs(os.path.dirname(prefix), exist_ok=True)
+        for f in glob.glob(prefix + ".*"):
+            os.remove(f)
+        conf = f"stats_print:true,stats_print_opts:J,prof:true,prof_accum:true,lg_prof_sample:0,prof_final:true,prof_prefix:{prefix}"
+        app = with_preload(LIBJEMALLOC, {"MALLOC_CONF": conf})
+        try:
+            sess = b.session(app, labels)
+            rts = b.routes(sess)
+            if n:
+                r, _ = b.lg("http", "--base", app.base, "--cookie", sess["cookie"], *rts[a.route], "--conc", 1, "--duration", 600, "--requests", n)
+                results[f"requests_{n}"] = r["latency"]["n"]
+        finally:
+            app.stop()
+        log = open(os.path.join(b.WORK, "app.log")).read()
+        results[n] = jemalloc_stats(log)
+        heaps[n] = sorted(glob.glob(prefix + ".*.heap"))[-1]
+    d = {k: (results[a.requests][k] - results[0][k]) / a.requests for k in ("nrequests", "nmalloc")}
+    # Full-rate profiling bypasses the thread caches, so every allocation is an arena `nmalloc`.
+    summary = {"route": a.route, "requests": a.requests, "baseline": results[0], "with_requests": results[a.requests],
+               "allocations_per_request": round(d["nmalloc"], 1)}
+    json.dump(summary, open(os.path.join(out, f"alloc-{a.route}.json"), "w"), indent=1)
+    b.log(f"{a.route}: {summary['allocations_per_request']} allocations per request")
+    for kind in ("alloc_objects", "alloc_space"):
+        txt = subprocess.run(["jeprof", "--text", f"--{kind}", f"--base={heaps[0]}", "--nodecount=60", binary, heaps[a.requests]],
+                             capture_output=True, text=True).stdout
+        open(os.path.join(out, f"alloc-{a.route}.{kind}.txt"), "w").write(txt)
+        folded = subprocess.run(["jeprof", "--collapsed", f"--{kind}", f"--base={heaps[0]}", binary, heaps[a.requests]],
+                                capture_output=True, text=True).stdout
+        open(os.path.join(out, f"alloc-{a.route}.{kind}.folded"), "w").write(folded)
+
+
+def heap():
+    prefix = os.path.join(out, "raw", "heap")
+    os.makedirs(os.path.dirname(prefix), exist_ok=True)
+    for f in glob.glob(prefix + ".*"):
+        os.remove(f)
+    conf = f"prof:true,prof_gdump:true,lg_prof_sample:16,prof_prefix:{prefix}"
+    app = with_preload(LIBJEMALLOC, {"MALLOC_CONF": conf})
+    marks = []
+    try:
+        sess = b.session(app, labels)
+        sampler = b.MemSampler(app)
+        sampler.start()
+
+        def on_phase(name):
+            marks.append((name, int(time.time() * 1000), sorted(glob.glob(prefix + ".*.heap"), key=os.path.getmtime)[-1:]))
+
+        res = run_cable_toggled(app, sess, a.clients, on_phase)
+        sampler.stop()
+    finally:
+        app.stop()
+    dumps = sorted(glob.glob(prefix + ".*.heap"), key=os.path.getmtime)
+    phases = [(n, t) for n, t, _ in marks]
+    summary = {"clients": a.clients, "tput": res["throughput"]["delivered_msgs_per_sec"], "memory_by_phase": b.phase_memory(sampler.samples, phases),
+               "phase_dumps": {n: (d[0] if d else None) for n, _, d in marks}, "peak_dump": dumps[-1] if dumps else None}
+    json.dump(summary, open(os.path.join(out, "heap-cable.json"), "w"), indent=1)
+    if dumps:
+        for kind in ("inuse_space", "inuse_objects"):
+            txt = subprocess.run(["jeprof", "--text", f"--{kind}", "--nodecount=60", binary, dumps[-1]], capture_output=True, text=True).stdout
+            open(os.path.join(out, f"heap-cable-peak.{kind}.txt"), "w").write(txt)
+        folded = subprocess.run(["jeprof", "--collapsed", "--inuse_space", binary, dumps[-1]], capture_output=True, text=True).stdout
+        open(os.path.join(out, "heap-cable-peak.folded"), "w").write(folded)
+    b.log(f"heap: {summary['memory_by_phase']} peak dump {summary['peak_dump']}")
+
+
+{"cpu": cpu, "alloc": alloc, "heap": heap}[a.mode]()

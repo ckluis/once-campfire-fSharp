@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Attribute the Rust app's throughput to its serving setup and build: the same routes and cable
+fan-out under several configurations (bench/lib/benchlib.py), interleaved per rep so host load
+drifts hit every configuration alike.
+
+  bench/attrib [--configs proxy-thruster,proxy-direct,host-thruster,host-direct] [--reps 3]
+               [--out DIR] [--routes up,room_show,...] [--concs 1,16,64] [--secs 5]
+               [--cable 1000] [--posters 4] [--user-agent UA]
+  bench/attrib-report DIR
+
+Each run records throughput and latency (as bench/run), and CPU seconds per request for every
+server-side process (campfire, thrust, docker-proxy) and for the load generator, read from
+/proc/<pid>/stat around each run. The cable run also records RssAnon per fan-out phase.
+
+The load generator sends no User-Agent unless given one with --user-agent, which it then sends on
+every request; a desktop Chrome, say:
+  --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+
+Knobs (env): SERVER_CPUS=8-11 LOADGEN_CPUS=12-15 PORT=4390 RUST_IMAGE=campfire-rust:app,
+NATIVE_<LABEL>_BIN / NATIVE_<LABEL>_PRELOAD for native-<label> configurations.
+"""
+import argparse, json, os, subprocess, sys, time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib as b
+
+p = argparse.ArgumentParser()
+p.add_argument("--configs", default="proxy-thruster,proxy-direct,host-thruster,host-direct")
+p.add_argument("--reps", type=int, default=3)
+p.add_argument("--out")
+p.add_argument("--routes", default="up,room_show,room_show_identity,messages_page,sidebar,post_message")
+p.add_argument("--concs", default="1,16,64")
+p.add_argument("--secs", default="5")
+p.add_argument("--cable", default="1000", help="client counts, comma separated; empty to skip")
+p.add_argument("--posters", default="4")
+p.add_argument("--app-env", action="append", default=[], help="extra app environment, K=V (repeatable)")
+p.add_argument("--user-agent", help="User-Agent for every loadgen request (default: none), e.g. 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'")
+a = p.parse_args()
+b.USER_AGENT = a.user_agent
+
+out = a.out or os.path.join(b.BENCH, "results", "attrib-" + time.strftime("%Y%m%d-%H%M%S"))
+os.makedirs(out, exist_ok=True)
+b.build_loadgen()
+seed = os.path.join(b.WORK + "-seed")
+labels = b.snapshot_seed(seed)
+configs = a.configs.split(",")
+
+with open(os.path.join(out, "env.txt"), "w") as f:
+    f.write(f"date: {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n")
+    f.write(f"host: {os.uname().release}, {os.cpu_count()} threads\n")
+    f.write(f"server cpus: {b.SERVER_CPUS}; loadgen cpus: {b.LOADGEN_CPUS}\n")
+    f.write(f"image: {b.IMAGE} {subprocess.check_output(['docker', 'image', 'inspect', '-f', '{{.Id}}', b.IMAGE], text=True).strip()}\n")
+    for c in configs:
+        if c.startswith("native-"):
+            l = c[7:].upper().replace("-", "_")
+            f.write(f"{c}: {os.environ.get(f'NATIVE_{l}_BIN')} preload={os.environ.get(f'NATIVE_{l}_PRELOAD', '')}\n")
+    f.write(f"env: {' '.join(f'{k}={v}' for k, v in b.app_env().items() if 'CONC' in k or 'THREADS' in k)}\n")
+    f.write(f"routes: {a.routes}; concs: {a.concs}; secs: {a.secs}; cable: {a.cable}; app env: {' '.join(a.app_env)}\n")
+    f.write(f"user agent: {a.user_agent if a.user_agent is not None else '(none)'}\n")
+
+try:
+    for rep in range(1, a.reps + 1):
+        for config in configs:
+            load0 = b.loadavg()
+            b.log(f"{config} rep {rep}: starting (load {' '.join(load0)})")
+            app = b.start(config, seed, dict(kv.split("=", 1) for kv in a.app_env))
+            result = {"config": config, "rep": rep, "cold_start_s": round(app.cold_start_s, 3), "pids": app.pids, "load_start": load0}
+            try:
+                time.sleep(2)
+                result["idle"] = b.rss(app.pids["campfire"])
+                sess = b.session(app, labels)
+                rts = b.routes(sess)
+                result["http"] = []
+                for name in filter(None, a.routes.split(",")):
+                    b.lg("http", "--base", app.base, "--cookie", sess["cookie"], *rts[name], "--conc", 4, "--duration", 1)
+                    for c in a.concs.split(","):
+                        r = b.http(app, sess, rts[name], c, a.secs)
+                        r["route"] = name
+                        result["http"].append(r)
+                        b.log(f"{config} rep {rep}: {name} c={c} {r['rps']} rps p50 {r['latency'].get('p50_ms')} p99 {r['latency'].get('p99_ms')} "
+                              f"cpu ms/req {r['cpu_ms_per_req']} statuses {r['statuses']} err {r['errors']}")
+                result["cable"] = []
+                for n in filter(None, a.cable.split(",")):
+                    r = b.cable(app, sess, n, posters=a.posters)
+                    result["cable"].append(r)
+                    b.log(f"{config} rep {rep}: cable {n} ready {r['ready']} tput {r['throughput']['delivered_msgs_per_sec']} msg/s "
+                          f"all p50 {r['latency']['all_clients'].get('p50_ms')} cpu us/delivery {r['cpu_us_per_delivery']} mem {r['memory_by_phase']}")
+            finally:
+                result["load_end"] = b.loadavg()
+                app.stop()
+            json.dump(result, open(os.path.join(out, f"{config}-{rep}.json"), "w"), indent=1)
+finally:
+    subprocess.run(["docker", "rm", "-f", b.CONTAINER], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+subprocess.run([os.path.join(b.BENCH, "attrib-report"), out])

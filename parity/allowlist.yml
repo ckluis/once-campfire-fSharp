@@ -1,0 +1,7 @@
+# Known, owned exceptions (format: capture/allowlist.ts). Deliberate divergences from the Rails
+# app belong in README "Known differences"; list one here only when no mask can express it.
+
+- state: pwa/manifest
+  layers: [server]
+  reason: The manifest is JSON-escaped, not HTML-escaped, so the small logo's URL reads `&v=` where Rails wrote `&amp;v=` (README, "The web app manifest is valid JSON")
+  owner: views

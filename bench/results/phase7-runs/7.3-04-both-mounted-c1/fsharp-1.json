@@ -1,0 +1,299 @@
+{
+ "app": "fsharp",
+ "rep": 1,
+ "cold_start_ms": 202,
+ "memory": {
+  "idle_current_mb": 28,
+  "idle_anon_mb": 15,
+  "peak_current_mb": 128,
+  "peak_anon_mb": 105,
+  "cgroup_peak_mb": 128
+ },
+ "http": [
+  {
+   "avg_bytes": 24080,
+   "conc": 1,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 0.625,
+    "mean_ms": 0.13,
+    "n": 59244,
+    "p50_ms": 0.13,
+    "p90_ms": 0.151,
+    "p99_ms": 0.18
+   },
+   "ok": 59244,
+   "path": "/rooms/486777696",
+   "rps": 7405.3,
+   "secs": 8.0,
+   "statuses": {
+    "200": 59244
+   },
+   "cost": {
+    "wall_s": 8.0,
+    "server_usage_us": 12636448,
+    "server_user_us": 9200768,
+    "server_system_us": 3435681,
+    "loadgen_user_us": 924815,
+    "loadgen_system_us": 989882,
+    "n": 59244,
+    "server_cpu_us_per_req": 213.3,
+    "server_user_us_per_req": 155.3,
+    "server_system_us_per_req": 58.0,
+    "loadgen_cpu_us_per_req": 32.3,
+    "server_cores_busy": 1.58,
+    "loadgen_cores_busy": 0.24
+   },
+   "route": "room_show",
+   "warmup": {
+    "secs": 30.0,
+    "windows_rps": [
+     3725.2,
+     5421.2,
+     7404.4,
+     7485.1,
+     7452.7,
+     7452.9,
+     7473.7,
+     7469.9,
+     7406.0,
+     7489.3,
+     7476.9,
+     7564.5,
+     7518.4,
+     7457.4,
+     7504.1
+    ],
+    "reason": "settled",
+    "window_secs": 2.0,
+    "settled": true,
+    "tail_rps": 7493.3
+   },
+   "host_probe_after": {
+    "spin_ms": 59.09,
+    "spin_ms_max_cpu": 61.41,
+    "cpus": "0-3,4-7",
+    "baseline_ms": 57.4,
+    "ratio": 1.029
+   }
+  },
+  {
+   "avg_bytes": 5910,
+   "conc": 1,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 0.572,
+    "mean_ms": 0.13,
+    "n": 60892,
+    "p50_ms": 0.125,
+    "p90_ms": 0.143,
+    "p99_ms": 0.188
+   },
+   "ok": 60892,
+   "path": "/users/me/sidebar",
+   "rps": 7611.5,
+   "secs": 8.0,
+   "statuses": {
+    "200": 60892
+   },
+   "cost": {
+    "wall_s": 8.0,
+    "server_usage_us": 11719291,
+    "server_user_us": 8831858,
+    "server_system_us": 2887433,
+    "loadgen_user_us": 751623,
+    "loadgen_system_us": 899107,
+    "n": 60892,
+    "server_cpu_us_per_req": 192.5,
+    "server_user_us_per_req": 145.0,
+    "server_system_us_per_req": 47.4,
+    "loadgen_cpu_us_per_req": 27.1,
+    "server_cores_busy": 1.46,
+    "loadgen_cores_busy": 0.21
+   },
+   "route": "sidebar",
+   "warmup": {
+    "secs": 30.0,
+    "windows_rps": [
+     7441.2,
+     7620.7,
+     7631.8,
+     7679.0,
+     7445.5,
+     7560.4,
+     7547.0,
+     7575.4,
+     7642.9,
+     7709.5,
+     7665.0,
+     7514.7,
+     7456.1,
+     7671.6,
+     7729.8
+    ],
+    "reason": "settled",
+    "window_secs": 2.0,
+    "settled": true,
+    "tail_rps": 7619.2
+   },
+   "host_probe_after": {
+    "spin_ms": 59.97,
+    "spin_ms_max_cpu": 62.21,
+    "cpus": "0-3,4-7",
+    "baseline_ms": 57.4,
+    "ratio": 1.045
+   }
+  },
+  {
+   "avg_bytes": 9713,
+   "conc": 1,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 0.635,
+    "mean_ms": 0.17,
+    "n": 46563,
+    "p50_ms": 0.172,
+    "p90_ms": 0.185,
+    "p99_ms": 0.215
+   },
+   "ok": 46563,
+   "path": "/searches?q=coffee",
+   "rps": 5820.3,
+   "secs": 8.0,
+   "statuses": {
+    "200": 46563
+   },
+   "cost": {
+    "wall_s": 8.0,
+    "server_usage_us": 15206011,
+    "server_user_us": 10987364,
+    "server_system_us": 4218647,
+    "loadgen_user_us": 623001,
+    "loadgen_system_us": 713368,
+    "n": 46563,
+    "server_cpu_us_per_req": 326.6,
+    "server_user_us_per_req": 236.0,
+    "server_system_us_per_req": 90.6,
+    "loadgen_cpu_us_per_req": 28.7,
+    "server_cores_busy": 1.9,
+    "loadgen_cores_busy": 0.17
+   },
+   "route": "search",
+   "warmup": {
+    "secs": 30.0,
+    "windows_rps": [
+     5767.5,
+     5695.7,
+     5783.3,
+     5785.5,
+     5844.5,
+     5781.4,
+     5767.9,
+     5859.6,
+     5834.0,
+     5766.3,
+     5757.9,
+     5705.8,
+     5806.3,
+     5859.4,
+     5648.7
+    ],
+    "reason": "settled",
+    "window_secs": 2.0,
+    "settled": true,
+    "tail_rps": 5771.5
+   },
+   "host_probe_after": {
+    "spin_ms": 58.49,
+    "spin_ms_max_cpu": 59.78,
+    "cpus": "0-3,4-7",
+    "baseline_ms": 57.4,
+    "ratio": 1.019
+   }
+  }
+ ],
+ "cable": [],
+ "upload": {},
+ "loadavg_start": "1.30 4.57 4.26 1/186 696784",
+ "loadavg_end": "1.88 3.57 3.92 1/227 700960",
+ "post_rows": [],
+ "probe": [
+  {
+   "route": "room_show",
+   "path": "/rooms/486777696",
+   "gzip": {
+    "status": 200,
+    "content_encoding": "gzip",
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 24080,
+    "decoded_bytes": 416122,
+    "etag": true
+   },
+   "identity": {
+    "status": 200,
+    "content_encoding": null,
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 416122,
+    "decoded_bytes": 416122,
+    "etag": true
+   }
+  },
+  {
+   "route": "sidebar",
+   "path": "/users/me/sidebar",
+   "gzip": {
+    "status": 200,
+    "content_encoding": "gzip",
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 5910,
+    "decoded_bytes": 30763,
+    "etag": true
+   },
+   "identity": {
+    "status": 200,
+    "content_encoding": null,
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 30763,
+    "decoded_bytes": 30763,
+    "etag": true
+   }
+  },
+  {
+   "route": "search",
+   "path": "/searches?q=coffee",
+   "gzip": {
+    "status": 200,
+    "content_encoding": "gzip",
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 9713,
+    "decoded_bytes": 149623,
+    "etag": true
+   },
+   "identity": {
+    "status": 200,
+    "content_encoding": null,
+    "content_type": "text/html; charset=utf-8",
+    "wire_bytes": 149623,
+    "decoded_bytes": 149623,
+    "etag": true
+   }
+  }
+ ],
+ "host_probe_start": {
+  "spin_ms": 59.22,
+  "spin_ms_max_cpu": 62.77,
+  "cpus": "0-3,4-7",
+  "baseline_ms": 57.4,
+  "ratio": 1.032
+ },
+ "host_probe_end": {
+  "spin_ms": 58.09,
+  "spin_ms_max_cpu": 59.72,
+  "cpus": "0-3,4-7",
+  "baseline_ms": 57.4,
+  "ratio": 1.012
+ }
+}

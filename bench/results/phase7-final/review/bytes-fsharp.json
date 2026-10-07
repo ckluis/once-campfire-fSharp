@@ -1,0 +1,44 @@
+{
+ "room_show.html": {
+  "status": 200,
+  "encoding": "gzip",
+  "wire": 24080,
+  "decoded": 416122
+ },
+ "room_show.identity.html": {
+  "status": 200,
+  "encoding": null,
+  "wire": 416122,
+  "decoded": 416122
+ },
+ "messages_page.html": {
+  "status": 200,
+  "encoding": "gzip",
+  "wire": 15967,
+  "decoded": 383844
+ },
+ "sidebar.html": {
+  "status": 200,
+  "encoding": "gzip",
+  "wire": 5910,
+  "decoded": 30763
+ },
+ "search.html": {
+  "status": 200,
+  "encoding": "gzip",
+  "wire": 9714,
+  "decoded": 149623
+ },
+ "post_message.txt": {
+  "status": 200,
+  "encoding": "gzip",
+  "wire": 1978,
+  "decoded": 9273
+ },
+ "write_room_after_post.html": {
+  "status": 200,
+  "encoding": "gzip",
+  "wire": 8630,
+  "decoded": 42299
+ }
+}

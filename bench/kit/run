@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# The kit's request layer on its own: Campfire.Kit on Kestrel against campfire_kit on hyper, serving the
+# same five endpoints on loopback, driven by wrk. Per scenario: requests per second, and the server
+# process's CPU time per request (user and system, from ps), which stays meaningful when wrk is
+# the bottleneck. It needs wrk, the .NET SDK and (for the Rust side) cargo via mise.
+#
+#   bench/kit/run [fsharp|rust|both] [--secs 8] [--connections 64] [--threads 4]
+#
+# Nothing here goes into the solution or the Rust workspace: the F# server is built from
+# bench/kit/fsharp, the Rust one from bench/kit/rust (with rust/Cargo.lock beside it, so that it builds
+# offline against what rust/ already fetched), and both land under target/kit-bench.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+OUT=$ROOT/target/kit-bench
+which=${1:-both}
+[ $# -gt 0 ] && shift
+SECS=8 CONNS=64 THREADS=4
+while [ $# -gt 0 ]; do
+  case $1 in
+    --secs) SECS=$2; shift 2 ;;
+    --connections) CONNS=$2; shift 2 ;;
+    --threads) THREADS=$2; shift 2 ;;
+    *) echo "unknown option $1"; exit 2 ;;
+  esac
+done
+export PATH="$HOME/.dotnet:$PATH" DOTNET_ROOT="$HOME/.dotnet" DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+mkdir -p "$OUT"
+
+build_fsharp() {
+  dotnet build "$ROOT/bench/kit/fsharp" -c Release -v quiet -nologo -o "$OUT/fsharp"
+}
+build_rust() {
+  cp "$ROOT/rust/Cargo.lock" "$ROOT/bench/kit/rust/Cargo.lock"
+  (cd "$ROOT/bench/kit/rust" && CARGO_TARGET_DIR="$ROOT/target/rust" mise exec rust -- cargo build --release --offline)
+}
+
+cpu_seconds() { ps -o cputime= -p "$1" | awk -F: '{ if (NF==3) print $1*3600+$2*60+$3; else print $1*60+$2 }'; }
+
+COOKIE=""
+scenario() {
+  local pid=$1 name=$2; shift 2
+  local c0 c1 out reqs rps
+  c0=$(cpu_seconds "$pid")
+  out=$(wrk -t"$THREADS" -c"$CONNS" -d"${SECS}s" "$@" 2>&1)
+  c1=$(cpu_seconds "$pid")
+  reqs=$(echo "$out" | grep "requests in" | awk '{print $1}')
+  rps=$(echo "$out" | grep Requests/sec | awk '{print $2}')
+  printf '%-28s %9.0f req/s   server CPU %6.1f us/request\n' "$name" "$rps" "$(echo "($c1-$c0)*1000000/$reqs" | bc -l)"
+}
+
+run_server() {
+  local label=$1 port=$2; shift 2
+  echo "== $label"
+  "$@" "$port" > "$OUT/$label.log" 2>&1 &
+  local pid=$!
+  sleep 3
+  if [ "$label" = fsharp ]; then COOKIE=$(grep COOKIE= "$OUT/fsharp.log" | head -1 | sed 's/COOKIE=//'); fi
+  local base=http://127.0.0.1:$port
+  wrk -t2 -c16 -d3s $base/page > /dev/null 2>&1
+  scenario "$pid" "hello (tiny)" $base/hello
+  scenario "$pid" "page 100KB, identity" $base/page
+  scenario "$pid" "page 100KB, gzip (cached)" -H "Accept-Encoding: gzip" $base/page
+  scenario "$pid" "signed cookie + page" -H "Cookie: $COOKIE" $base/session
+  local lua
+  lua=$(mktemp)
+  cat > "$lua" <<'LUA'
+wrk.method = "POST"
+wrk.body = "message%5Bbody%5D=hello+there&message%5Bclient_message_id%5D=abc"
+wrk.headers["Content-Type"] = "application/x-www-form-urlencoded"
+wrk.headers["Sec-Fetch-Site"] = "same-origin"
+LUA
+  scenario "$pid" "POST form -> redirect" -s "$lua" $base/rooms/1/messages
+  rm -f "$lua"
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+case $which in
+  fsharp|both)
+    build_fsharp
+    run_server fsharp 3001 "$OUT/fsharp/KitBench"
+    ;;
+esac
+case $which in
+  rust|both)
+    # The Rust server needs a cookie signed with the same secret; the F# server prints one.
+    [ -n "$COOKIE" ] || { build_fsharp; "$OUT/fsharp/KitBench" 3003 > "$OUT/cookie.log" 2>&1 & p=$!; sleep 3; COOKIE=$(grep COOKIE= "$OUT/cookie.log" | head -1 | sed 's/COOKIE=//'); kill $p; wait $p 2>/dev/null || true; }
+    build_rust
+    run_server rust 3002 "$ROOT/target/rust/release/kitbench"
+    ;;
+esac

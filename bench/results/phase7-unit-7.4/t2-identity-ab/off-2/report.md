@@ -1,0 +1,28 @@
+```
+date: 2026-10-06T19:35:14-04:00
+host: 6.8.0-117-generic, , 8 threads, 5GB
+server cpus: 0-3 (nproc 4); loadgen cpus: 4-7; network: host
+env: WEB_CONCURRENCY=3 JOB_CONCURRENCY=3 RAILS_MAX_THREADS=5 
+rust extra env: 
+fsharp extra env: CAMPFIRE_NO_CONN_POOL=1
+user agent: (none)
+fsharp-identity image: campfire-fsharp:app sha256:53ce6520c2c2b6ec6c4c85985059c413ff1b0958f97983ee294df1a56442b09e 2026-10-06T17:56:54.059565692-04:00 built from commit: b1d55bf59da053f1697bee5229b0bdfea5989cbb
+fsharp build: MOUNTED /var/tmp/campfire-mounted over /opt/campfire (dcb5ffa (dirty files under src/: 3) at 2026-10-06T23:30:10Z)
+repo HEAD: dcb5ffa (dirty: 3 files under src/ and rust/)
+work dir (seed copies): /var/tmp/campfire-bench-work (ext4)
+loadgen: /Users/clank/Desktop/projects/once-campfire-fsharp/target/rust/aarch64-unknown-linux-gnu/release/loadgen (2026-10-06 03:04:07), built with rust:1.98.1-trixie
+schedule: apps fsharp-identity, reps 1; suites: http; http secs 8, concs 16, routes room_show, warm-up 30s at each route and concentration, idle 5s
+log retention: 2 x 10m (json-file)
+```
+
+Reps: , fsharp-identity 1. Cells: median [min–max].
+
+### Startup and memory
+
+| Metric |  |
+|---|
+| cold start: docker run → /up 200 (ms) |  |
+| idle memory.current (MB) |  |
+| idle anon (MB) |  |
+| peak memory.current under load (MB) |  |
+| peak anon under load (MB) |  |
