@@ -81,6 +81,14 @@ specific to this port are listed below, each citing the reference file it depart
     ASCII, so it splits the same places. `FILES_AND_MEDIA_URL_REGEX` is .NET's regex engine (non-backtracking) where
     Rust uses the `regex` crate: `\b` and `\S` can differ from Rust's on characters that are only marks or letter numbers.
 
+- **Web app manifest** (`Campfire.Views/Templates/Pwa/Manifest.fs`; reference `app/views/pwa/manifest.json.erb`):
+  the account name and the logo URLs are JSON strings, where Rails HTML-escaped them inside the JSON (a small logo's
+  `src` reads `/account/logo?size=small&amp;v=...` there, `&v=` here and in the Rust port, which lists the same
+  difference). With an account logo the manifest differs from Rails in that one byte run, so parity's
+  `pwa/manifest/custom_styles` cell reports it for this port and for Rust alike: both `allowlist.yml` files list only
+  `pwa/manifest`, which doesn't match the sub-state, and ours is kept no larger than Rust's. Tested by `ParityATests`
+  ("pwa manifest is valid json whatever the account is called").
+
 - **Response headers set before the response exists** (`Ctx.SetHeader`, e.g. `X-Version` in a before-action)
   keep every line of a multi-line value. The Rust port keeps only the first line; Puma writes them all
   (puma 7.2.1, `Puma::Request#str_headers`, the reference's server). Tested by `AdapterTests`
