@@ -213,7 +213,12 @@ USER 1000:1000
 #     core count; with 4 cores the peak was 234 MB against 251 MB without it (256 MiB cost 450 MB, and bought nothing more).
 # Measured and not set: DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=0 (CPU per request -34% at one connection, but 10-14% fewer
 # requests a second on the messages page and search at sixteen), workstation GC, TieredPGO=0, ReadyToRun off.
-ENV DOTNET_GCgen0size=0x4000000
+#   DOTNET_HillClimbing_Disable=1 (unit 7.5, bench/results/phase7-unit-7.5.md): the thread pool's hill climbing kept adding
+#     workers under steady load (38 -> 43-46 threads after about 60-80 s, with CPU per request rising from 93 to 100 us on the room
+#     page at sixteen connections). Without it the pool stays at 30-31 threads (starvation injection still adds threads for
+#     blocked work) and p99 at sixteen connections fell from 1.6-3.3 ms to 1.1-1.3 ms on the read pages, req/s within noise.
+ENV DOTNET_GCgen0size=0x4000000 \
+    DOTNET_HillClimbing_Disable=1
 
 # Configure environment defaults
 ENV RAILS_ENV="production"
