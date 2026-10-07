@@ -2577,5 +2577,61 @@
       "phase7c": 7,
       "after": 0
     }
+  },
+  "same_pixels": {
+    "state": "rooms/show/busy/last_page",
+    "cell": "chromium-desktop-light",
+    "viewport": "1440×900",
+    "image": "site/assets/same-pixels/room.webp",
+    "thumb_size": "640×400",
+    "page": "All Talk, the busy room (131 messages), signed in as David: the page the room_show benchmark requests",
+    "identical": true,
+    "bytes_identical": true,
+    "pixels_identical": true,
+    "pixels_sha256": "3c57af02305d5b101bceeb80de3c274ac56437f8b302ad981be260f2eb60ca23",
+    "checked": "2026-10-07T10:41:27Z",
+    "apps": [
+      {
+        "key": "rails",
+        "name": "Rails",
+        "tag": "slow",
+        "bench_app": "reference",
+        "run": "p6-r-default",
+        "side": "reference",
+        "harness_verdict": "pass",
+        "capture_sha256": "ac7420e6d0a8941463402fbeddc90f4972c50c0a7c4f935e637345164c13d0b8",
+        "thumb": "site/assets/same-pixels/rails.webp",
+        "started": "2026-10-07T07:14:59.311Z"
+      },
+      {
+        "key": "rust",
+        "name": "Rust",
+        "tag": "fast",
+        "bench_app": "rust",
+        "run": "p6-r-default",
+        "side": "candidate",
+        "harness_verdict": "pass",
+        "capture_sha256": "ac7420e6d0a8941463402fbeddc90f4972c50c0a7c4f935e637345164c13d0b8",
+        "thumb": "site/assets/same-pixels/rust.webp",
+        "started": "2026-10-07T07:14:59.311Z"
+      },
+      {
+        "key": "fsharp",
+        "name": "F#",
+        "tag": "faster",
+        "bench_app": "fsharp",
+        "run": "p6-f-default",
+        "side": "candidate",
+        "harness_verdict": "pass",
+        "capture_sha256": "ac7420e6d0a8941463402fbeddc90f4972c50c0a7c4f935e637345164c13d0b8",
+        "thumb": "site/assets/same-pixels/fsharp.webp",
+        "started": "2026-10-07T07:14:43.448Z"
+      }
+    ],
+    "bench": {
+      "dir": "bench/results/phase7-final",
+      "route": "room_show",
+      "conc": 16
+    }
   }
 }

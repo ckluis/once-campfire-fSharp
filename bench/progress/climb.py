@@ -14,6 +14,7 @@ from the same directory. Rails is the 5b baseline (bench/results/baseline-202610
 import glob
 import html
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -321,11 +322,27 @@ def climb():
         line = " ".join("%.1f,%.1f" % (X(r), Y(v)) for t, v, r, *_ in kept)
         svg.append('<polygon class="cc-area" points="%.1f,%d %s %.1f,%d"/>' % (X(kept[0][2]), H - B, line, X(kept[-1][2]), H - B))
         svg.append('<polyline class="cc-climb" points="%s"/>' % line)
-    step = max(1, -(-len(pts) // 24))  # label every dot until there are more than 24
-    for i, (t, v, r, *_) in enumerate(pts):
-        if i % step == 0 or i == len(pts) - 1:
-            svg.append('<text x="%.1f" y="%d" class="cc-tick" text-anchor="middle">%s</text><text x="%.1f" y="%d" class="cc-day" text-anchor="middle">%s</text>'
-                       % (X(r), H - B + 20, t.astimezone().strftime("%H:%M"), X(r), H - B + 36, t.astimezone().strftime("%a %-d %b")))
+    # The labels are SVG text, so they scale with the chart and these widths hold at every size (in viewBox units):
+    # a time ("23:59", 12px) needs ~34, a day ("Wed 7 Oct", 10.5px) ~56. Times go on every dot while they fit,
+    # else on every step-th dot and the last; the day goes only under the first label of each day, so a day's
+    # worth of dots no longer repeats it under every time.
+    TIME_W, DAY_W = 34, 56
+    pitch = (W - L - R) / n
+    step = max(1, math.ceil(TIME_W / pitch))
+    shown = [i for i in range(len(pts)) if i % step == 0]
+    if pts and shown[-1] != len(pts) - 1:
+        if (len(pts) - 1 - shown[-1]) * pitch < TIME_W:
+            shown.pop()  # the last dot's label wins over a neighbour it would overlap
+        shown.append(len(pts) - 1)
+    day_seen, day_end = None, -1e9
+    for i in shown:
+        t, r = pts[i][0], pts[i][2]
+        x, local_t = X(r), t.astimezone()
+        svg.append('<text x="%.1f" y="%d" class="cc-tick" text-anchor="middle">%s</text>' % (x, H - B + 20, local_t.strftime("%H:%M")))
+        day = local_t.strftime("%a %-d %b")
+        if day != day_seen and x - DAY_W / 2 >= day_end + 8:
+            svg.append('<text x="%.1f" y="%d" class="cc-day" text-anchor="middle">%s</text>' % (x, H - B + 36, day))
+            day_seen, day_end = day, x + DAY_W / 2
     svg.append("</svg>")
 
     dots = []
