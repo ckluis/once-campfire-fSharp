@@ -30,6 +30,17 @@ def e(s):
     return html.escape(str(s), quote=True)
 
 
+# The page is served by GitHub Pages under /once-campfire-fSharp/, where a repo path is either a raw
+# file (a .md comes down as text/markdown) or a 404 (a directory has no index). Every link to a file
+# in the repository goes to GitHub's view of it instead; build() sets this from meta.repo.
+REPO_URL = 'https://github.com/ckluis/once-campfire-fSharp'
+
+
+def src(path):
+    kind = 'tree' if path.endswith('/') else 'blob'
+    return '%s/%s/main/%s' % (REPO_URL.rstrip('/'), kind, path.rstrip('/'))
+
+
 def n(x):
     return format(int(x), ',')
 
@@ -477,8 +488,8 @@ def p_phase(d, i, p):
     script = ''
     unit = next((u for u in d['prompts']['units'] if u['phase'] == p['key']), None)
     if unit:
-        script = ('<h3>What the builders were told</h3><ul>%s</ul><p class="src">Script: <a href="site/workflows/%s">site/workflows/%s</a></p>'
-                  % (''.join('<li>%s</li>' % inline(x) for x in unit['items']), e(unit['script']), e(unit['script'])))
+        script = ('<h3>What the builders were told</h3><ul>%s</ul><p class="src">Script: <a href="%s">site/workflows/%s</a></p>'
+                  % (''.join('<li>%s</li>' % inline(x) for x in unit['items']), e(src('site/workflows/' + unit['script'])), e(unit['script'])))
     body = ''.join(['<dl class="pmeta">%s</dl>' % dl, findings_line(wf['agents']) if wf else '', gate,
                     '<h3>Units</h3><ul class="units">%s</ul>' % units, '<h3>What happened</h3><ul class="hl">%s</ul>' % hl,
                     pills(p['pills']), script, '<p class="pnav">%s</p>' % ' '.join(nav)])
@@ -542,8 +553,9 @@ def p_process(d):
         m = re.search(r'const RULES = `(.*?)`', open(path, encoding='utf-8').read(), re.S)
         if m:
             rules = ('<h3>As the relaunched Phase 7 workflow tells every agent</h3><pre class="code">%s</pre>'
-                     '<p class="src">From <a href="site/workflows/campfire-fs-phase7b.js">site/workflows/campfire-fs-phase7b.js</a>; '
-                     'the first launch, before the change, is <a href="site/workflows/campfire-fs-phase7.js">campfire-fs-phase7.js</a>.</p>' % e(m.group(1).strip()))
+                     '<p class="src">From <a href="%s">site/workflows/campfire-fs-phase7b.js</a>; '
+                     'the first launch, before the change, is <a href="%s">campfire-fs-phase7.js</a>.</p>'
+                     % (e(m.group(1).strip()), e(src('site/workflows/campfire-fs-phase7b.js')), e(src('site/workflows/campfire-fs-phase7.js'))))
     body = ''.join([quotes, '<p class="lead">%s</p>' % e(pc['summary']), tiers, rules])
     return panel('p-process', 'A change of process', e(pc['title']), body, 'b-process')
 
@@ -581,7 +593,7 @@ def p_prompts(d, f):
         '<h3>The routine, as code</h3><p>%s</p>' % e(p['routine_intro']),
         '<div class="prole common"><p class="kicker">%s</p><pre>%s</pre></div>' % (e(p['common_label']), e(p['common'])),
         roles,
-        '<h3>The workflow scripts</h3><ul class="scripts">%s</ul>' % ''.join('<li><a href="site/workflows/%s">%s</a></li>' % (e(s), e(s)) for s in scripts),
+        '<h3>The workflow scripts</h3><ul class="scripts">%s</ul>' % ''.join('<li><a href="%s">%s</a></li>' % (e(src('site/workflows/' + s)), e(s)) for s in scripts),
     ])
     return panel('p-prompts', 'The prompts', 'What was actually said', body, 'more')
 
@@ -978,9 +990,14 @@ JS = r"""
 """
 
 
+FONTS_CSS = 'https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap'
+
+
 def build():
     d = json.load(open(os.path.join(SITE, 'data.json'), encoding='utf-8'))
     m = d['meta']
+    global REPO_URL
+    REPO_URL = m.get('repo') or REPO_URL
     cl = climb_chart.climb()
     f = facts(d, cl)
     phases = d['chapters']['build']['phases']
@@ -998,11 +1015,12 @@ def build():
         '<footer class="site"><div class="wrap"><p><b>Sources.</b> Muse: Ren&#39;s <code>STATUS.md</code>, <code>AI-ORIENTATION.md</code>, '
         '<code>campfire-fs/Program.fs</code> and <code>bench_official.sh</code> from the hand-off zip. Hand-over: the M4 logs '
         '<code>bench-mac-rebaseline.log</code> and <code>bench-mac-rebaseline-run1-badpost.log</code>. The build and tuning: '
-        '<a href="plans/fsharp-port.md">plans/fsharp-port.md</a>, <a href="AGENTS.md">AGENTS.md</a>, <a href="README.md">README.md</a> (Known differences), '
+        '<a href="%s">plans/fsharp-port.md</a>, <a href="%s">AGENTS.md</a>, <a href="%s">README.md</a> (Known differences), '
         '<code>bench/results/</code> (the climb is <code>phase7-log.jsonl</code>), the git history of <code>port</code>, and the workflow scripts in '
-        '<a href="site/workflows/">site/workflows/</a>. Tokens and prompts: the session transcripts, via <code>site/collect_tokens.py</code>. %s</p>'
+        '<a href="%s">site/workflows/</a>. Tokens and prompts: the session transcripts, via <code>site/collect_tokens.py</code>. %s</p>'
         '<p>Written by %s with Claude. Campfire, the Rust port, its parity harness and vectors are &copy; 37signals, LLC, MIT. '
-        'Generated from <code>site/data.json</code> and the Phase 7 log by <code>site/build.py</code>.</p></div></footer>' % (e(m['timezone_note']), e(m['author'])),
+        'Generated from <code>site/data.json</code> and the Phase 7 log by <code>site/build.py</code>.</p></div></footer>'
+        % (e(src('plans/fsharp-port.md')), e(src('AGENTS.md')), e(src('README.md')), e(src('site/workflows/')), e(m['timezone_note']), e(m['author'])),
         '<div class="panels">%s</div>' % ''.join(panels),
     ])
     page = ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
@@ -1011,9 +1029,12 @@ def build():
             '<meta name="color-scheme" content="light dark">'
             '<script>document.documentElement.className+=" js";try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>'
             '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-            '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap">'
+            # The display face is a nicety: load it without blocking render, so a slow or blocked
+            # fonts.googleapis.com can't hold the whole page blank (the stack falls back to Georgia).
+            '<link rel="stylesheet" href="%s" media="print" onload="this.media=\'all\'">'
+            '<noscript><link rel="stylesheet" href="%s"></noscript>'
             '<style>%s%s</style></head><body>%s<script>%s</script></body></html>\n'
-            % (e(m['title']), e(m['description']), climb_chart.CSS.strip(), CSS.strip(), body, JS.strip()))
+            % (e(m['title']), e(m['description']), e(FONTS_CSS), e(FONTS_CSS), climb_chart.CSS.strip(), CSS.strip(), body, JS.strip()))
     out = os.path.join(REPO, 'index.html')
     with open(out, 'w', encoding='utf-8') as fh:
         fh.write(page)
