@@ -4,7 +4,11 @@ An F# implementation of [ONCE Campfire](https://github.com/basecamp/once-campfir
 ASP.NET Core and Falco. It aims to be a drop-in replacement for the Rails app: the same SQLite
 database, storage layout and signed or encrypted cookies, with the same pages and behavior.
 
-**Status: under construction.** See [`plans/fsharp-port.md`](plans/fsharp-port.md) for the phases.
+**Status: complete, and faster than the Rust port under load.** Every screen the parity harness captures renders the
+same as the Rust port's, byte for byte (214 states across 5 seeds), and the five benchmarked workloads run 1.24-1.33x the
+Rust port's throughput at 16 connections while spending 8-23% less CPU per request. The story, with every measured
+version on one chart, is the [project page](https://ckluis.github.io/once-campfire-fSharp/) (`index.html`); the phases
+are in [`plans/fsharp-port.md`](plans/fsharp-port.md).
 
 It is translated from the [Rust port](https://github.com/basecamp/once-campfire-rust) (pinned in
 `rust/`), which reproduces the Rails app (pinned in `reference/`) and ships the parity harness,
@@ -13,6 +17,26 @@ golden vectors and benchmark tooling this repository reuses under the MIT licens
 The Rails frontend ships with a few
 [port-owned overrides](src/Campfire.Assets/OVERRIDES.md): three JavaScript files and one image that
 deliberately differ from Rails.
+
+## Performance
+
+Measured with 16 concurrent clients in a Linux VM (colima, 8 vCPUs) on an Apple M4, with four hardware threads
+allocated to each app, the reference Rails app and the unmodified Rust image on the same machine and seed, 3 reps each
+in alternating order ([`bench/results/phase7-final.md`](bench/results/phase7-final.md)):
+
+| HTTP workload (requests/sec) | Rails | [Rust](https://github.com/basecamp/once-campfire-rust) | F# | F# / Rust |
+|---|---:|---:|---:|---:|
+| Room page | 239 | 28,623 | 40,422 | 1.41× ¹ |
+| Messages page | 381 | 30,063 | 37,836 | 1.26× |
+| Sidebar | 599 | 28,238 | 37,555 | 1.33× |
+| Search | 408 | 26,606 | 34,070 | 1.28× |
+| Post a message | 330 | 7,174 | 8,905 | 1.24× |
+
+Every response was 2xx, every post's row was counted, and decoded bodies are identical to the Rust port's. F# spends
+8-23% less CPU per request than Rust at 16 and 64 connections. ¹ The room page settles about 6% lower after 80 s,
+when the thread pool grows (about 1.33×). Where Rust still leads: CPU per request at a single connection, p99 latency on
+the read pages, memory, cold start and Action Cable fan-out (see the results file). Part of the lead is how the request
+log is written: F# batches plain lines, the Rust port writes one coloured line per request.
 
 ## Running it
 
@@ -184,4 +208,5 @@ specific to this port are listed below, each citing the reference file it depart
 
 ## License
 
-MIT. Campfire, the Rust port, its parity harness and vectors are © 37signals, LLC.
+MIT ([`MIT-LICENSE`](MIT-LICENSE)). The F# port is © 2026 Chris Kluis; Campfire, the Rust port, its parity harness and
+vectors are © 37signals, LLC.
