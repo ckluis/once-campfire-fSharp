@@ -3,7 +3,7 @@
 # ReadyToRun, linux-arm64, no symbols) into DIR on the colima VM's own disk, without rebuilding the image. bench/quick
 # --mounted DIR then runs it in a container of campfire-fsharp:app with DIR mounted over /opt/campfire.
 #
-#   colima ssh -- bash -c 'cd /Users/clank/Desktop/projects/once-campfire-fsharp && bin/publish-mounted [DIR]'
+#   colima ssh -- bash -c "cd $PWD && bin/publish-mounted [DIR]"
 #
 # It builds in the toolchain image (the SDK global.json pins, Linux) from an rsync copy of src/ kept in
 # /var/tmp/campfire-publish-src, so the second build is incremental and neither the virtiofs mount nor the Mac's own

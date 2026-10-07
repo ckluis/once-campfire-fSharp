@@ -136,7 +136,7 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
   (`bench/lib/warmup.py`, `WARMUP_SECS`/`WARMUP_MAX_SECS`; `bench/warmup` draws the curve) and `bench/report` flags runs that did
   not settle. `bench/breakdown alloc` traces allocation by type and by the code that allocates, bytes per request (GC allocation ticks with stacks through dotnet-trace; `bench/alloc-analyze` reads the trace; build it once into `/var/tmp/alloc-analyze/out` in the toolchain image). `bench/breakdown perf` scales perf's shares to the unprofiled CPU per request and attributes allocation the same
   way for both apps (`bench/lib/clr-symbols` installs the libcoreclr and libc symbols it needs). Container logs are capped
-  (`LOG_MAX_SIZE`, `LOG_MAX_FILE`; request logging itself stays on). Before every benchmark check `df -h /Users/clank`
+  (`LOG_MAX_SIZE`, `LOG_MAX_FILE`; request logging itself stays on). Before every benchmark check `df -h ~`
   (stop under 15 GB free), and run `bin/clean-docker` after image rebuilds and `bin/clean-rust-builds` after Rust builds.
   Rebuild `campfire-fsharp:app` from HEAD before measuring F# (`CAMPFIRE_REVISION=$(git rev-parse HEAD) parity/bin/candidate build`
   in colima labels the image with its commit; `bench/run`'s env.txt records the label and the digest).
@@ -180,7 +180,7 @@ Project references follow the crate graph. Don't add an edge Rust doesn't have.
 - Toolchain: .NET SDK 10.0.401 in `~/.dotnet` (`export PATH="$HOME/.dotnet:$PATH"`).
 - Docker runs in colima. Run `parity/`, `bench/` and `reference-tools/` scripts inside the VM,
   where they get GNU userland and host networking:
-  `colima ssh -- bash -c 'cd /Users/clank/Desktop/projects/once-campfire-fsharp && parity/bin/...'`.
+  `colima ssh -- bash -c "cd $PWD && parity/bin/..."`.
   The reference image is `campfire-reference:app`. Set `PARITY_NET_DIR=/tmp/parity-net` (create it
   first) for anything that captures pages: the repo is a virtiofs mount in the VM, and a Unix socket
   there refuses connections between containers (`parity/capture/sandbox/run.sh`).

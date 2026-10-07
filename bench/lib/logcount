@@ -3,7 +3,7 @@
 # log, sends N requests at 16 connections, stops the container with SIGTERM right after the last answer, and compares the number of
 # `Request path=` lines in `docker logs` with the number of requests sent (plus the readiness probes). Inside colima:
 #
-#   colima ssh -- bash -c 'cd /Users/clank/Desktop/projects/once-campfire-fsharp && bench/lib/logcount [--mounted DIR] [N]'
+#   colima ssh -- bash -c "cd $PWD && bench/lib/logcount [--mounted DIR] [N]"
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 MOUNT=()

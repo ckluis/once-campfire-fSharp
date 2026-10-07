@@ -18,3 +18,7 @@ bench/front/rust/Cargo.lock
 bench/cable/*/bin/
 bench/cable/*/obj/
 bench/cable/rust/Cargo.lock
+bench/*/bin/
+bench/*/obj/
+reference-tools/**/bin/
+reference-tools/**/obj/
