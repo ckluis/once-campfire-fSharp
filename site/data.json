@@ -3,7 +3,7 @@
     "title": "Campfire in F#",
     "description": "How an overnight benchmark challenge became a full, identical-in-use F# port of Basecamp's ONCE Campfire: the prompts, the routine, and every token it took.",
     "author": "Chris Kluis",
-    "repo": "https://github.com/ckluis/once-campfire-fsharp",
+    "repo": "https://github.com/ckluis/once-campfire-fSharp",
     "upstream": "https://github.com/basecamp/once-campfire",
     "rust_port": "https://github.com/basecamp/once-campfire-rust",
     "timezone_note": "Times are US Eastern (EDT), as the work was run.",
