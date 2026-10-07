@@ -634,3 +634,30 @@ let ``a failed backup prints the error and exits 1 instead of throwing`` () =
         Assert.DoesNotContain("Unhandled", captured.ToString())
     finally
         Directory.Delete(dir, true)
+
+/// The request log lines are written as bytes and never coloured, so the console logger must not colour the other lines on a terminal
+/// either (`ColorBehavior.Default` colours when stdout is a TTY, as under `docker run -t`).
+[<Fact>]
+let ``the console logger never colours its lines`` () =
+    let options = Microsoft.Extensions.Logging.Console.SimpleConsoleFormatterOptions()
+    Assert.Equal(Microsoft.Extensions.Logging.Console.LoggerColorBehavior.Default, options.ColorBehavior)
+    Boot.configureConsole options
+    Assert.Equal(Microsoft.Extensions.Logging.Console.LoggerColorBehavior.Disabled, options.ColorBehavior)
+    Assert.True options.SingleLine
+    Assert.True options.UseUtcTimestamp
+    // and the lines of a factory made as the app makes it carry no escape codes
+    let real = Console.Out
+    use sw = new StringWriter()
+    Console.SetOut sw
+    try
+        let config =
+            match AppConfig.fromLookup (fun name -> match name with "SECRET_KEY_BASE" -> "abc" | _ -> null) with
+            | Ok config -> config
+            | Error e -> failwith e
+        let factory = Boot.createLoggerFactory config
+        Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(factory.CreateLogger "campfire", "something={Thing}", "odd")
+        factory.Dispose()
+    finally
+        Console.SetOut real
+    Assert.Contains("warn: campfire[0]", sw.ToString())
+    Assert.DoesNotContain("\u001b", sw.ToString())

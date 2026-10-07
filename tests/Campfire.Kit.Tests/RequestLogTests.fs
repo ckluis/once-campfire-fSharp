@@ -64,7 +64,10 @@ let ``the line written as bytes is the line the console logger writes`` () =
                     builder.AddSimpleConsole(fun options ->
                         options.SingleLine <- true
                         options.UseUtcTimestamp <- true
-                        options.TimestampFormat <- "yyyy-MM-ddTHH:mm:ss.ffffffZ ")
+                        options.TimestampFormat <- "yyyy-MM-ddTHH:mm:ss.ffffffZ "
+                        // as `Boot.configureConsole` sets them (`AppTests` checks that it does): colour is the one option that
+                        // changes the line's bytes, and only when stdout is a terminal
+                        options.ColorBehavior <- Microsoft.Extensions.Logging.Console.LoggerColorBehavior.Disabled)
                     |> ignore)
             let logger = factory.CreateLogger "thruster"
             for c in samples do

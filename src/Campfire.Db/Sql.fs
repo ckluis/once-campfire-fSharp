@@ -111,12 +111,24 @@ module internal Native =
     [<DllImport(Lib, CallingConvention = CallingConvention.Cdecl); SuppressGCTransition>]
     extern int sqlite3_bind_double(nativeint stmt, int index, double value)
 
-    /// With `destructor` `SQLITE_TRANSIENT` (-1): SQLite copies the bytes before returning.
-    [<DllImport(Lib, CallingConvention = CallingConvention.Cdecl); SuppressGCTransition>]
+    /// With `destructor` `SQLITE_TRANSIENT` (-1): SQLite mallocs and copies the bytes before returning, so the call lasts as long as
+    /// the value is long. `SuppressGCTransition` is only for a short, non-allocating call (a thread in it blocks a GC's suspension
+    /// until it returns), so the `_short` imports, which suppress it, take a value of at most `ShortBind` bytes and these, which don't, the rest.
+    [<DllImport(Lib, CallingConvention = CallingConvention.Cdecl)>]
     extern int sqlite3_bind_text(nativeint stmt, int index, nativeint text, int length, nativeint destructor)
 
-    [<DllImport(Lib, CallingConvention = CallingConvention.Cdecl); SuppressGCTransition>]
+    [<DllImport(Lib, CallingConvention = CallingConvention.Cdecl)>]
     extern int sqlite3_bind_blob(nativeint stmt, int index, nativeint bytes, int length, nativeint destructor)
+
+    [<DllImport(Lib, EntryPoint = "sqlite3_bind_text", CallingConvention = CallingConvention.Cdecl); SuppressGCTransition>]
+    extern int sqlite3_bind_text_short(nativeint stmt, int index, nativeint text, int length, nativeint destructor)
+
+    [<DllImport(Lib, EntryPoint = "sqlite3_bind_blob", CallingConvention = CallingConvention.Cdecl); SuppressGCTransition>]
+    extern int sqlite3_bind_blob_short(nativeint stmt, int index, nativeint bytes, int length, nativeint destructor)
+
+    /// The longest value (bytes) bound through a `_short` import: a malloc and a copy of this much is tens of nanoseconds.
+    [<Literal>]
+    let ShortBind = 1024
 
     /// `SQLITE_TRANSIENT`
     let Transient = nativeint -1
@@ -312,14 +324,20 @@ type Conn(raw: SqliteConnection, capacity: int) =
             scratch <- GC.AllocateArray<byte>(max needed (scratch.Length * 2), true)
             scratchAt <- Marshal.UnsafeAddrOfPinnedArrayElement(scratch, 0)
         let length = Encoding.UTF8.GetBytes(text, 0, text.Length, scratch, 0)
-        Native.sqlite3_bind_text (stmt, index, scratchAt, length, Native.Transient)
+        if length <= Native.ShortBind then
+            Native.sqlite3_bind_text_short (stmt, index, scratchAt, length, Native.Transient)
+        else
+            Native.sqlite3_bind_text (stmt, index, scratchAt, length, Native.Transient)
 
     let bindBlob (stmt: nativeint) (index: int) (bytes: byte[]) : int =
         if bytes.Length = 0 then
-            Native.sqlite3_bind_blob (stmt, index, scratchAt, 0, Native.Transient)
+            Native.sqlite3_bind_blob_short (stmt, index, scratchAt, 0, Native.Transient)
         else
             use pinned = fixed bytes
-            Native.sqlite3_bind_blob (stmt, index, NativePtr.toNativeInt pinned, bytes.Length, Native.Transient)
+            if bytes.Length <= Native.ShortBind then
+                Native.sqlite3_bind_blob_short (stmt, index, NativePtr.toNativeInt pinned, bytes.Length, Native.Transient)
+            else
+                Native.sqlite3_bind_blob (stmt, index, NativePtr.toNativeInt pinned, bytes.Length, Native.Transient)
 
     let bind (prepared: Prepared) (sql: string) (args: SqlArg[]) : unit =
         if args.Length <> prepared.Parameters then

@@ -38,6 +38,57 @@ let ``a body whose plain text raises has none`` () =
     Assert.Equal("", richText.ToPlainText(conn, html))
     Assert.Equal("Hey there", richText.ToPlainText(conn, "Hey <b>there</b>"))
 
+/// Rust parses every body for its mentions and logs `mentioned_users raised` where the parse fails (`rich_text.rs`). Skipping the
+/// parse for a body with no attachment (unit 7.4) lost that line for the bodies that fail, which are only those past `DomLimits`.
+let private deepBody = String.replicate 500 "<div>" + "text"
+let private manyAttributesBody = "<p " + String.Join(" ", [ for i in 1..450 -> $"a{i}" ]) + ">text</p>"
+
+[<Fact>]
+let ``a body without attachments that fails to parse still logs the mentions error`` () =
+    use loggers = new CapturingLoggers()
+    let richText = AppRichText(Secrets.create "test-secret", SystemClock(), loggers.Logger "rich_text") :> Campfire.Db.RichText
+    use conn = Conn.OpenInMemory()
+    for body in [ deepBody; manyAttributesBody ] do
+        Assert.True(body.Length > AppRichText.ParseSafeLength)
+        Assert.Equal<int64 list>([], richText.MentionedUserIds(conn, body))
+    Assert.Contains("Error rich_text: mentioned_users raised error=Document tree depth limit exceeded", loggers.Text)
+    Assert.Contains("Error rich_text: mentioned_users raised error=Attributes per element limit exceeded", loggers.Text)
+
+[<Fact>]
+let ``a plain body parses nothing and logs nothing`` () =
+    use loggers = new CapturingLoggers()
+    let richText = AppRichText(Secrets.create "test-secret", SystemClock(), loggers.Logger "rich_text") :> Campfire.Db.RichText
+    use conn = Conn.OpenInMemory()
+    for body in [ ""; "hello"; "<div>hi <b>there</b></div>"; String('x', 5000) ] do
+        Assert.Equal<int64 list>([], richText.MentionedUserIds(conn, body))
+    Assert.Equal("", loggers.Text)
+
+/// The skip is exact only while no body of `ParseSafeLength` units or fewer can fail to parse: the worst shapes (the most elements,
+/// the most formatting elements the tree builder re-opens, the most attributes) cut to that length all parse.
+[<Fact>]
+let ``no body of the safe length fails to parse`` () =
+    let limit = AppRichText.ParseSafeLength
+    let formatting = [ "b"; "i"; "u"; "em"; "strong"; "a"; "code"; "font"; "s"; "small"; "big"; "tt"; "strike"; "nobr" ]
+    let opens = String.Join("", formatting |> List.map (fun t -> $"<{t}>"))
+    let shapes =
+        [ String.replicate 400 "<b>"
+          String.replicate 400 "<div>"
+          String.replicate 400 "<b><p>"
+          String.replicate 400 (opens + "<p>")
+          String.replicate 400 (opens + "<div>x")
+          String.replicate 200 "<table><td>"
+          String.replicate 200 "<svg><g>"
+          String.replicate 400 "<p><b>"
+          "<p " + String.Join(" ", [ for i in 1..400 -> $"a{i}" ])
+          "<p " + String.Join("", [ for i in 1..400 -> $"a{i}=1 " ])
+          "<p " + String.Join("", [ for i in 1..400 -> $"{char (97 + i % 26)}{i} " ]) ]
+    for shape in shapes do
+        let body = shape.Substring(0, min limit shape.Length)
+        let dom = Campfire.RichText.Dom()
+        match dom.ParseFragment body with
+        | Ok _ -> ()
+        | Error e -> failwith $"{e.Message}: {body.Substring(0, 40)}"
+
 // --- controllers/sessions.rs ---------------------------------------------------------------------------------------
 
 [<Fact>]

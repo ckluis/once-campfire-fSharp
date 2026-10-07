@@ -297,6 +297,14 @@ module Boot =
         finally
             if File.Exists partial then File.Delete partial
 
+    /// The console logger's options: one line, UTC microsecond timestamps, and no colour (a terminal would otherwise get ANSI
+    /// codes around the level, which the request log lines `RequestLog` writes as bytes never have).
+    let internal configureConsole (options: Microsoft.Extensions.Logging.Console.SimpleConsoleFormatterOptions) : unit =
+        options.SingleLine <- true
+        options.UseUtcTimestamp <- true
+        options.TimestampFormat <- "yyyy-MM-ddTHH:mm:ss.ffffffZ "
+        options.ColorBehavior <- Microsoft.Extensions.Logging.Console.LoggerColorBehavior.Disabled
+
     /// A logger factory at the level `RAILS_LOG_LEVEL` names (or `CAMPFIRE_LOG`, which replaces it), with
     /// the front server logging on its own terms, as Thruster did: requests at info, more with DEBUG.
     let createLoggerFactory (config: AppConfig) : ILoggerFactory =
@@ -318,10 +326,7 @@ module Boot =
         let front = if (FrontConfig.fromEnv ()).Debug then LogLevel.Debug else LogLevel.Information
         LoggerFactory.Create(fun builder ->
             builder
-                .AddSimpleConsole(fun options ->
-                    options.SingleLine <- true
-                    options.UseUtcTimestamp <- true
-                    options.TimestampFormat <- "yyyy-MM-ddTHH:mm:ss.ffffffZ ")
+                .AddSimpleConsole(configureConsole)
                 .SetMinimumLevel(level)
                 .AddFilter("Microsoft", LogLevel.Warning)
                 .AddFilter("System", LogLevel.Warning)

@@ -164,6 +164,51 @@ let ``a stored value that cannot be converted is an error, not an exception`` ()
     // The statement that raised is dropped and the connection still works.
     Assert.Equal(1L, conn.Count("SELECT COUNT(*) FROM things WHERE id = 1", [||]))
 
+/// `SuppressGCTransition` is for a short, non-allocating call: a thread in one blocks a GC's suspension until it returns. Binding with
+/// `SQLITE_TRANSIENT` mallocs and copies the whole value, so only a value of at most `Native.ShortBind` bytes goes through the
+/// import that suppresses it.
+[<Fact>]
+let ``binding a long value does not suppress the GC transition`` () =
+    let native = nonNull (typeof<Conn>.Assembly.GetType "Campfire.Db.Native")
+    let suppresses (name: string) =
+        let flags = Reflection.BindingFlags.Static ||| Reflection.BindingFlags.Public ||| Reflection.BindingFlags.NonPublic
+        let methodInfo = nonNull (native.GetMethod(name, flags))
+        methodInfo.GetCustomAttributes(typeof<System.Runtime.InteropServices.SuppressGCTransitionAttribute>, false).Length > 0
+    Assert.False(suppresses "sqlite3_bind_text")
+    Assert.False(suppresses "sqlite3_bind_blob")
+    Assert.True(suppresses "sqlite3_bind_text_short")
+    Assert.True(suppresses "sqlite3_bind_blob_short")
+    // the readers and the scalar binds stay as they were
+    for name in [ "sqlite3_column_int64"; "sqlite3_column_type"; "sqlite3_column_bytes"; "sqlite3_bind_int64" ] do
+        Assert.True(suppresses name, name)
+
+[<Fact>]
+let ``text and blobs bind and read back at every size around the short threshold`` () =
+    use conn = Conn.OpenInMemory()
+    table conn
+    let short = Native.ShortBind
+    let sizes = [ 0; 1; short - 1; short; short + 1; 4096; 1_000_000; 8_000_000 ]
+    let mutable id = 0L
+    for size in sizes do
+        id <- id + 1L
+        // text of `size` UTF-8 bytes (ASCII), with a multi-byte tail when there is room, and a blob of `size` bytes
+        let text = String('t', size)
+        let blob = Array.init size (fun i -> byte (i * 31 % 251))
+        conn.Execute("INSERT INTO things (id, name, data) VALUES (?, ?, ?)", [| I id; S text; B blob |]) |> ignore
+        let name, data = conn.QueryRow("SELECT name, data FROM things WHERE id = ?", [| I id |], fun r -> r.Text 0, r.Arg 1)
+        Assert.Equal(text.Length, name.Length)
+        Assert.True(String.Equals(text, name, StringComparison.Ordinal))
+        match data with
+        | B read -> Assert.True(Span<byte>(blob).SequenceEqual(ReadOnlySpan<byte>(read)), $"blob of {size}")
+        | other -> if size = 0 then Assert.Equal(B [||], other) else failwith $"blob of {size} read as {other}"
+    // multi-byte text across the threshold counts bytes, not characters
+    for chars in [ short / 4 - 1; short / 4; short / 4 + 1 ] do
+        id <- id + 1L
+        let text = String.replicate chars "\u00e9\u00e9\u00e9\u00e9"
+        conn.Execute("INSERT INTO things (id, name) VALUES (?, ?)", [| I id; S text |]) |> ignore
+        Assert.Equal(text, conn.QueryRow("SELECT name FROM things WHERE id = ?", [| I id |], fun r -> r.Text 0))
+        Assert.Equal(int64 (text.Length * 2), conn.QueryRow("SELECT length(CAST(name AS BLOB)) FROM things WHERE id = ?", [| I id |], fun r -> r.Int64 0))
+
 [<Fact>]
 let ``the library runs without its memory statistics mutex`` () =
     use conn = Conn.OpenInMemory()

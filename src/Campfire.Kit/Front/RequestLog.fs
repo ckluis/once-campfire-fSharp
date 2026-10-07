@@ -7,6 +7,10 @@
 // 4 KiB (a pipe's `write` of 4 KiB or less is atomic, so a line of another writer to stdout can't land in the middle of one).
 // What the line says is `SimpleConsoleFormatter`'s output for `RequestLogEntry` (`<timestamp>info: thruster[0] Request path=... proto=...`,
 // a newline in a value a space), which `RequestLogTests` compares against the console logger itself.
+// Two things differ from the console logger's path, both by design. The bytes are never coloured, so `Boot.configureConsole` sets
+// `ColorBehavior` to Disabled and the app's other lines are plain on a terminal too. And these lines no longer share a queue with the
+// app's other `ILogger` lines (the console logger's own thread writes those), so on stdout a request line and another line logged
+// within the same 10 ms can come out in either order; each line stays whole.
 namespace Campfire.Kit
 
 open System
