@@ -1,12 +1,16 @@
-// The Rust app's own versions of reference assets (crates/assets/overrides, README "Known
-// differences") differ from the reference's on purpose, and so do their digests. Where a capture
+// The port's own versions of reference assets (src/Campfire.Assets/overrides here, copied from
+// the Rust port's crates/assets/overrides; README "Known differences") differ from the reference's on purpose, and so do their digests. Where a capture
 // names one by its digested path, the digest becomes a placeholder; every other digest-named asset
 // still has to match exactly, since its digest is its content.
 import fs from "node:fs"
 import path from "node:path"
 import { REPO_DIR } from "./config.ts"
 
-const OVERRIDES_DIR = path.join(REPO_DIR, "crates/assets/overrides")
+// This repo keeps them under src/; the Rust repo (where this file came from) under crates/.
+const OVERRIDES_DIR = [
+  path.join(REPO_DIR, "src/Campfire.Assets/overrides"),
+  path.join(REPO_DIR, "crates/assets/overrides"),
+].find((dir) => fs.existsSync(dir)) ?? path.join(REPO_DIR, "src/Campfire.Assets/overrides")
 
 // Logical paths under the overrides directory, e.g. "models/file_uploader.js".
 export function overriddenAssets(dir = OVERRIDES_DIR): string[] {
