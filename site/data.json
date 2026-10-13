@@ -2633,5 +2633,46 @@
       "route": "room_show",
       "conc": 16
     }
+  },
+  "oncrack": {
+    "heading": "Check out the onCrack version",
+    "repo": "https://github.com/ckluis/once-campfire-fSharp-onCrack",
+    "page": "https://ckluis.github.io/once-campfire-fSharp-onCrack/",
+    "intro": "The same Campfire, pixel for pixel: 944 of 944 screenshots equal to Rails. onCrack was forked from this port, with the \"same work as Rust\" constraint dropped: caches, group commit, and a Cable layer that keeps every client.",
+    "report": "https://github.com/ckluis/once-campfire-fSharp-onCrack/blob/main/bench/results/oncrack-r5-final.md",
+    "tiles": [
+      {
+        "text": "2.11–4.74",
+        "unit": "×",
+        "label": "per session, vs current Rust (f9dca47) on Basecamp's own harness. Against C (cd0cbe4): 1.41–3.81×.",
+        "href": "https://github.com/ckluis/once-campfire-fSharp-onCrack/blob/main/bench/results/oncrack-r5-final.md"
+      },
+      {
+        "value": 5.25,
+        "dec": 2,
+        "unit": "×",
+        "label": "over this F# port, pooled, normal profile, same harness.",
+        "href": "https://github.com/ckluis/once-campfire-fSharp-onCrack/blob/main/bench/results/oncrack-r5-final/RESULTS.md"
+      },
+      {
+        "value": 2.0,
+        "dec": 0,
+        "unit": " M",
+        "prefix": "~",
+        "label": "deliveries a second at 1,000 clients: 1,995 messages a second, each to all 1,000. Rust: 1,706 messages a second.",
+        "href": "https://github.com/ckluis/once-campfire-fSharp-onCrack/blob/main/bench/results/oncrack-r5-final/cable/RESULTS.md"
+      },
+      {
+        "text": "0",
+        "label": "clients cut in 3 of 3 rounds on the heaviest Cable profile (1,000 clients, 64 posters, no limit). Rust cut 902–959.",
+        "href": "https://github.com/ckluis/once-campfire-fSharp-onCrack/blob/main/bench/results/oncrack-r5-final/reliability/RESULTS.md"
+      }
+    ],
+    "ladder": {
+      "label": "Cable fan-out against Rust at 100 / 500 / 1,000 / 2,000 clients:",
+      "values": "1.65× / 1.24× / 1.17× / 1.01×",
+      "tail": "level at 2,000;",
+      "href": "https://github.com/ckluis/once-campfire-fSharp-onCrack/blob/main/bench/results/oncrack-r5-final/cable/RESULTS.md"
+    }
   }
 }

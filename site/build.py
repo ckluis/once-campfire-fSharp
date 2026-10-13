@@ -467,6 +467,28 @@ def more_row():
             '<p class="links">%s</p></div></section>' % ''.join('<a class="more" href="#%s">%s <span aria-hidden="true">&rarr;</span></a>' % (p, l) for p, l in links))
 
 
+def oncrack(d):
+    """The call to action: onCrack, the successor fork. All of its figures come from data.json's `oncrack`, each linked to its source."""
+    c = d.get('oncrack')
+    if not c:
+        return ''
+    tiles = []
+    for t in c['tiles']:
+        big = counter(t['value'], t.get('dec', 0), t.get('unit', ''), t.get('prefix', '')) if 'value' in t else \
+            '<span class="num-big">%s%s</span>' % (e(t['text']), ('<i>%s</i>' % e(t['unit'])) if t.get('unit') else '')
+        tiles.append('<a class="ht cta-t" href="%s" rel="noopener">%s<span>%s</span></a>' % (e(t['href']), big, e(t['label'])))
+    lad = c['ladder']
+    return ('<section class="cta" id="oncrack" aria-labelledby="oncrack-h"><div class="wrap reveal">'
+            '<p class="kicker">The successor</p><h2 id="oncrack-h">%s</h2><p class="lede">%s</p>'
+            '<p class="cta-btns"><a class="more primary" href="%s" rel="noopener">The onCrack repo <span aria-hidden="true">&rarr;</span></a>'
+            '<a class="more primary" href="%s" rel="noopener">The onCrack page <span aria-hidden="true">&rarr;</span></a></p>'
+            '<div class="htiles cta-tiles">%s</div>'
+            '<p class="cta-math">%s <b>%s</b> (%s <a href="%s" rel="noopener">source</a>) &middot; <a href="%s" rel="noopener">The final report</a></p>'
+            '</div></section>'
+            % (e(c['heading']), e(c['intro']), e(c['repo']), e(c['page']), ''.join(tiles),
+               e(lad['label']), e(lad['values']), e(lad['tail']), e(lad['href']), e(c['report'])))
+
+
 # ---------------------------------------------------------------- panels
 
 def panel(pid, kicker, title, body, back):
@@ -1062,6 +1084,21 @@ pre{font:13px/1.55 var(--mono);white-space:pre-wrap;word-break:break-word;margin
 .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
 details{margin:18px 0;border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:4px 16px}
 details summary{cursor:pointer;padding:12px 0;font-weight:600}details .tw{border:0;margin:0 -16px 8px}
+/* onCrack call to action */
+.cta{padding:56px 0 72px;border-top:1px solid var(--line-2)}
+.cta h2{font:400 clamp(36px,6vw,72px)/.95 var(--display);letter-spacing:-.02em;margin:0 0 16px;text-wrap:balance}
+.cta .lede{margin-bottom:22px}
+.cta-btns{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 28px}
+.more.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.more.primary span{color:inherit}
+.more.primary:hover,.more.primary:focus-visible{border-color:var(--ink)}
+.cta-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+.cta-t{display:block;color:var(--ink);text-decoration:none;transition:transform .2s,border-color .2s}
+.cta-t:hover,.cta-t:focus-visible{transform:translateY(-3px);border-color:var(--accent)}
+.cta-t>span:last-child{line-height:1.4}
+@media (max-width:1000px){.cta-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.cta-tiles{grid-template-columns:minmax(0,1fr)}}
+.cta-math{color:var(--muted);font-size:14px;margin:0}.cta-math b{color:var(--ink)}
 /* motion: everything is visible without JS; with it, things wait for their reveal */
 .js .reveal{opacity:0;transform:translateY(26px);transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1)}
 .js .reveal.in{opacity:1;transform:none}
@@ -1179,7 +1216,7 @@ def build():
         '<a class="skip" href="#main">Skip to content</a>',
         '<header class="bar"><div class="wrap"><a class="brand" href="#top">Campfire <span>in F#</span></a>'
         '<nav aria-label="Sections"><ol>%s</ol></nav><button class="theme" type="button" aria-label="Switch theme"></button></div></header>' % nav,
-        '<main id="main">', hero(d, cl, f), same_pixels(sp), numbers(d, f), ''.join(beats), '</main>',
+        '<main id="main">', hero(d, cl, f), same_pixels(sp), numbers(d, f), ''.join(beats), oncrack(d), '</main>',
         '<footer class="site"><div class="wrap"><p><b>Sources.</b> Muse: Ren&#39;s <code>STATUS.md</code>, <code>AI-ORIENTATION.md</code>, '
         '<code>campfire-fs/Program.fs</code> and <code>bench_official.sh</code> from the hand-off zip. Hand-over: the M4 logs '
         '<code>bench-mac-rebaseline.log</code> and <code>bench-mac-rebaseline-run1-badpost.log</code>. The build and tuning: '
